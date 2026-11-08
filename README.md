@@ -128,7 +128,7 @@ With **detailed live info** on, the bottom line rotates through the game clock a
 | Layout | What it shows |
 |---|---|
 | **Classic** | Logos, the score, a small diamond with outs, and a rotating info line |
-| **Scorebug** | TV-style: stacked teams with team-color bars, a big diamond with base runners, the inning (▲/▼) and B/S/O count dots, plus a pitcher / batter / last-play ticker |
+| **Scorebug** | TV-style: stacked teams, each with its logo, team-color bar and score (a pointer marks who's batting); a big diamond with base runners; a right-hand column with the inning (▲/▼) and large B/S/O count dots; plus a pitcher / batter / last-play ticker |
 | **Line Score** | Runs by inning plus R/H/E, with the current inning highlighted. A strip underneath shows the inning, base runners, count and outs. |
 | **Matchup** | Small logos and big scores, then pitcher vs. batter (with their stats for the game when ESPN sends them), a diamond and the count. It alternates with the last play. |
 

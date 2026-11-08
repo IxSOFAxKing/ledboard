@@ -94,33 +94,63 @@ def ticker_items(board, g):
 
 # ---------------------------------------------------------------- layouts
 def render_scorebug(board, c, g, t, team_color, cycle):
-    """Stacked teams with color bars, big diamond, inning + B/S/O dots, bottom ticker."""
-    H = c.height
-    # teams (left)
+    """TV-style bug using the full width:
+
+    [logo][team bar: ABBR  score] x2 | big diamond | inning + B/S/O column
+    with a pitcher / batter / last-play ticker underneath the teams and diamond.
+    """
+    W, H = c.width, c.height
+    row_h = 12                     # two team rows: y 0-11 and 12-23
+    bar_end = 55                   # team bars run x 0..55
+    col_x = W - 40                 # right column x 88..127
+    dia_cx = (bar_end + 2 + col_x) // 2
+
+    # teams: logo tile (on black) + team-color bar with abbreviation and score
     for row, side in ((0, "away"), (1, "home")):
         team = g[side]
-        y = 1 + row * 12
+        y = row * row_h
+        logo = small_logo(board, team, row_h - 1)
+        has_logo = logo is not None
+        bx = row_h if has_logo else 0
         bg = panel_color(team)
-        c.rect(0, y - 1, 45, y + 10, bg)
-        c.rect(0, y - 1, 2, y + 10, team_color(team))
-        c.text(5, y, team["abbr"], "6x10", WHITE)
-        c.text_right(44, y, score_text(board, g, side), "6x10", score_color(board, g, side))
+        c.rect(bx, y, bar_end, y + row_h - 2, bg)
+        c.rect(bx, y, bx + 1, y + row_h - 2, team_color(team))
+        if has_logo:
+            c.paste(logo, 0, y)
+        c.text(bx + 4, y + 1, team["abbr"], "6x10", WHITE)
+        c.text_right(bar_end - 2, y + 1, score_text(board, g, side), "6x10", score_color(board, g, side))
         if g.get("half") == ("top" if side == "away" else "bottom"):
-            c.rect(46, y + 3, 47, y + 6, YELLOW)    # batting team marker
-    # diamond (middle)
-    draw_diamond(c, 66, 2, 8, 3, g.get("bases") or [False] * 3)
-    # inning + count (right)
-    rx = 86
-    draw_inning(c, rx + 4, 0, g)
-    for i, (label, n, total, color) in enumerate((("B", g.get("balls"), 3, GREEN),
-                                                  ("S", g.get("strikes"), 2, RED),
-                                                  ("O", g.get("outs"), 2, YELLOW))):
-        y = 12 + i * 6
-        c.text(rx, y, label, "4x6", GRAY)
-        draw_dots(c, rx + 6, y + 1, n, total, color)
-    # ticker (bottom left)
-    text, color, lt = cycle(c, ticker_items(board, g), t, rx - 2, font="4x6")
-    c.scroll_text(0, rx - 2, H - 6, text, "4x6", color, lt, speed=26, pause=0.8, gap=200)
+            # batting team: small yellow pointer just outside the bar
+            for i in range(3):
+                c.line(bar_end + 2 + i, y + 3 + i, bar_end + 2 + i, y + 7 - i, YELLOW)
+
+    # diamond (middle), a bit larger than before
+    draw_diamond(c, dia_cx, 1, 9, 3, g.get("bases") or [False] * 3)
+
+    # right column: big inning on top, then B / S / O rows with large dots
+    word, n = inning_label(g)
+    if word:
+        c.text_centered(1, f"{word} {n}", "5x8", YELLOW, col_x, W)
+    else:
+        f = "7x13B"
+        nw = c.text_width(n, f)
+        x = col_x + (W - col_x - (6 + nw)) // 2
+        draw_half_arrow(c, x, 5, g.get("half"))
+        c.text(x + 6, 0, n, f, YELLOW)
+    dot, gap = 5, 2
+    block_w = 4 + 3 + 3 * dot + 2 * gap               # label + space + three dots
+    bx = col_x + (W - col_x - block_w) // 2           # centered in the column
+    for i, (label, cnt, total, color) in enumerate((("B", g.get("balls"), 3, GREEN),
+                                                   ("S", g.get("strikes"), 2, RED),
+                                                   ("O", g.get("outs"), 2, YELLOW))):
+        y = 14 + i * 6
+        c.text(bx, y, label, "4x6", GRAY)
+        draw_dots(c, bx + 7, y, cnt, total, color, size=dot, gap=gap)
+
+    # ticker underneath the teams and diamond
+    tick_x1 = col_x - 2
+    text, color, lt = cycle(c, ticker_items(board, g), t, tick_x1, font="4x6")
+    c.scroll_text(0, tick_x1, H - 6, text, "4x6", color, lt, speed=26, pause=0.8, gap=200)
 
 
 def render_linescore(board, c, g, t, team_color, cycle):
