@@ -114,7 +114,7 @@ class HomeAssistantBoard(Board):
     def render(self, c, slide, t):
         n = max(1, int(self.cfg.get("per_page", 3)))
         ents = self._entities()[slide: slide + n]
-        H, W = c.height, c.width
+        W = c.width
         label_color = hex_to_rgb(self.cfg.get("label_color"), GRAY)
         if n == 1 and ents:
             e = ents[0]

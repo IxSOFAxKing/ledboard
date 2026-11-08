@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import logging
-import time
 from datetime import datetime, timedelta, timezone
 
 import requests
 
 from .base import Board
-from ..gfx import (GRAY, DIM, RED, WHITE, YELLOW, fetch_image, hex_to_rgb, readable, scale)
+from ..gfx import (GRAY, DIM, RED, WHITE, YELLOW, fetch_image, hex_to_rgb, readable)
 
 log = logging.getLogger(__name__)
 
