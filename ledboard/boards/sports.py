@@ -10,6 +10,7 @@ from __future__ import annotations
 import colorsys
 import logging
 import re
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -23,6 +24,14 @@ log = logging.getLogger(__name__)
 ESPN = "https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/scoreboard"
 
 # key: (sport, espn league path, display name, extra query params when favorites are set)
+CELEBRATED = ("football", "hockey", "soccer", "baseball")
+SIM_KINDS = {
+    "football": {"touchdown": "Touchdown", "field_goal": "Field goal"},
+    "hockey": {"goal": "Goal"},
+    "soccer": {"goal": "Goal"},
+    "baseball": {"home_run": "Home run", "grand_slam": "Grand slam"},
+}
+
 LEAGUES = {
     "nfl": ("football", "nfl", "NFL", {}),
     "ncaaf": ("football", "college-football", "College Football", {"groups": "80"}),
@@ -261,6 +270,25 @@ def team_color(team):
     return readable(base, min_value=0.9)
 
 
+def _snapshot(g):
+    """Copy of a game dict that later score updates won't change."""
+    out = dict(g)
+    out["home"], out["away"] = dict(g["home"]), dict(g["away"])
+    return out
+
+
+def _sample_game(league, fav=None):
+    """A stand-in game for Simulate when ESPN has no games for this league right now."""
+    home = fav or "HOME"
+    return {"id": "sim", "league": league, "sport": LEAGUES[league][0], "state": "in", "detail": "", "period": 2,
+            "clock": "", "start": None, "last_play": "", "possession": None,
+            "home": {"id": "h", "abbr": home, "name": home, "score": "10", "color": (0, 90, 200), "alt": (255, 255, 255),
+                     "logo_url": None, "record": "", "winner": False, "rank": None},
+            "away": {"id": "a", "abbr": "AWAY" if home != "AWAY" else "OPP", "name": "", "score": "7",
+                     "color": (200, 30, 30), "alt": (255, 255, 255), "logo_url": None, "record": "", "winner": False,
+                     "rank": None}}
+
+
 def _num(s):
     try:
         return float(s)
@@ -281,6 +309,7 @@ class LeagueBoard(Board):
         "show_records": True, "show_rankings": True, "show_odds": False, "show_network": True,
         "hide_favorite_score": False, "detailed_live": True, "show_last_play": True, "score_flash": True,
         "use_dark_logos": True, "live_layout": "classic", "show_win_probability": True, "goal_animation": True,
+        "celebrations": True, "celebrate_field_goals": False, "celebrate_runs": False,
     }
 
     @classmethod
@@ -332,6 +361,22 @@ class LeagueBoard(Board):
              "help": live_help, "show_if": {"live_layout": "classic"} if layouts else None},
             {"key": "show_last_play", "label": "Scroll the last play", "type": "bool", "section": "Live games"},
             {"key": "score_flash", "label": "Flash the score when it changes", "type": "bool", "section": "Live games"},
+        ]
+        if sport in CELEBRATED:
+            what = {"football": "touchdown", "hockey": "goal", "soccer": "goal", "baseball": "home run"}[sport]
+            f.append({"key": "celebrations", "label": f"Celebrate when a favorite team scores a {what}",
+                      "type": "bool", "section": "Celebrations",
+                      "help": "Plays an animation the next time this board comes up, then the games. "
+                              "Needs favorite teams; skipped in spoiler mode."})
+            if sport == "football":
+                f.append({"key": "celebrate_field_goals", "label": "Also celebrate field goals", "type": "bool",
+                          "section": "Celebrations", "show_if": {"celebrations": True}})
+            if sport == "baseball":
+                f.append({"key": "celebrate_runs", "label": "Celebrate every run, not just home runs", "type": "bool",
+                          "section": "Celebrations", "show_if": {"celebrations": True}})
+            f.append({"key": "simulate", "label": "Simulate", "type": "simulate", "section": "Celebrations",
+                      "options": SIM_KINDS[sport]})
+        f += [
             {"key": "duration", "label": "Seconds per game", "type": "number", "section": "Timing"},
             {"key": "refresh", "label": "Refresh interval (s)", "type": "number", "section": "Timing"},
             {"key": "live_refresh", "label": "Refresh interval while games are live (s)", "type": "number", "section": "Timing"},
@@ -346,6 +391,9 @@ class LeagueBoard(Board):
         self.logo_src: dict[str, object] = {}    # url -> trimmed hi-res copy for other sizes
         self.flash: dict[str, float] = {}     # "gameid|side" -> until (monotonic)
         self._scores: dict[str, str] = {}
+        self.pending = []                     # queued Celebration slides
+        self._cel_lock = threading.Lock()
+        self._last_td: dict[str, float] = {}
         self.session = requests.Session()
         self.session.headers["User-Agent"] = "ledboard/1.0"
 
@@ -383,8 +431,64 @@ class LeagueBoard(Board):
                 old = self._scores.get(key)
                 if old is not None and g["state"] == "in" and _num(score) > _num(old):
                     self.flash[key] = now + 8
+                    self._maybe_celebrate(g, side, int(_num(score) - _num(old)))
                 self._scores[key] = score
         self.games = games
+
+    # -- celebrations ----------------------------------------------------------
+    def _maybe_celebrate(self, g, side, diff):
+        from .celebrations import Celebration, classify
+        c = self.cfg
+        if not c.get("celebrations", True) or self.sport not in CELEBRATED or c.get("hide_favorite_score"):
+            return
+        if g[side]["abbr"].upper() not in self.favorites():
+            return
+        key = f"{g['id']}|{side}"
+        recent_td = time.time() - self._last_td.get(key, 0) < 180
+        kind = classify(self.sport, diff, g.get("last_play", ""), c, recent_td)
+        if not kind:
+            return
+        if kind == "touchdown":
+            self._last_td[key] = time.time()
+        with self._cel_lock:
+            self.pending.append(Celebration(kind, side, _snapshot(g), self.sport))
+            self.pending = self.pending[-3:]
+        log.info("[%s] queued %s celebration for %s", self.name, kind, g[side]["abbr"])
+
+    def intro_slides(self):
+        """Celebrations to play before this board's games (consumed when taken)."""
+        with self._cel_lock:
+            fresh = [x for x in self.pending if time.time() - x.created < 30 * 60]
+            self.pending = []
+        return fresh
+
+    def simulate(self, kind):
+        """Queue a celebration for testing: uses a real game with a favorite if there is one."""
+        from .celebrations import Celebration
+        favs = self.favorites()
+        pick, side = None, "home"
+        for g in self.games:
+            for sd in ("home", "away"):
+                if g[sd]["abbr"].upper() in favs:
+                    pick, side = g, sd
+                    break
+            if pick:
+                break
+        if pick is None and self.games:
+            pick = self.games[0]
+        if pick is None:
+            pick = _sample_game(self.league, next(iter(favs), None))
+        g = _snapshot(pick)
+        pts = {"touchdown": 7, "field_goal": 3, "goal": 1, "home_run": 1, "grand_slam": 4, "run": 1}[kind]
+        g[side]["score"] = str(int(_num(g[side]["score"])) + pts)
+        with self._cel_lock:
+            self.pending.append(Celebration(kind, side, g, self.sport))
+
+    def slide_duration(self, slide):
+        from .celebrations import DURATION, Celebration
+        if isinstance(slide, Celebration):
+            return DURATION
+        return self.duration
 
     def _load_logo(self, team):
         url = team.get("logo_url")
@@ -448,6 +552,11 @@ class LeagueBoard(Board):
 
     # -- drawing --------------------------------------------------------------
     def render(self, c, slide, t):
+        from .celebrations import Celebration
+        if isinstance(slide, Celebration):
+            from . import celebrations
+            celebrations.render(self, c, slide, t, team_color)
+            return
         g = self._game(slide)
         if not g:
             return

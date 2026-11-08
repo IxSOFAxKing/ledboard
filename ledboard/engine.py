@@ -89,7 +89,7 @@ class Engine:
             b = self.boards.get(board_name)
             if not b:
                 raise KeyError(board_name)
-            slides = b.slides() or [None]
+            slides = self._with_intro(b, b.slides() or [None])
             self.cur = (board_name, slides, 0, time.monotonic())
             self.overlay = None
 
@@ -146,7 +146,7 @@ class Engine:
                 fresh = dict(cands)[name]
                 # keep going through the snapshot, but skip slides that vanished
                 for j in range(idx + 1, len(slides)):
-                    if slides[j] in fresh:
+                    if _is_intro(slides[j]) or slides[j] in fresh:
                         self.cur = (name, slides, j, now)
                         return
         # move to the next board after the current one, in rotation order
@@ -158,7 +158,13 @@ class Engine:
             nxt = after[0] if after else names[0]
             start = names.index(nxt)
         name, slides = cands[start]
-        self.cur = (name, slides, 0, now)
+        self.cur = (name, self._with_intro(self.boards[name], slides), 0, now)
+
+    @staticmethod
+    def _with_intro(board, slides):
+        """Queued intro slides (e.g. scoring celebrations) play before the board's own slides."""
+        intro = board.intro_slides() if hasattr(board, "intro_slides") else []
+        return list(intro) + list(slides) if intro else slides
 
     # -- scroll mode -------------------------------------------------------------
     def _scroll_params(self, board):
@@ -210,6 +216,8 @@ class Engine:
             self.cur = None
             self._advance()
             return
+        if _is_intro(slides[idx]):
+            return                      # an intro (celebration) plays to the end regardless
         if name in names and slides[idx] not in names[name] and slides[idx] is not None:
             self._advance()
         elif name not in names and name != self.cfg.get("fallback_board") and not self.paused:
@@ -388,3 +396,7 @@ def _system_health():
     except (OSError, AttributeError):
         pass
     return info
+
+
+def _is_intro(slide):
+    return bool(getattr(slide, "intro", False))

@@ -115,6 +115,22 @@ With **detailed live info** on, the bottom line rotates through the game clock a
 
 **Goal celebration.** When a team scores, an NHL or soccer game shows a flashing **GOAL!** with the team's logo and colors for a few seconds. Turn it off with **Goal celebration** on the league's board.
 
+**Scoring celebrations.** When one of your **favorite teams** scores, the league's board plays an animation the next time it comes up in the rotation, then shows its games as usual:
+
+| Sport | Celebrated | Animation |
+|---|---|---|
+| Football | Touchdowns, plus field goals if you turn that on | A football spirals across the field into the end zone, or through the uprights, then flashing "TOUCHDOWN!" with fireworks and confetti |
+| Hockey | Goals | The puck slides into the net, then a spinning red goal light with "GOAL!" |
+| Soccer | Goals | The ball curls into a rippling net, then confetti |
+| Baseball | Home runs (and grand slams), plus every run if you turn that on | The ball sails over the outfield wall, then a fireworks show |
+
+How it works:
+- Each animation uses the scoring team's colors and logo, and ends on the new score.
+- The extra point after a touchdown doesn't trigger a second celebration.
+- Celebrations are skipped in spoiler mode, and when the score was already on the board as LEDBoard started.
+- Up to three can queue, and they expire after 30 minutes.
+- To see one now, use the **Simulate** buttons on the league's board (under Celebrations). Simulate uses a live game with your favorite if there is one, or a sample game otherwise.
+
 **Classic view.** Every sport's standard view puts each team's abbreviation (and AP rank for college) under its logo.
 
 > **Note:** The live details read optional fields from ESPN's unofficial API. If ESPN doesn't send a field for a game, that detail is simply left out.

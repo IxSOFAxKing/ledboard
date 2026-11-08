@@ -175,6 +175,7 @@ function renderField(obj, f, onDepChange) {
     }
     case "entities": return entitiesField(obj, f);
     case "geocode": return geocodeField(obj, f);
+    case "simulate": return simulateField(f);
     case "spotify_auth": return spotifyAuthField(obj);
     default:
       return field(f.label, h("input", { type: "text", value: val ?? "", oninput: (e) => set(e.target.value) }), f.help);
@@ -205,6 +206,16 @@ function entitiesField(obj, f) {
   };
   draw();
   return h("div", {}, h("div", { class: "muted small", style: "margin-bottom:6px" }, f.label), wrap);
+}
+
+// Simulate buttons: queue a celebration on this board and jump to it.
+function simulateField(f) {
+  const board = Object.keys(SCHEMA).find((n) => SCHEMA[n].fields.includes(f));
+  return field("Simulate a score", h("div", { class: "row" }, Object.entries(f.options).map(([kind, label]) =>
+    h("button", { class: "small", onclick: async () => {
+      try { await api("/api/control", { action: "simulate", board, kind }); toast(`Simulating a ${label.toLowerCase()} — watch the preview`); pollState(); }
+      catch (e) { toast(e.message, true); }
+    } }, "▶ " + label))), "Plays the celebration now, then this board's games, exactly as it would after a real score.");
 }
 
 // Location search (Open-Meteo geocoding): fills name + latitude + longitude.

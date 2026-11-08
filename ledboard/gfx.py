@@ -123,6 +123,8 @@ class Canvas:
 
     # -- shapes -------------------------------------------------------------
     def rect(self, x0, y0, x1, y1, color, fill=True):
+        if x1 < x0 or y1 < y0:
+            return          # empty (e.g. a shape that has slid completely off screen)
         if fill:
             self.draw.rectangle((x0, y0, x1, y1), fill=color)
         else:

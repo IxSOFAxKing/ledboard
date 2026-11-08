@@ -92,6 +92,15 @@ def create_app(engine):
                 engine.jump(j.get("board"))
             except KeyError:
                 return jsonify({"error": "unknown board"}), 400
+        elif a == "simulate":
+            b = engine.boards.get(j.get("board"))
+            if not b or not hasattr(b, "simulate"):
+                return jsonify({"error": "this board has no celebrations"}), 400
+            try:
+                b.simulate(j.get("kind") or "goal")
+                engine.jump(j.get("board"))
+            except Exception as e:
+                return jsonify({"error": str(e)}), 400
         elif a == "refresh":
             for b in engine.boards.values():
                 b.poke()
