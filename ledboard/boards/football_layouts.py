@@ -10,7 +10,7 @@ import time
 
 from PIL import Image
 
-from ..gfx import DIM, GRAY, RED, WHITE, YELLOW, readable, scale
+from ..gfx import DIM, GRAY, RED, WHITE, YELLOW, scale
 
 FIELD_GREEN = (0, 55, 0)
 YARD_LINE = (0, 120, 0)
@@ -179,7 +179,6 @@ def render_scorebug(board, c, g, t, team_color, cycle):
     """TV-style: solid team-color panels with score + timeouts; center shows game situation."""
     W, H = c.width, c.height
     pw = 40 if W >= 128 else W // 3
-    away, home = g["away"], g["home"]
     for side, px0 in (("away", 0), ("home", W - pw)):
         team = g[side]
         bg = panel_color(team)

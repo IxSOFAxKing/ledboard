@@ -72,6 +72,15 @@ With **detailed live info** on, the bottom line rotates through the game clock a
 | Hockey | Shots on goal, last play |
 | Soccer | Red cards, latest goal scorer and minute |
 
+**Football live layouts.** On the NFL and College Football boards, **Live game layout** chooses how live games look:
+
+| Layout | What it shows |
+|---|---|
+| **Classic** | Logos at the edges, the score, and a rotating info line |
+| **Field** | Classic plus a mini football field: team-colored end zones, yard lines, the ball (blue line of scrimmage), a yellow first-down line and red-zone shading. One line combines the clock with down and distance. |
+| **Scorebug** | TV-style solid team-color panels with the score, timeout bars and a football icon for possession. The center shows the clock, down and distance, the spot and a mini field. |
+| **Drive** | Small logos and big scores, an arrow for the drive direction, a win-probability bar in team colors (when ESPN provides it), and a full-width field along the bottom |
+
 > **Note:** The live details read optional fields from ESPN's unofficial API. If ESPN doesn't send a field for a game, that detail is simply left out.
 
 Upgrading from an earlier LEDBoard with a single "Sports" board moves your settings over automatically. Each league keeps its favorites and on/off state, and the old config is saved as `config.json.bak`.
