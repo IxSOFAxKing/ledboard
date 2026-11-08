@@ -377,6 +377,10 @@ class LeagueBoard(Board):
             f.append({"key": "simulate", "label": "Simulate", "type": "simulate", "section": "Celebrations",
                       "options": SIM_KINDS[sport]})
         f += [
+            {"key": "preview", "label": "Preview", "type": "actions", "section": "Preview", "action": "preview",
+             "options": {"live": "Live game", "pre": "Upcoming", "post": "Final", "all": "All three"},
+             "help": "Shows sample games with your current settings and layout for 3 minutes, even in the "
+                     "off-season. Uses your favorite teams when set."},
             {"key": "duration", "label": "Seconds per game", "type": "number", "section": "Timing"},
             {"key": "refresh", "label": "Refresh interval (s)", "type": "number", "section": "Timing"},
             {"key": "live_refresh", "label": "Refresh interval while games are live (s)", "type": "number", "section": "Timing"},
@@ -392,6 +396,7 @@ class LeagueBoard(Board):
         self.flash: dict[str, float] = {}     # "gameid|side" -> until (monotonic)
         self._scores: dict[str, str] = {}
         self.pending = []                     # queued Celebration slides
+        self.preview_state = ([], 0.0)        # (sample games, show until epoch)
         self._cel_lock = threading.Lock()
         self._last_td: dict[str, float] = {}
         self.session = requests.Session()
@@ -531,7 +536,8 @@ class LeagueBoard(Board):
             out.append(g)
         order = {"in": 0, "pre": 1, "post": 2}
         out.sort(key=lambda g: (not self.is_favorite(g), order.get(g["state"], 3), g["start"] or now))
-        return out[: int(c.get("max_games", 20) or 20)]
+        out = out[: int(c.get("max_games", 20) or 20)]
+        return self._preview_games() + out
 
     def slides(self):
         return [g["id"] for g in self.visible_games()]
@@ -539,10 +545,37 @@ class LeagueBoard(Board):
     def takeover_slides(self):
         if not self.cfg.get("takeover"):
             return []
-        return [g["id"] for g in self.visible_games() if g["state"] == "in" and self.is_favorite(g)]
+        return [g["id"] for g in self.visible_games()
+                if g["state"] == "in" and self.is_favorite(g) and not g.get("preview")]
 
     def _game(self, slide):
-        return next((g for g in self.games if g["id"] == slide), None)
+        return next((g for g in self._preview_games() + self.games if g["id"] == slide), None)
+
+    # -- previews (sample games) --------------------------------------------------
+    PREVIEW_SECONDS = 180
+
+    def _preview_games(self):
+        games, until = self.preview_state
+        if games and time.time() < until:
+            return games
+        return []
+
+    def preview(self, kind="all"):
+        """Show sample games (live / pre / post / all) for a few minutes, e.g. in the off-season."""
+        from .sample_games import fetch_teams, make_event, pick_teams
+        sport, path, _, _ = LEAGUES[self.league]
+        teams = fetch_teams(sport, path)
+        away, home = pick_teams(self.league, [f.upper() for f in self.cfg.get("favorites", [])], teams)
+        states = {"live": ["in"], "pre": ["pre"], "post": ["post"], "all": ["in", "pre", "post"]}[kind]
+        games = []
+        for st in states:
+            g = parse_event(make_event(self.league, sport, st, away, home, teams), self.league)
+            g["preview"] = True
+            for side in ("home", "away"):
+                self._load_logo(g[side])
+            games.append(g)
+        self.preview_state = (games, time.time() + self.PREVIEW_SECONDS)
+        return [g["id"] for g in games]
 
     def status(self):
         s = super().status()

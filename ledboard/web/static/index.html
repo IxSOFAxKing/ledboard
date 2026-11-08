@@ -2,14 +2,23 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>LEDBoard</title>
+<meta name="theme-color" content="#0d0f12">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LEDBoard">
+<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header>
   <div class="brand"><span class="logo-dot"></span>LEDBoard</div>
   <div class="pills">
+    <button id="btn-install" class="small primary hidden" title="Install LEDBoard as an app">Install app</button>
     <span id="pill-mode" class="pill">…</span>
     <span id="pill-fps" class="pill muted"></span>
   </div>

@@ -175,7 +175,9 @@ function renderField(obj, f, onDepChange) {
     }
     case "entities": return entitiesField(obj, f);
     case "geocode": return geocodeField(obj, f);
-    case "simulate": return simulateField(f);
+    case "simulate": return actionsField({ ...f, action: "simulate" }, f, "Simulate a score",
+      "Plays the celebration now, then this board's games, exactly as it would after a real score.");
+    case "actions": return actionsField(f, f, f.label, f.help);
     case "spotify_auth": return spotifyAuthField(obj);
     default:
       return field(f.label, h("input", { type: "text", value: val ?? "", oninput: (e) => set(e.target.value) }), f.help);
@@ -208,14 +210,16 @@ function entitiesField(obj, f) {
   return h("div", {}, h("div", { class: "muted small", style: "margin-bottom:6px" }, f.label), wrap);
 }
 
-// Simulate buttons: queue a celebration on this board and jump to it.
-function simulateField(f) {
-  const board = Object.keys(SCHEMA).find((n) => SCHEMA[n].fields.includes(f));
-  return field("Simulate a score", h("div", { class: "row" }, Object.entries(f.options).map(([kind, label]) =>
-    h("button", { class: "small", onclick: async () => {
-      try { await api("/api/control", { action: "simulate", board, kind }); toast(`Simulating a ${label.toLowerCase()} — watch the preview`); pollState(); }
+// A row of buttons that each send {action, board, kind} to /api/control, then jump to the board.
+function actionsField(f, schemaField, label, help) {
+  const board = Object.keys(SCHEMA).find((n) => SCHEMA[n].fields.includes(schemaField));
+  return field(label, h("div", { class: "row" }, Object.entries(f.options).map(([kind, text]) =>
+    h("button", { class: "small", onclick: async (ev) => {
+      const btn = ev.currentTarget; btn.disabled = true;
+      try { await api("/api/control", { action: f.action, board, kind }); toast(`${text} — watch the preview above`); pollState(); }
       catch (e) { toast(e.message, true); }
-    } }, "▶ " + label))), "Plays the celebration now, then this board's games, exactly as it would after a real score.");
+      finally { btn.disabled = false; }
+    } }, "▶ " + text))), help);
 }
 
 // Location search (Open-Meteo geocoding): fills name + latitude + longitude.
@@ -451,3 +455,23 @@ window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault()
 reloadConfig().catch((e) => toast("Could not load config: " + e.message, true));
 setInterval(pollFrame, 120);
 setInterval(pollState, 1500);
+
+// ---------------------------------------------------------------- installable app (PWA)
+// Service workers (and so installing) need a secure origin: https://, or localhost.
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch((e) => console.warn("service worker:", e));
+}
+let installPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  $("#btn-install").classList.remove("hidden");
+});
+$("#btn-install").onclick = async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice;
+  installPrompt = null;
+  $("#btn-install").classList.add("hidden");
+};
+window.addEventListener("appinstalled", () => toast("LEDBoard installed — find it on your home screen"));

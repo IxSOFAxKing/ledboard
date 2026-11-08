@@ -43,6 +43,25 @@ def create_app(engine):
     def static_files(p):
         return send_from_directory(STATIC, p)
 
+    # -- installable web app (PWA) ----------------------------------------------
+    @app.get("/manifest.webmanifest")
+    def manifest():
+        r = send_from_directory(STATIC, "manifest.webmanifest", mimetype="application/manifest+json")
+        r.headers["Cache-Control"] = "no-cache"
+        return r
+
+    @app.get("/sw.js")
+    def service_worker():
+        # served from the root so it can control the whole app
+        r = send_from_directory(STATIC, "sw.js", mimetype="application/javascript")
+        r.headers["Cache-Control"] = "no-cache"
+        r.headers["Service-Worker-Allowed"] = "/"
+        return r
+
+    @app.get("/favicon.ico")
+    def favicon():
+        return send_from_directory(os.path.join(STATIC, "icons"), "favicon-32.png", mimetype="image/png")
+
     # -- state / preview ------------------------------------------------------
     @app.get("/api/state")
     def state():
@@ -98,6 +117,15 @@ def create_app(engine):
                 return jsonify({"error": "this board has no celebrations"}), 400
             try:
                 b.simulate(j.get("kind") or "goal")
+                engine.jump(j.get("board"))
+            except Exception as e:
+                return jsonify({"error": str(e)}), 400
+        elif a == "preview":
+            b = engine.boards.get(j.get("board"))
+            if not b or not hasattr(b, "preview"):
+                return jsonify({"error": "this board has no previews"}), 400
+            try:
+                b.preview(j.get("kind") or "all")
                 engine.jump(j.get("board"))
             except Exception as e:
                 return jsonify({"error": str(e)}), 400

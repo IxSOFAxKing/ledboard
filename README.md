@@ -43,6 +43,34 @@ sudo systemctl restart ledboard
 sudo nano /etc/ledboard/config.json  # everything in the UI is stored here
 ```
 
+## Install the web UI as an app (Android / iPhone)
+
+The web UI is an installable app (a PWA) with its own icon, a full-screen window and offline start-up. Browsers only install apps from **https://** addresses, though, and the Pi serves plain `http://`. Pick one of these options.
+
+### Option A: Tailscale (recommended)
+This gives a real HTTPS address that also works away from home.
+
+1. In the Tailscale admin console, open **DNS** and turn on **MagicDNS** and **HTTPS Certificates**. This is a one-time step.
+2. On the Pi, run:
+   ```bash
+   sudo tailscale serve --bg 8080
+   ```
+   It prints an address like `https://pisports.your-tailnet.ts.net`, and keeps serving it after reboots.
+3. On your phone, with the Tailscale app connected, open that address in **Chrome**.
+4. Tap **Install app**, either in LEDBoard's header or in Chrome's ⋮ menu.
+
+On an iPhone, open the address in Safari and use Share → **Add to Home Screen**.
+
+### Option B: Home Wi-Fi only, no Tailscale
+1. In Chrome on the phone, open `chrome://flags/#unsafely-treat-insecure-origin-as-secure`.
+2. Enter `http://<pi-ip>:8080`, set the flag to **Enabled**, and relaunch Chrome.
+3. Open LEDBoard and choose **Install app**.
+
+### Option C: A plain shortcut
+Chrome's ⋮ menu → **Add to Home screen** works on `http://` too. It opens in a normal browser tab instead of its own app window.
+
+The app always loads the latest UI from the Pi, so updating LEDBoard updates the app as well.
+
 ## Setting up integrations
 
 All of this is done in the web UI under **Boards → ⚙**. Enabled boards are listed first, in rotation order. Disabled boards sit below them and are hidden until you click **Show disabled boards**. Turning a board on adds it to the end of the rotation.
@@ -114,6 +142,11 @@ With **detailed live info** on, the bottom line rotates through the game clock a
 | **Rink** | A mini hockey rink drawn across the display (boards, red and blue lines, goal creases), with each team's logo and score in its own end and the period, clock and shots in the neutral zone |
 
 **Goal celebration.** When a team scores, an NHL or soccer game shows a flashing **GOAL!** with the team's logo and colors for a few seconds. Turn it off with **Goal celebration** on the league's board.
+
+**Previewing games.** Every league board has **Preview** buttons: Live game, Upcoming, Final, and All three. They're useful in the off-season.
+- They show realistic sample games for 3 minutes, drawn with your current settings and live layout.
+- They use your favorite teams, with real team colors and logos from ESPN's teams list.
+- Preview games ignore your filters, and never trigger takeover or celebrations.
 
 **Scoring celebrations.** When one of your **favorite teams** scores, the league's board plays an animation the next time it comes up in the rotation, then shows its games as usual:
 
