@@ -166,6 +166,10 @@ def parse_event(ev, league_key):
     if poss:
         game["possession"] = ("home" if poss == teams["home"]["id"]
                               else "away" if poss == teams["away"]["id"] else None)
+    game.update(field_position(game))
+    prob = (sit.get("lastPlay") or {}).get("probability") or {}
+    hw, aw = prob.get("homeWinPercentage"), prob.get("awayWinPercentage")
+    game["win_prob"] = (float(aw), float(hw)) if isinstance(hw, (int, float)) and isinstance(aw, (int, float)) else None
     # soccer: goals / cards are listed in competition "details"
     for d in comp.get("details") or []:
         tid = str((d.get("team") or {}).get("id", ""))
@@ -177,6 +181,36 @@ def parse_event(ev, league_key):
             minute = (d.get("clock") or {}).get("displayValue", "")
             game["last_goal"] = " ".join(x for x in ("GOAL", teams[side]["abbr"] if side else "", who, minute) if x)
     return game
+
+
+def field_position(g):
+    """Ball spot and first-down line on a 0-100 scale: 0 = away end zone (left), 100 = home end zone (right).
+
+    The away team attacks to the right, the home team to the left, matching where the logos sit.
+    """
+    out = {"ball_pos": None, "first_down_pos": None}
+    m = re.match(r"\s*([A-Za-z]+)?\s*(\d+)\s*$", g.get("spot") or "")
+    if not m:
+        return out
+    side, yard = (m.group(1) or "").upper(), int(m.group(2))
+    if yard == 50 or not side:
+        pos = 50
+    elif side == g["home"]["abbr"].upper():
+        pos = 100 - yard          # on the home team's half (right side)
+    elif side == g["away"]["abbr"].upper():
+        pos = yard                # on the away team's half (left side)
+    else:
+        return out
+    out["ball_pos"] = pos
+    dist = g.get("distance")
+    goal = "goal" in (g.get("down_text") or "").lower()
+    if g.get("possession") in ("home", "away"):
+        sign = 1 if g["possession"] == "away" else -1
+        if goal:
+            out["first_down_pos"] = 100 if sign > 0 else 0
+        elif isinstance(dist, (int, float)):
+            out["first_down_pos"] = max(0, min(100, pos + sign * dist))
+    return out
 
 
 def short_down(text):
@@ -220,7 +254,7 @@ class LeagueBoard(Board):
         "show_pregame": True, "show_final": True, "final_hours": 18, "upcoming_hours": 48, "max_games": 20,
         "show_records": True, "show_rankings": True, "show_odds": False, "show_network": True,
         "hide_favorite_score": False, "detailed_live": True, "show_last_play": True, "score_flash": True,
-        "use_dark_logos": True,
+        "use_dark_logos": True, "live_layout": "classic", "show_win_probability": True,
     }
 
     @classmethod
@@ -257,9 +291,17 @@ class LeagueBoard(Board):
             "hockey": "Shots on goal.",
             "soccer": "Red cards and the latest goal scorer.",
         }[sport]
+        if sport == "football":
+            from .football_layouts import LAYOUTS
+            f += [
+                {"key": "live_layout", "label": "Live game layout", "type": "select", "section": "Live games",
+                 "options": list(LAYOUTS), "option_labels": LAYOUTS},
+                {"key": "show_win_probability", "label": "Show win probability bar (when ESPN provides it)",
+                 "type": "bool", "section": "Live games", "show_if": {"live_layout": "drive"}},
+            ]
         f += [
             {"key": "detailed_live", "label": "Detailed live info", "type": "bool", "section": "Live games",
-             "help": live_help},
+             "help": live_help, "show_if": {"live_layout": "classic"} if sport == "football" else None},
             {"key": "show_last_play", "label": "Scroll the last play", "type": "bool", "section": "Live games"},
             {"key": "score_flash", "label": "Flash the score when it changes", "type": "bool", "section": "Live games"},
             {"key": "duration", "label": "Seconds per game", "type": "number", "section": "Timing"},
@@ -374,6 +416,12 @@ class LeagueBoard(Board):
         g = self._game(slide)
         if not g:
             return
+        if g["state"] == "in" and self.sport == "football":
+            from .football_layouts import RENDERERS
+            fn = RENDERERS.get(self.cfg.get("live_layout", "classic"))
+            if fn:
+                fn(self, c, g, t, team_color, _cycle)
+                return
         H, W = c.height, c.width
         away, home = g["away"], g["home"]
         c.paste(self.logos.get(away.get("logo_url")), -2, 0)
@@ -554,13 +602,13 @@ class LeagueBoard(Board):
         return local.strftime("%-m/%-d ") + hm
 
 
-def _cycle(c, items, t, avail):
+def _cycle(c, items, t, avail, font="5x7"):
     """Pick the info line to show at time t. Long lines get enough time to scroll fully."""
     if not items:
         return "", WHITE, 0.0
     durs = []
     for text, _ in items:
-        w = c.text_width(text, "5x7")
+        w = c.text_width(text, font)
         durs.append(INFO_SECONDS if w <= avail else 0.6 + (w - avail) / INFO_SPEED + 1.2)
     t = t % sum(durs)
     for (text, color), d in zip(items, durs):
