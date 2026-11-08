@@ -28,7 +28,12 @@ def draw_base(c, cx, cy, r, on, color=YELLOW, off=GRAY):
 
 
 def draw_diamond(c, cx, top, d, r, bases, home=True):
-    """Bases [1st, 2nd, 3rd]: 2nd at the top, 3rd left, 1st right, home plate at the bottom."""
+    """Bases [1st, 2nd, 3rd]: 2nd at the top, 3rd left, 1st right, home plate at the bottom.
+
+    `top` is the topmost pixel row of the diamond (the tip of 2nd base); `d` is the
+    distance between base centers and `r` the radius of each base.
+    """
+    top += r                       # centre row of 2nd base
     mid = top + d
     if home:
         for i in range(1, d):
@@ -226,10 +231,11 @@ def render_matchup(board, c, g, t, team_color, cycle):
     c.line(0, 16, W - 1, 16, LINE)
 
     # bottom: diamond + count on the right, players (or last play) on the left
-    draw_diamond(c, W - 14, 18, 5, 2, g.get("bases") or [False] * 3, home=False)
+    # diamond tucked into the bottom-right corner, count to its left
+    draw_diamond(c, W - 8, 19, 5, 2, g.get("bases") or [False] * 3, home=False)
     if g.get("balls") is not None and g.get("strikes") is not None:
-        c.text_right(W - 1, 25, f"{g['balls']}-{g['strikes']}", "5x7", WHITE)
-    area = W - 26
+        c.text_right(W - 17, 22, f"{g['balls']}-{g['strikes']}", "5x7", WHITE)
+    area = W - 36
     players = []
     if g.get("pitcher"):
         players.append(("P", g["pitcher"], g.get("pitcher_summary", ""), GRAY))
