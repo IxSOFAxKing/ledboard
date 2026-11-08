@@ -17,13 +17,14 @@ log = logging.getLogger(__name__)
 
 
 #: Settings every board gets (merged into DEFAULTS / FIELDS automatically).
-COMMON_DEFAULTS = {"scroll_mode": False, "scroll_speed": 30, "scroll_gap": 16}
+COMMON_DEFAULTS = {"scroll_mode": False, "scroll_speed": "", "scroll_gap": ""}   # "" = use global
 COMMON_FIELDS = [
     {"key": "scroll_mode", "label": "Scroll mode (slides scroll across like a ticker)", "type": "bool", "section": "Scroll mode"},
     {"key": "scroll_speed", "label": "Scroll speed (pixels per second)", "type": "number", "section": "Scroll mode",
-     "show_if": {"scroll_mode": True}},
+     "show_if": {"scroll_mode": True}, "placeholder": "global default",
+     "help": "Leave blank to use the global default (Settings tab)."},
     {"key": "scroll_gap", "label": "Gap between slides (pixels)", "type": "number", "section": "Scroll mode",
-     "show_if": {"scroll_mode": True}},
+     "show_if": {"scroll_mode": True}, "placeholder": "global default"},
 ]
 
 

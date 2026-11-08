@@ -280,7 +280,7 @@ class LeagueBoard(Board):
         "show_pregame": True, "show_final": True, "final_hours": 18, "upcoming_hours": 48, "max_games": 20,
         "show_records": True, "show_rankings": True, "show_odds": False, "show_network": True,
         "hide_favorite_score": False, "detailed_live": True, "show_last_play": True, "score_flash": True,
-        "use_dark_logos": True, "live_layout": "classic", "show_win_probability": True,
+        "use_dark_logos": True, "live_layout": "classic", "show_win_probability": True, "goal_animation": True,
     }
 
     @classmethod
@@ -321,6 +321,9 @@ class LeagueBoard(Board):
         if layouts:
             f.append({"key": "live_layout", "label": "Live game layout", "type": "select", "section": "Live games",
                       "options": list(layouts), "option_labels": layouts})
+        if sport in ("hockey", "soccer"):
+            f.append({"key": "goal_animation", "label": "Goal celebration (flashing GOAL! when a team scores)",
+                      "type": "bool", "section": "Live games"})
         if sport == "football":
             f.append({"key": "show_win_probability", "label": "Show win probability bar (when ESPN provides it)",
                       "type": "bool", "section": "Live games", "show_if": {"live_layout": "drive"}})
@@ -441,6 +444,12 @@ class LeagueBoard(Board):
         g = self._game(slide)
         if not g:
             return
+        if g["state"] == "in" and self.sport in ("hockey", "soccer") and self.cfg.get("goal_animation", True):
+            from .hockey_layouts import goal_side, render_goal
+            side = goal_side(self, g)
+            if side:
+                render_goal(self, c, g, side, team_color)
+                return
         if g["state"] == "in" and live_layouts(self.sport):
             fn = live_renderers(self.sport).get(self.cfg.get("live_layout", "classic"))
             if fn:
@@ -598,6 +607,9 @@ class LeagueBoard(Board):
     def _clock_text(self, g):
         detail = g["detail"]
         sport = self.sport
+        if sport == "hockey":
+            from .hockey_layouts import clock_text, period_label
+            return f"{period_label(g)} {clock_text(g)}".strip() if g["period"] else detail.upper()
         if sport in ("basketball", "hockey", "football") and g["clock"] and g["period"] \
                 and "half" not in detail.lower() and "end" not in detail.lower():
             prefix = {"football": "Q", "basketball": "Q", "hockey": "P"}[sport]
@@ -634,6 +646,9 @@ def live_layouts(sport):
     if sport == "baseball":
         from .baseball_layouts import LAYOUTS
         return LAYOUTS
+    if sport == "hockey":
+        from .hockey_layouts import LAYOUTS
+        return LAYOUTS
     return {}
 
 
@@ -643,6 +658,9 @@ def live_renderers(sport):
         return RENDERERS
     if sport == "baseball":
         from .baseball_layouts import RENDERERS
+        return RENDERERS
+    if sport == "hockey":
+        from .hockey_layouts import RENDERERS
         return RENDERERS
     return {}
 

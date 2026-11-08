@@ -10,10 +10,11 @@ It's built for two chained 64×32 panels (128×32), and the layouts scale to oth
 | **Now Playing** | Album art, scrolling title and artist, and a progress bar, from a **Home Assistant media player** (HA's Spotify integration, Sonos and so on) or directly from the Spotify API. It's skipped when nothing is playing and can take over the display while music plays. |
 | **Plex** | Active streams (movies, TV, music) with the poster, title, S/E or artist, who's watching, and progress. You can filter by user. |
 | **Home Assistant** | Any entities (sensors, locks, doors, lights, thermostats, and so on) at 1, 2 or 3 per screen, with automatic formatting and colors. |
+| **3D Printer (Klipper)** | Print progress from Klipper via Moonraker: the model thumbnail, progress, time left or finish time, layer, nozzle and bed temperatures, and paused, finished and error states. |
 | **Clock** | The time and date. It's also the fallback when nothing else has content. |
 | **Custom message** | Your own text in the rotation. You can also flash a one-off message from the UI or API. |
 
-The web UI also covers: board order, enable and disable, per-board settings, "show now", next and pause, power, a brightness slider, quiet hours (dim or off on a schedule), hardware settings, optional password protection, and a status page with errors.
+The web UI also covers: board order, enable and disable, per-board settings, "show now", next and pause, power, a brightness slider, quiet hours (dim or off on a schedule), global scroll defaults, hardware settings, optional password protection, and a status page with errors.
 
 ## Install on the Pi
 
@@ -46,7 +47,19 @@ sudo nano /etc/ledboard/config.json  # everything in the UI is stored here
 All of this is done in the web UI under **Boards → ⚙**. Disabled boards are hidden until you click **Show disabled boards**.
 
 ### Scroll mode (every board)
-Every board has a **Scroll mode** switch. When it's on, the board's slides scroll across the display one after another, like a ticker, instead of showing one at a time. You can set the scroll speed and the gap between slides.
+Every board has a **Scroll mode** switch. When it's on, the board's slides scroll across the display one after another, like a ticker, instead of showing one at a time.
+
+The speed (20 px/s by default) and the gap between slides are set once for all boards under **Settings → Defaults for all boards**. If you fill in a board's own speed or gap, that board uses its own value.
+
+### Global settings (Settings tab)
+- **Defaults for all boards**: scroll mode speed and gap.
+- **Quiet hours**: dim the display or turn it off between two times.
+- **General**:
+  - the board shown when nothing else has content (the clock by default)
+  - the web UI port
+  - an optional web UI password
+
+The **Display** tab has brightness, frame rate and panel hardware settings. Brightness is also the slider at the top of the page.
 
 ### Sports
 Each league is its own board, so it has its own place in the rotation and its own settings. Turn on the leagues you want, then open one with ⚙. Settings are grouped like this:
@@ -90,6 +103,17 @@ With **detailed live info** on, the bottom line rotates through the game clock a
 | **Line Score** | Runs by inning plus R/H/E, with the current inning highlighted. A strip underneath shows the inning, base runners, count and outs. |
 | **Matchup** | Small logos and big scores, then pitcher vs. batter (with their stats for the game when ESPN sends them), a diamond and the count. It alternates with the last play. |
 
+**Hockey live layouts.** The NHL board has the same **Live game layout** setting:
+
+| Layout | What it shows |
+|---|---|
+| **Classic** | Logos, the score, and a rotating info line |
+| **Scorebug** | Stacked team-color bars with small logos, the score and shots on goal; the period and a big game clock; a ticker with the last play and top scorers |
+| **Period Score** | Goals by period (1st / 2nd / 3rd / OT / SO) with the total and shots on goal, and the current period highlighted |
+| **Rink** | A mini hockey rink drawn across the display (boards, red and blue lines, goal creases), with each team's logo and score in its own end and the period, clock and shots in the neutral zone |
+
+**Goal celebration.** When a team scores, an NHL or soccer game shows a flashing **GOAL!** with the team's logo and colors for a few seconds. Turn it off with **Goal celebration** on the league's board.
+
 **Classic view.** Every sport's standard view puts each team's abbreviation (and AP rank for college) under its logo.
 
 > **Note:** The live details read optional fields from ESPN's unofficial API. If ESPN doesn't send a field for a game, that detail is simply left out.
@@ -112,6 +136,19 @@ Upgrading from an earlier LEDBoard with a single "Sports" board moves your setti
 5. Your browser lands on a `127.0.0.1` page that fails to load. That's expected. Copy that page's full URL from the address bar, paste it into the box, and click **Finish**.
 
 LEDBoard saves the refresh token, so you only do this once.
+
+### 3D printer (Klipper / Moonraker)
+1. Turn on **3D Printer (Klipper)**.
+2. Set **Moonraker URL** to the address Mainsail or Fluidd uses, normally `http://<printer-ip>:7125`.
+3. **API key**: only needed if Moonraker's `[authorization]` doesn't already trust the Pi's network. Mainsail and Fluidd show the key under their settings.
+4. **Thumbnails**: turn on G-code thumbnails in your slicer to see the model on the panel. PrusaSlicer, OrcaSlicer and SuperSlicer all support this; include a 32×32 size if you can. Without one, a printer icon is shown instead.
+5. **Options**:
+   - take over the display while printing
+   - show temperatures when idle
+   - how long a finished print stays up
+   - show time left, or the clock time it will finish
+
+Time left averages the file-progress estimate and the slicer's estimate, the way Mainsail does.
 
 ### Plex
 1. Enter your server URL, for example `http://192.168.1.10:32400`.

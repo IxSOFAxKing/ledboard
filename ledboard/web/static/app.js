@@ -137,7 +137,8 @@ function renderField(obj, f, onDepChange) {
       return field(f.label, sw, f.help, "bool");
     }
     case "number":
-      return field(f.label, h("input", { type: "number", value: val ?? "", step: "any", oninput: (e) => set(e.target.value === "" ? "" : Number(e.target.value)) }), f.help);
+      return field(f.label, h("input", { type: "number", value: val ?? "", step: "any", placeholder: f.placeholder || null,
+        oninput: (e) => set(e.target.value === "" ? "" : Number(e.target.value)) }), f.help);
     case "password":
       return field(f.label, h("input", { type: "password", value: val || "", placeholder: "not set", autocomplete: "new-password",
         onfocus: (e) => { if (e.target.value === MASK) e.target.value = ""; },
@@ -316,6 +317,11 @@ function renderOtherTabs() {
     { key: "mode", label: "During quiet hours", type: "select", options: ["dim", "off"] },
     { key: "brightness", label: "Dimmed brightness", type: "number" },
   ].map((f) => renderField(draft.schedule, f)));
+  draft.scroll = draft.scroll || { speed: 20, gap: 16 };
+  $("#defaults-form").replaceChildren(
+    renderField(draft.scroll, { key: "speed", label: "Scroll mode speed (pixels per second)", type: "number",
+      help: "Used by every board in scroll mode unless that board sets its own speed." }),
+    renderField(draft.scroll, { key: "gap", label: "Scroll mode gap between slides (pixels)", type: "number" }));
   $("#general-form").replaceChildren(
     renderField(draft, { key: "fallback_board", label: "Show when nothing else has content", type: "select", options: Object.keys(SCHEMA) }),
     renderField(draft.web, { key: "port", label: "Web UI port (restart needed)", type: "number" }),

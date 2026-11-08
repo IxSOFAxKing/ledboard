@@ -43,13 +43,14 @@ DEFAULTS = {
         "mode": "dim",          # "dim" or "off"
         "brightness": 15,
     },
+    "scroll": {"speed": 20, "gap": 16},   # used by boards whose own scroll settings are blank
     "fallback_board": "clock",  # shown when no board has anything to display
     "rotation": [],             # defaults to the board registry order
     "boards": {},               # filled from each board's DEFAULTS
 }
 
 # Keys whose values must never be returned to the browser in clear text.
-SECRET_KEYS = {"client_secret", "refresh_token", "token", "password"}
+SECRET_KEYS = {"client_secret", "refresh_token", "token", "password", "api_key"}
 MASK = "••••••••"
 
 

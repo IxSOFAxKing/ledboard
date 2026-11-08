@@ -160,9 +160,18 @@ class Engine:
 
     # -- scroll mode -------------------------------------------------------------
     def _scroll_params(self, board):
-        speed = max(5.0, float(board.cfg.get("scroll_speed", 30) or 30))
-        gap = max(0, int(board.cfg.get("scroll_gap", 16) or 0))
-        return speed, gap
+        """Board's own scroll speed/gap, or the global defaults when left blank."""
+        g = self.cfg.get("scroll", {})
+
+        def pick(key, gkey, default):
+            v = board.cfg.get(key)
+            if v in (None, ""):
+                v = g.get(gkey, default)
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return float(default)
+        return max(5.0, pick("scroll_speed", "speed", 20)), max(0, int(pick("scroll_gap", "gap", 16)))
 
     def _duration(self, board, slide):
         if isinstance(slide, ScrollSlide):

@@ -3,13 +3,14 @@ from .base import COMMON_DEFAULTS, COMMON_FIELDS
 __all__ = ["BOARD_CLASSES", "LEAGUES", "LeagueBoard", "board_defaults", "board_fields", "migrate"]
 from .clock import ClockBoard
 from .homeassistant import HomeAssistantBoard
+from .klipper import KlipperBoard
 from .message import MessageBoard
 from .plex import PlexBoard
 from .sports import LEAGUE_BOARDS, LEAGUES, LeagueBoard
 from .spotify import SpotifyBoard
 
 BOARD_CLASSES = {cls.name: cls for cls in (
-    *LEAGUE_BOARDS, SpotifyBoard, PlexBoard, HomeAssistantBoard, ClockBoard, MessageBoard)}
+    *LEAGUE_BOARDS, SpotifyBoard, PlexBoard, HomeAssistantBoard, KlipperBoard, ClockBoard, MessageBoard)}
 
 
 def board_defaults():
@@ -55,4 +56,14 @@ def migrate(data: dict) -> bool:
         if data.get("fallback_board") == "sports":
             data["fallback_board"] = "clock"
         changed = True
+    # v2 -> v3: per-board scroll speed/gap left at the old built-in defaults now follow the
+    # global scroll settings instead
+    for b in boards.values():
+        if isinstance(b, dict):
+            if b.get("scroll_speed") == 30:
+                b["scroll_speed"] = ""
+                changed = True
+            if b.get("scroll_gap") == 16:
+                b["scroll_gap"] = ""
+                changed = True
     return changed
