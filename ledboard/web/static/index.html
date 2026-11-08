@@ -44,6 +44,7 @@
       <button id="btn-power" class="danger">Turn off</button>
       <label class="bright">☀ <input id="brightness" type="range" min="1" max="100"><span id="bright-val"></span></label>
     </div>
+    <div id="active-alerts" class="active-alerts hidden"></div>
     <form id="msg-form" class="msg">
       <input id="msg-text" placeholder="Flash a message on the board…" autocomplete="off">
       <input id="msg-secs" type="number" value="10" min="1" title="seconds">
@@ -74,6 +75,9 @@
   </section>
 
   <section id="tab-schedule" class="tab">
+    <div class="card"><h3>Send an alert</h3><div id="alert-form" class="form"></div>
+      <p class="muted small">Alerts interrupt the display with an animated icon. <b>Critical</b> alerts repeat every minute (and wake the display) until dismissed. Home Assistant can send them through MQTT or <code>POST /api/alert</code>.</p>
+    </div>
     <div class="card"><h3>Defaults for all boards</h3><div id="defaults-form" class="form"></div></div>
     <div class="card"><h3>Quiet hours</h3><div id="schedule-form" class="form"></div></div>
     <div class="card"><h3>General</h3><div id="general-form" class="form"></div></div>

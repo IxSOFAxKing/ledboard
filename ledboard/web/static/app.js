@@ -127,6 +127,7 @@ async function pollState() {
     if (err) { err.textContent = b.last_error || ""; err.classList.toggle("hidden", !b.last_error); }
   }
   renderStatus();
+  renderActiveAlerts(st.alerts || []);
   const sa = document.querySelector("[data-spotify-status]");
   if (sa) sa.textContent = st.boards.spotify.connected ? "✅ Connected" : "Not connected";
 }
@@ -161,6 +162,38 @@ function renderStatus() {
   $("#status").replaceChildren(h("div", { class: "status-grid" }, perfRow, rows));
 }
 
+// ---------------------------------------------------------------- alerts
+let alertIcons = [];
+function renderActiveAlerts(list) {
+  const box = $("#active-alerts");
+  const repeating = list.filter((a) => a.repeating || a.until_dismissed);
+  box.classList.toggle("hidden", !repeating.length);
+  if (!repeating.length) return box.replaceChildren();
+  box.replaceChildren(...repeating.map((a) => h("div", { class: "alert-row" },
+    h("span", { class: "badge " + (a.priority === "critical" ? "crit" : "") }, a.priority),
+    h("span", { class: "grow" }, a.title + (a.message ? " — " + a.message : "")),
+    h("button", { class: "small", onclick: () => api("/api/alert/dismiss", { id: a.id }).then(pollState) }, "Dismiss"))),
+    ...(repeating.length > 1 ? [h("button", { class: "small", onclick: () => api("/api/alert/dismiss", { id: "all" }).then(pollState) }, "Dismiss all")] : []));
+}
+
+async function renderAlertForm() {
+  try { alertIcons = (await api("/api/alerts")).icons; } catch { alertIcons = ["bell"]; }
+  const a = { __scratch: true, title: "Doorbell", message: "Someone is at the front door", icon: "doorbell", color: "#3b9cff", priority: "high", seconds: 10 };
+  const send = h("button", { class: "primary", onclick: async () => {
+    const { __scratch, ...payload } = a;
+    try { await api("/api/alert", payload); toast("Alert sent"); pollState(); } catch (e) { toast(e.message, true); }
+  } }, "Send alert");
+  $("#alert-form").replaceChildren(
+    renderField(a, { key: "title", label: "Title", type: "text" }),
+    renderField(a, { key: "message", label: "Message (optional)", type: "text" }),
+    renderField(a, { key: "icon", label: "Icon", type: "select", options: alertIcons }),
+    renderField(a, { key: "priority", label: "Priority", type: "select", options: ["low", "normal", "high", "critical"],
+      option_labels: { low: "Low — waits for the current board", normal: "Normal — interrupts", high: "High — interrupts, flashing border", critical: "Critical — repeats until dismissed" } }),
+    renderField(a, { key: "color", label: "Color", type: "color" }),
+    renderField(a, { key: "seconds", label: "Seconds on screen", type: "number" }),
+    h("div", { class: "row" }, send));
+}
+
 // ---------------------------------------------------------------- fields
 function field(label, input, help, cls = "") {
   return h("div", { class: "field " + cls }, h("label", {}, label), input, help ? h("div", { class: "help" }, help) : null);
@@ -181,7 +214,7 @@ function renderForm(obj, fields, rerender) {
 
 function renderField(obj, f, onDepChange) {
   const key = f.key, val = obj[key];
-  const set = (v) => { obj[key] = v; markDirty(); if (onDepChange) onDepChange(); };
+  const set = (v) => { obj[key] = v; if (!obj.__scratch) markDirty(); if (onDepChange) onDepChange(); };
   switch (f.type) {
     case "bool": {
       const sw = h("label", { class: "switch" }, h("input", { type: "checkbox", checked: !!val, onchange: (e) => set(e.target.checked) }), h("span"));
@@ -436,7 +469,7 @@ async function reloadConfig() {
   const j = await api("/api/config");
   CONFIG = j.config; SCHEMA = j.schema; FONTS = j.fonts; MAPPINGS = j.hardware_mappings;
   draft = clone(CONFIG); partitionRotation(draft); dirty = false; $("#savebar").classList.add("hidden");
-  renderBoards(); renderOtherTabs();
+  renderBoards(); renderOtherTabs(); renderAlertForm();
 }
 
 async function save() {

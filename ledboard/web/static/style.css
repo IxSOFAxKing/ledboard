@@ -136,3 +136,8 @@ h4.section:first-child { margin-top: 0; }
 .mini-live canvas { display: block; border-radius: 4px; image-rendering: pixelated; max-width: 100%; }
 .mini-now { font-size: 12px; display: flex; gap: 6px; align-items: baseline; }
 .mini-up { margin-left: 6px; font-size: 11px; }
+
+.active-alerts { display: grid; gap: 6px; margin-top: 12px; }
+.alert-row { display: flex; gap: 8px; align-items: center; background: #2a1d0b; border: 1px solid #6b4c12; border-radius: 8px; padding: 6px 10px; }
+.alert-row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge.crit { background: #4a1012; color: #ff8c8f; }

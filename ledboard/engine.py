@@ -9,6 +9,7 @@ from datetime import datetime
 
 from . import display as display_mod
 from .boards import BOARD_CLASSES
+from .alerts import PRIORITIES, AlertManager, render_alert
 from .boards.message import draw_message
 from .gfx import Canvas, RED, hex_to_rgb
 
@@ -46,6 +47,8 @@ class Engine:
         self.paused = False
         self.power = True
         self.overlay = None            # dict(text, color, font, until, started)
+        self.alerts = AlertManager()
+        self._at_boundary = True       # True right after a slide change (low-priority alerts wait for this)
         self.cur = None                # (board_name, [slides], index, started_monotonic)
         self.takeover_active = False
         self._last_check = 0
@@ -159,6 +162,7 @@ class Engine:
             start = names.index(nxt)
         name, slides = cands[start]
         self.cur = (name, self._with_intro(self.boards[name], slides), 0, now)
+        self._at_boundary = True
 
     @staticmethod
     def _with_intro(board, slides):
@@ -237,6 +241,10 @@ class Engine:
         except Exception:
             return False
 
+    def _critical_alert_pending(self):
+        cur = self.alerts.current
+        return bool((cur and cur.priority >= PRIORITIES["critical"]) or self.alerts.next_due(PRIORITIES["critical"]))
+
     def _effective(self):
         """(power_on, brightness) after manual power + schedule."""
         bright = int(self.cfg["display"]["brightness"])
@@ -254,6 +262,11 @@ class Engine:
         c = self.canvas
         c.clear()
         now = time.monotonic()
+        alert, at = self.alerts.tick(at_boundary=self._at_boundary)
+        self._at_boundary = False
+        if alert:
+            render_alert(c, alert, at)
+            return c.image
         if self.overlay:
             if now < self.overlay["until"]:
                 o = self.overlay
@@ -297,6 +310,8 @@ class Engine:
             fps = max(1, int(self.cfg["display"].get("fps", 30)))
             t0 = time.monotonic()
             on, bright = self._effective()
+            if not on and self._critical_alert_pending():
+                on, bright = True, int(self.cfg["display"]["brightness"])   # critical alerts wake the display
             if bright != self._applied_brightness:
                 self.display.set_brightness(bright)
                 self._applied_brightness = bright
@@ -358,6 +373,8 @@ class Engine:
             "paused": self.paused, "takeover": self.takeover_active,
             "current": {"board": cur[0], "slide": cur[2] + 1, "slides": len(cur[1])} if cur else None,
             "overlay": self.overlay["text"] if self.overlay else None,
+            "alert": self.alerts.current.title if self.alerts.current else None,
+            "alerts": self.alerts.active(),
             "fps": round(self.fps_measured, 1),
             "perf": self.perf_info(),
             "boards": {n: b.status() for n, b in self.boards.items()},

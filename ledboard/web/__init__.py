@@ -144,6 +144,29 @@ def create_app(engine):
         engine.show_message(j["text"], j.get("seconds", 10), j.get("color", "#ffffff"), j.get("font", "7x13B"))
         return jsonify({"ok": True})
 
+    # -- alerts ------------------------------------------------------------------
+    @app.post("/api/alert")
+    def alert():
+        j = request.get_json(force=True) or {}
+        if not (j.get("title") or j.get("message")):
+            return jsonify({"error": "title or message required"}), 400
+        a = engine.alerts.add(j.get("title") or j.get("message"), j.get("message", "") if j.get("title") else "",
+                              icon=j.get("icon", "bell"), color=j.get("color", "#ffaa00"),
+                              priority=j.get("priority", "normal"), seconds=j.get("seconds", 10),
+                              repeat_minutes=j.get("repeat_minutes", 0), until_dismissed=j.get("until_dismissed"),
+                              source=j.get("source", "api"))
+        return jsonify({"ok": True, "id": a.id})
+
+    @app.get("/api/alerts")
+    def alerts():
+        from ..alerts import ICONS
+        return jsonify({"alerts": engine.alerts.active(), "icons": list(ICONS)})
+
+    @app.post("/api/alert/dismiss")
+    def alert_dismiss():
+        j = request.get_json(silent=True) or {}
+        return jsonify({"ok": True, "dismissed": engine.alerts.dismiss(j.get("id", "all"))})
+
     @app.post("/api/restart")
     def restart():
         def later():
