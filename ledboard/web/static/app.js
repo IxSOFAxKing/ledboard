@@ -174,6 +174,7 @@ function renderField(obj, f, onDepChange) {
         h("button", { class: "small", onclick: () => loadHaEntities() }, "Load from HA")), f.help);
     }
     case "entities": return entitiesField(obj, f);
+    case "geocode": return geocodeField(obj, f);
     case "spotify_auth": return spotifyAuthField(obj);
     default:
       return field(f.label, h("input", { type: "text", value: val ?? "", oninput: (e) => set(e.target.value) }), f.help);
@@ -204,6 +205,25 @@ function entitiesField(obj, f) {
   };
   draw();
   return h("div", {}, h("div", { class: "muted small", style: "margin-bottom:6px" }, f.label), wrap);
+}
+
+// Location search (Open-Meteo geocoding): fills name + latitude + longitude.
+function geocodeField(obj, f) {
+  const input = h("input", { type: "text", value: obj[f.key] || "", placeholder: "City or ZIP, e.g. Buffalo" });
+  const results = h("div", { class: "geo-results" });
+  const search = async () => {
+    try {
+      const j = await api("/api/weather/geocode?q=" + encodeURIComponent(input.value));
+      if (!j.results.length) return results.replaceChildren(h("span", { class: "muted small" }, "No places found"));
+      results.replaceChildren(...j.results.map((r) => h("button", { class: "small", onclick: () => {
+        obj[f.key] = r.label; obj.latitude = r.latitude; obj.longitude = r.longitude; markDirty(); renderBoards();
+        toast(`Location set to ${r.label} — click Save`);
+      } }, r.label)));
+    } catch (e) { toast(e.message, true); }
+  };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); search(); } });
+  input.addEventListener("input", (e) => { obj[f.key] = e.target.value; markDirty(); });
+  return field(f.label, h("div", {}, h("div", { class: "row nowrap" }, input, h("button", { class: "small", onclick: search }, "Search")), results), f.help);
 }
 
 // Fills the entity autocomplete lists from Home Assistant (unsaved URL/token from the HA form win).

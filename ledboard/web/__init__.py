@@ -183,6 +183,18 @@ def create_app(engine):
         except Exception as e:
             return jsonify({"error": str(e)}), 400
 
+    @app.get("/api/weather/geocode")
+    def weather_geocode():
+        from ..boards.weather import geocode
+        q = (request.args.get("q") or "").strip()
+        if len(q) < 2:
+            return jsonify({"results": []})
+        try:
+            return jsonify({"results": geocode(q)})
+        except Exception as e:
+            from ..boards.base import short_error
+            return jsonify({"error": f"Location search failed: {short_error(e)}"}), 400
+
     @app.post("/api/plex/test")
     def plex_test():
         c = _creds("plex", ["url", "token", "verify_ssl"])

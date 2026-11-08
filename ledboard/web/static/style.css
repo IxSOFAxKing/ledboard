@@ -116,3 +116,4 @@ h4.section:first-child { margin-top: 0; }
   .msg { flex-wrap: wrap; } .msg #msg-text { flex-basis: 100%; }
   header { padding: 12px 16px; }
 }
+.geo-results { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }

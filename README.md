@@ -11,7 +11,8 @@ It's built for two chained 64×32 panels (128×32), and the layouts scale to oth
 | **Plex** | Active streams (movies, TV, music) with the poster, title, S/E or artist, who's watching, and progress. You can filter by user. |
 | **Home Assistant** | Any entities (sensors, locks, doors, lights, thermostats, and so on) at 1, 2 or 3 per screen, with automatic formatting and colors. |
 | **3D Printer (Klipper)** | Print progress from Klipper via Moonraker: the model thumbnail, progress, time left or finish time, layer, nozzle and bed temperatures, and paused, finished and error states. |
-| **Clock** | The time and date. It's also the fallback when nothing else has content. |
+| **Weather** | Animated icons (spinning sun, drifting clouds, falling rain and snow, lightning flashes, fog, wind), current conditions, a 4-day forecast and a 24-hour temperature and rain graph. Data comes from Open-Meteo (free, no key) or your Home Assistant weather entity. |
+| **Clock** | The time and date. Every piece of text (time, AM/PM, date, an optional extra line) has its own font size, color and format. It's also the fallback when nothing else has content. |
 | **Custom message** | Your own text in the rotation. You can also flash a one-off message from the UI or API. |
 
 The web UI also covers: board order, enable and disable, per-board settings, "show now", next and pause, power, a brightness slider, quiet hours (dim or off on a schedule), global scroll defaults, hardware settings, optional password protection, and a status page with errors.
@@ -136,6 +137,22 @@ Upgrading from an earlier LEDBoard with a single "Sports" board moves your setti
 5. Your browser lands on a `127.0.0.1` page that fails to load. That's expected. Copy that page's full URL from the address bar, paste it into the box, and click **Finish**.
 
 LEDBoard saves the refresh token, so you only do this once.
+
+### Weather
+1. Turn on **Weather**.
+2. Choose a source:
+   - **Open-Meteo**: type a city or ZIP code under Location, click **Search**, pick the right place, then **Save**.
+   - **Home Assistant**: enter your weather entity, for example `weather.forecast_home`. It uses the Home Assistant board's URL and token, and gets forecasts through `weather.get_forecasts`. Night icons follow `sun.sun`.
+3. Optionally:
+   - switch units (°F/mph or °C/km/h)
+   - turn the **Now**, **4-day forecast** and **Next 24 hours** screens on or off
+
+### Clock
+The time, AM/PM, date and an optional extra line each have their own font, from tiny (4×6) up to huge (10×20), and their own color. You can also set:
+- the date format, from presets or a custom `strftime` pattern
+- 24-hour time, seconds, a leading zero and a blinking colon
+- uppercase or lowercase
+- left, center or right alignment, and the spacing between lines
 
 ### 3D printer (Klipper / Moonraker)
 1. Turn on **3D Printer (Klipper)**.

@@ -492,8 +492,8 @@ class LeagueBoard(Board):
         show_rank = self.league in COLLEGE and self.cfg.get("show_rankings", True)
         for side, cx0 in (("away", 0), ("home", W - col)):
             team = g[side]
-            # logo fills the whole column width and everything above the name
-            c.paste(logo_fit(self, team, col, H - 7), cx0, 0)
+            # logo fills the column (minus a 1px gap on the inner side) and everything above the name
+            c.paste(logo_fit(self, team, col - 1, H - 7), cx0 if side == "away" else cx0 + 1, 0)
             rank = str(team["rank"]) if show_rank and team["rank"] else ""
             aw = c.text_width(team["abbr"], "5x8")
             rw = c.text_width(rank, "4x6") + 1 if rank else 0

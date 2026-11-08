@@ -147,10 +147,10 @@ def render_field(board, c, g, t, team_color, cycle):
     """Logos at the edges, scores, a mini field, one combined info line."""
     W, H = c.width, c.height
     away, home = g["away"], g["home"]
-    c.paste(board.logos.get(away.get("logo_url")), -2, 0)
-    c.paste(board.logos.get(home.get("logo_url")), W - H + 2, 0)
-    x0, x1 = H - 1, W - H + 1
-    c.rect(x0, 0, x1 - 1, H - 1, (0, 0, 0))
+    # logos fully on screen (they're trimmed, so any offset would clip real artwork)
+    c.paste(logo_fit(board, away, H - 1, H), 0, 0)
+    c.paste(logo_fit(board, home, H - 1, H), W - H + 1, 0)
+    x0, x1 = H, W - H
     mid = (x0 + x1) // 2
 
     aw = c.text(x0 + 1, 0, away["abbr"], "5x8", team_color(away))

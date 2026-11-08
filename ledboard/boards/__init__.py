@@ -8,9 +8,10 @@ from .message import MessageBoard
 from .plex import PlexBoard
 from .sports import LEAGUE_BOARDS, LEAGUES, LeagueBoard
 from .spotify import SpotifyBoard
+from .weather import WeatherBoard
 
 BOARD_CLASSES = {cls.name: cls for cls in (
-    *LEAGUE_BOARDS, SpotifyBoard, PlexBoard, HomeAssistantBoard, KlipperBoard, ClockBoard, MessageBoard)}
+    *LEAGUE_BOARDS, WeatherBoard, SpotifyBoard, PlexBoard, HomeAssistantBoard, KlipperBoard, ClockBoard, MessageBoard)}
 
 
 def board_defaults():
