@@ -1,0 +1,357 @@
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const MASK = "••••••••";
+let CONFIG = null, SCHEMA = null, FONTS = [], MAPPINGS = [], draft = null, STATE = null;
+let dirty = false, openBoards = new Set(JSON.parse(localStorageGet("openBoards") || "[]"));
+
+function localStorageGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function localStorageSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+const clone = (o) => JSON.parse(JSON.stringify(o));
+
+async function api(path, body, method) {
+  const opt = { method: method || (body !== undefined ? "POST" : "GET"), headers: {} };
+  if (body !== undefined) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+function toast(msg, isErr) {
+  const t = $("#toast");
+  t.textContent = msg; t.className = "toast" + (isErr ? " error" : "");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add("hidden"), isErr ? 6000 : 2500);
+}
+
+function h(tag, attrs = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "checked" || k === "value" || k === "disabled") el[k] = v;
+    else if (v !== undefined && v !== null && v !== false) el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) el.append(kid.nodeType ? kid : document.createTextNode(kid));
+  return el;
+}
+
+function markDirty() { dirty = true; $("#savebar").classList.remove("hidden"); }
+
+// ---------------------------------------------------------------- preview
+const preview = $("#preview"), pctx = preview.getContext("2d");
+const scratch = document.createElement("canvas"), sctx = scratch.getContext("2d", { willReadFrequently: true });
+let previewBusy = false;
+
+async function pollFrame() {
+  if (previewBusy || document.hidden) return;
+  previewBusy = true;
+  try {
+    const r = await fetch("/api/frame.png", { cache: "no-store" });
+    if (r.status === 200) drawLeds(await createImageBitmap(await r.blob()));
+  } catch {} finally { previewBusy = false; }
+}
+
+function drawLeds(bmp) {
+  const W = bmp.width, H = bmp.height;
+  scratch.width = W; scratch.height = H;
+  sctx.drawImage(bmp, 0, 0);
+  const px = sctx.getImageData(0, 0, W, H).data;
+  const avail = preview.parentElement.clientWidth - 20;
+  const s = Math.max(2, Math.floor(avail / W));
+  if (preview.width !== W * s) { preview.width = W * s; preview.height = H * s; preview.style.width = W * s + "px"; }
+  pctx.fillStyle = "#050505"; pctx.fillRect(0, 0, preview.width, preview.height);
+  const r = s * 0.42;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = (y * W + x) * 4, R = px[i], G = px[i + 1], B = px[i + 2];
+    pctx.fillStyle = (R | G | B) ? `rgb(${R},${G},${B})` : "#141414";
+    pctx.beginPath(); pctx.arc(x * s + s / 2, y * s + s / 2, r, 0, 6.2832); pctx.fill();
+  }
+}
+
+// ---------------------------------------------------------------- state
+async function pollState() {
+  try { STATE = await api("/api/state"); } catch { return; }
+  const st = STATE;
+  $("#pill-mode").textContent = st.simulated ? "Simulator (no LED hardware)" : `${st.width}×${st.height} matrix`;
+  $("#pill-mode").className = "pill " + (st.simulated ? "sim" : "hw");
+  $("#pill-fps").textContent = `${st.fps} fps`;
+  const cur = st.current;
+  $("#now-board").textContent = st.overlay ? "Message" : cur ? (SCHEMA?.[cur.board]?.title || cur.board) : "—";
+  $("#now-slide").textContent = !st.overlay && cur && cur.slides > 1 ? `${cur.slide} / ${cur.slides}` : "";
+  $("#badge-takeover").classList.toggle("hidden", !st.takeover);
+  $("#badge-quiet").classList.toggle("hidden", !st.quiet_hours);
+  $("#btn-pause").textContent = st.paused ? "Resume" : "Pause";
+  $("#btn-power").textContent = st.power ? "Turn off" : "Turn on";
+  const br = $("#brightness");
+  if (document.activeElement !== br) { br.value = CONFIG?.display.brightness ?? st.brightness; $("#bright-val").textContent = br.value; }
+  for (const [name, b] of Object.entries(st.boards)) {
+    const dot = document.querySelector(`[data-dot="${name}"]`);
+    if (dot) dot.className = "dot " + (!b.enabled ? "idle" : b.last_error ? "err" : "ok");
+    const err = document.querySelector(`[data-err="${name}"]`);
+    if (err) { err.textContent = b.last_error || ""; err.classList.toggle("hidden", !b.last_error); }
+  }
+  renderStatus();
+  const sa = document.querySelector("[data-spotify-status]");
+  if (sa) sa.textContent = st.boards.spotify.connected ? "✅ Connected" : "Not connected";
+}
+
+function renderStatus() {
+  if (!STATE) return;
+  const ago = (t) => t ? `${Math.round(Date.now() / 1000 - t)}s ago` : "never";
+  const rows = Object.entries(STATE.boards).map(([n, b]) => {
+    let info = !b.enabled ? "disabled" : `updated ${ago(b.last_update)} · ${b.slides} slide(s)`;
+    if (n === "spotify" && b.enabled) info += b.now ? ` · ${b.now.playing ? "▶" : "⏸"} ${b.now.title} — ${b.now.artist}` : " · nothing playing";
+    if (n === "plex" && b.enabled) info += ` · ${b.sessions.length} stream(s)`;
+    return h("div", { class: "status-row" },
+      h("span", { class: "dot " + (!b.enabled ? "idle" : b.last_error ? "err" : "ok") }),
+      h("span", { class: "nm" }, SCHEMA?.[n]?.title || n),
+      h("span", { class: "info" }, info, b.last_error ? h("div", { class: "err-line" }, b.last_error) : null));
+  });
+  $("#status").replaceChildren(h("div", { class: "status-grid" }, rows));
+}
+
+// ---------------------------------------------------------------- fields
+function field(label, input, help, cls = "") {
+  return h("div", { class: "field " + cls }, h("label", {}, label), input, help ? h("div", { class: "help" }, help) : null);
+}
+
+function renderField(obj, f) {
+  const key = f.key, val = obj[key];
+  const set = (v) => { obj[key] = v; markDirty(); };
+  switch (f.type) {
+    case "bool": {
+      const sw = h("label", { class: "switch" }, h("input", { type: "checkbox", checked: !!val, onchange: (e) => set(e.target.checked) }), h("span"));
+      return field(f.label, sw, f.help, "bool");
+    }
+    case "number":
+      return field(f.label, h("input", { type: "number", value: val ?? "", step: "any", oninput: (e) => set(e.target.value === "" ? "" : Number(e.target.value)) }), f.help);
+    case "password":
+      return field(f.label, h("input", { type: "password", value: val || "", placeholder: "not set", autocomplete: "new-password",
+        onfocus: (e) => { if (e.target.value === MASK) e.target.value = ""; },
+        onblur: (e) => { if (e.target.value === "" && val === MASK) e.target.value = MASK; },
+        oninput: (e) => set(e.target.value) }), f.help);
+    case "color":
+      return field(f.label, h("input", { type: "color", value: val || "#ffffff", oninput: (e) => set(e.target.value) }), f.help);
+    case "select": {
+      const sel = h("select", { onchange: (e) => set(typeof f.options[0] === "number" ? Number(e.target.value) : e.target.value) },
+        f.options.map((o) => h("option", { value: o, selected: String(o) === String(val) }, String(o))));
+      return field(f.label, sel, f.help);
+    }
+    case "list":
+      return field(f.label, h("input", { type: "text", value: (val || []).join(", "),
+        oninput: (e) => set(e.target.value.split(",").map((s) => s.trim()).filter(Boolean)) }), f.help);
+    case "leagues": return leaguesField(obj, f);
+    case "entities": return entitiesField(obj, f);
+    case "spotify_auth": return spotifyAuthField(obj);
+    default:
+      return field(f.label, h("input", { type: "text", value: val ?? "", oninput: (e) => set(e.target.value) }), f.help);
+  }
+}
+
+function leaguesField(obj, f) {
+  obj.leagues = obj.leagues || {};
+  const items = Object.entries(f.options).map(([k, name]) => {
+    const lc = obj.leagues[k] = obj.leagues[k] || { enabled: false, favorites: [] };
+    return h("div", { class: "league" },
+      h("input", { type: "checkbox", checked: !!lc.enabled, onchange: (e) => { lc.enabled = e.target.checked; markDirty(); } }),
+      h("span", { class: "lname" }, name),
+      h("input", { type: "text", placeholder: "favorites e.g. BUF, KC", value: (lc.favorites || []).join(", "),
+        oninput: (e) => { lc.favorites = e.target.value.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean); markDirty(); } }));
+  });
+  return h("div", {}, h("div", { class: "muted small", style: "margin-bottom:8px" }, f.label + " — use ESPN team abbreviations"), h("div", { class: "leagues" }, items));
+}
+
+function entitiesField(obj, f) {
+  obj.entities = obj.entities || [];
+  const wrap = h("div", { class: "entities" });
+  const draw = () => {
+    const rows = obj.entities.map((e, i) => h("tr", {},
+      h("td", {}, h("input", { class: "eid", list: "ha-entities", placeholder: "sensor.living_room_temperature", value: e.entity_id || "",
+        oninput: (ev) => { e.entity_id = ev.target.value.trim(); markDirty(); } })),
+      h("td", {}, h("input", { placeholder: "(friendly name)", value: e.label || "", oninput: (ev) => { e.label = ev.target.value; markDirty(); } })),
+      h("td", {}, h("input", { class: "narrow", placeholder: "attribute", value: e.attribute || "", title: "Show an attribute instead of the state (e.g. current_temperature)",
+        oninput: (ev) => { e.attribute = ev.target.value.trim(); markDirty(); } })),
+      h("td", {}, h("input", { class: "narrow", placeholder: "#color", value: e.color || "", title: "Value color, e.g. #ffcc00 (blank = automatic)",
+        oninput: (ev) => { e.color = ev.target.value.trim(); markDirty(); } })),
+      h("td", {}, h("input", { class: "narrow", type: "number", placeholder: "decimals", value: e.decimals ?? "",
+        oninput: (ev) => { e.decimals = ev.target.value === "" ? "" : Number(ev.target.value); markDirty(); } })),
+      h("td", {}, h("button", { class: "small", title: "Up", onclick: () => { if (i) { [obj.entities[i - 1], obj.entities[i]] = [obj.entities[i], obj.entities[i - 1]]; markDirty(); draw(); } } }, "↑")),
+      h("td", {}, h("button", { class: "small danger", title: "Remove", onclick: () => { obj.entities.splice(i, 1); markDirty(); draw(); } }, "✕"))));
+    wrap.replaceChildren(
+      h("table", {}, h("tr", {}, ["Entity ID", "Label", "Attribute", "Color", "Decimals", "", ""].map((t) => h("th", {}, t))), rows),
+      h("div", { class: "row", style: "margin-top:8px" },
+        h("button", { class: "small", onclick: () => { obj.entities.push({ entity_id: "", label: "" }); markDirty(); draw(); } }, "+ Add entity"),
+        h("button", { class: "small", onclick: loadHaEntities }, "Load entity list from Home Assistant")));
+  };
+  async function loadHaEntities() {
+    try {
+      const j = await api("/api/homeassistant/entities", { url: obj.url, token: obj.token, verify_ssl: obj.verify_ssl });
+      $("#ha-entities").replaceChildren(...j.entities.map((e) => h("option", { value: e.entity_id }, `${e.name} (${e.state})`)));
+      toast(`Loaded ${j.entities.length} entities — start typing in an Entity ID box`);
+    } catch (e) { toast("Home Assistant: " + e.message, true); }
+  }
+  draw();
+  return h("div", {}, h("div", { class: "muted small", style: "margin-bottom:6px" }, f.label), wrap);
+}
+
+function spotifyAuthField(obj) {
+  const box = h("input", { type: "text", placeholder: "Paste the 127.0.0.1/spotify/callback?code=… URL here", style: "width:100%" });
+  return h("div", { class: "card spotify-auth", style: "background:var(--panel2)" },
+    h("div", {}, h("strong", {}, "Spotify account: "), h("span", { "data-spotify-status": "" }, STATE?.boards.spotify.connected ? "✅ Connected" : "Not connected")),
+    h("ol", {},
+      h("li", {}, "Create an app at ", h("a", { href: "https://developer.spotify.com/dashboard", target: "_blank" }, "developer.spotify.com/dashboard"), " (choose “Web API”)."),
+      h("li", {}, "Add this Redirect URI to the app: ", h("code", {}, obj.redirect_uri)),
+      h("li", {}, "Paste the Client ID and Secret below and click Save."),
+      h("li", {}, "Click Connect. After approving, your browser lands on a 127.0.0.1 page that won't load — that's expected. Copy that page's full URL and paste it here.")),
+    h("div", { class: "row" },
+      h("button", { class: "primary", onclick: async () => {
+        if (dirty) return toast("Save your changes first", true);
+        try { const j = await api("/api/spotify/auth-url"); window.open(j.url, "_blank"); } catch (e) { toast(e.message, true); }
+      } }, "Connect Spotify"),
+      h("button", { class: "danger", onclick: async () => { await api("/api/spotify/disconnect", {}); toast("Disconnected"); pollState(); } }, "Disconnect")),
+    h("div", { class: "row" }, box, h("button", { onclick: async () => {
+      try { await api("/api/spotify/exchange", { code: box.value }); box.value = ""; toast("Spotify connected!"); await reloadConfig(); }
+      catch (e) { toast(e.message, true); }
+    } }, "Finish")));
+}
+
+// ---------------------------------------------------------------- boards tab
+function renderBoards() {
+  const root = $("#boards");
+  root.replaceChildren(...draft.rotation.map((name, idx) => {
+    const sch = SCHEMA[name], bc = draft.boards[name];
+    if (!sch) return null;
+    const card = h("div", { class: "board" + (openBoards.has(name) ? " open" : "") + (bc.enabled ? "" : " disabled") });
+    const toggleOpen = () => { card.classList.toggle("open"); card.classList.contains("open") ? openBoards.add(name) : openBoards.delete(name); localStorageSet("openBoards", JSON.stringify([...openBoards])); };
+    const move = (d) => { const j = idx + d; if (j < 0 || j >= draft.rotation.length) return; [draft.rotation[idx], draft.rotation[j]] = [draft.rotation[j], draft.rotation[idx]]; markDirty(); renderBoards(); };
+    const body = h("div", { class: "board-body" },
+      h("div", { class: "err-line hidden", "data-err": name }),
+      h("p", { class: "muted small", style: "margin-top:0" }, sch.description),
+      h("div", { class: "form" }, sch.fields.map((f) => renderField(bc, f))),
+      name === "plex" ? h("div", { class: "row", style: "margin-top:12px" }, h("button", { onclick: async () => {
+        try { toast((await api("/api/plex/test", { url: bc.url, token: bc.token, verify_ssl: bc.verify_ssl })).message); } catch (e) { toast("Plex: " + e.message, true); }
+      } }, "Test connection")) : null);
+    card.append(
+      h("div", { class: "board-head" },
+        h("div", { class: "order" }, h("button", { title: "Move up", onclick: () => move(-1) }, "▲"), h("button", { title: "Move down", onclick: () => move(1) }, "▼")),
+        h("span", { class: "dot", "data-dot": name }),
+        h("div", { class: "board-title", onclick: toggleOpen }, sch.title, h("span", { class: "sub" }, summary(name, bc))),
+        h("button", { class: "small", title: "Show this board now", onclick: () => api("/api/control", { action: "jump", board: name }).catch((e) => toast(e.message, true)) }, "Show"),
+        h("label", { class: "switch", title: "Enabled" }, h("input", { type: "checkbox", checked: !!bc.enabled, onchange: (e) => { bc.enabled = e.target.checked; card.classList.toggle("disabled", !bc.enabled); markDirty(); } }), h("span")),
+        h("button", { class: "small", onclick: toggleOpen }, "⚙")),
+      body);
+    return card;
+  }));
+  pollState();
+}
+
+function summary(name, bc) {
+  if (name === "sports") {
+    const on = Object.entries(bc.leagues || {}).filter(([, l]) => l.enabled).map(([k]) => k.toUpperCase());
+    return on.length ? on.join(" · ") : "no leagues selected";
+  }
+  if (name === "homeassistant") return `${(bc.entities || []).length} entities`;
+  if (name === "message") return bc.text || "";
+  if (name === "spotify" || name === "plex") return bc.takeover ? "takes over while playing" : `${bc.duration}s in rotation`;
+  return `${bc.duration}s`;
+}
+
+// ---------------------------------------------------------------- other tabs
+const DISPLAY_FIELDS = [
+  { key: "rows", label: "Panel rows", type: "number" },
+  { key: "cols", label: "Panel columns", type: "number" },
+  { key: "chain_length", label: "Panels chained", type: "number" },
+  { key: "parallel", label: "Parallel chains", type: "number" },
+  { key: "hardware_mapping", label: "Hardware mapping", type: "select" },
+  { key: "gpio_slowdown", label: "GPIO slowdown", type: "number", help: "Pi 4: 3–4, Pi 3: 2, Pi Zero/1: 0–1. Raise if you see flicker/garbage." },
+  { key: "pwm_bits", label: "PWM bits", type: "number" },
+  { key: "pwm_lsb_nanoseconds", label: "PWM LSB nanoseconds", type: "number" },
+  { key: "pwm_dither_bits", label: "PWM dither bits", type: "number" },
+  { key: "limit_refresh_rate_hz", label: "Limit refresh rate (Hz, 0 = off)", type: "number" },
+  { key: "scan_mode", label: "Scan mode", type: "select", options: [0, 1], help: "0 = progressive, 1 = interlaced" },
+  { key: "row_address_type", label: "Row address type", type: "number" },
+  { key: "multiplexing", label: "Multiplexing", type: "number" },
+  { key: "led_rgb_sequence", label: "RGB sequence", type: "select", options: ["RGB", "RBG", "GRB", "GBR", "BRG", "BGR"] },
+  { key: "pixel_mapper_config", label: "Pixel mapper", type: "text", help: "e.g. U-mapper, Rotate:180" },
+  { key: "panel_type", label: "Panel type", type: "text", help: "e.g. FM6126A (leave blank unless needed)" },
+  { key: "disable_hardware_pulsing", label: "Disable hardware pulsing", type: "bool" },
+  { key: "inverse_colors", label: "Inverse colors", type: "bool" },
+  { key: "show_refresh_rate", label: "Print refresh rate to log", type: "bool" },
+  { key: "fps", label: "Render FPS", type: "number", help: "Frames drawn per second (affects scroll smoothness and CPU)" },
+];
+
+function renderOtherTabs() {
+  const dfs = DISPLAY_FIELDS.map((f) => f.key === "hardware_mapping" ? { ...f, options: MAPPINGS } : f);
+  $("#display-form").replaceChildren(...dfs.map((f) => renderField(draft.display, f)));
+  $("#schedule-form").replaceChildren(...[
+    { key: "enabled", label: "Enable quiet hours", type: "bool" },
+    { key: "start", label: "Start (HH:MM, 24h)", type: "text" },
+    { key: "end", label: "End (HH:MM, 24h)", type: "text" },
+    { key: "mode", label: "During quiet hours", type: "select", options: ["dim", "off"] },
+    { key: "brightness", label: "Dimmed brightness", type: "number" },
+  ].map((f) => renderField(draft.schedule, f)));
+  $("#general-form").replaceChildren(
+    renderField(draft, { key: "fallback_board", label: "Show when nothing else has content", type: "select", options: Object.keys(SCHEMA) }),
+    renderField(draft.web, { key: "port", label: "Web UI port (restart needed)", type: "number" }),
+    renderField(draft.web, { key: "password", label: "Web UI password (blank = none)", type: "password", help: "Browser will prompt; any username works." }));
+}
+
+// ---------------------------------------------------------------- save / load
+async function reloadConfig() {
+  const j = await api("/api/config");
+  CONFIG = j.config; SCHEMA = j.schema; FONTS = j.fonts; MAPPINGS = j.hardware_mappings;
+  draft = clone(CONFIG); dirty = false; $("#savebar").classList.add("hidden");
+  renderBoards(); renderOtherTabs();
+}
+
+async function save() {
+  const payload = clone(draft);
+  delete payload.display.brightness; // controlled live by the slider
+  try {
+    const j = await api("/api/config", payload);
+    toast("Saved");
+    await reloadConfig();
+    if (j.restart_needed && confirm("Display hardware settings changed. Restart LEDBoard now to apply them?")) restart();
+  } catch (e) { toast("Save failed: " + e.message, true); }
+}
+
+async function restart() {
+  await api("/api/restart", {});
+  toast("Restarting…");
+  setTimeout(() => location.reload(), 6000);
+}
+
+// ---------------------------------------------------------------- wire up
+document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("active", x === b));
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.id === "tab-" + b.dataset.tab));
+  history.replaceState(null, "", "#" + b.dataset.tab);
+}));
+const initialTab = document.querySelector(`.tabs button[data-tab="${location.hash.slice(1)}"]`);
+if (initialTab) initialTab.click();
+
+$("#btn-next").onclick = () => api("/api/control", { action: "next" }).then(pollState);
+$("#btn-pause").onclick = () => api("/api/control", { action: STATE?.paused ? "resume" : "pause" }).then(pollState);
+$("#btn-power").onclick = () => api("/api/control", { action: "power", on: !STATE?.power }).then(pollState);
+$("#btn-refresh").onclick = () => api("/api/control", { action: "refresh" }).then(() => toast("Refreshing data…"));
+$("#btn-restart").onclick = () => confirm("Restart LEDBoard?") && restart();
+$("#btn-save").onclick = save;
+$("#btn-discard").onclick = reloadConfig;
+let brTimer;
+$("#brightness").oninput = (e) => {
+  $("#bright-val").textContent = e.target.value;
+  clearTimeout(brTimer);
+  brTimer = setTimeout(() => api("/api/control", { action: "brightness", value: Number(e.target.value) }).then(() => { CONFIG.display.brightness = Number(e.target.value); }), 150);
+};
+$("#msg-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const text = $("#msg-text").value.trim();
+  if (!text) return;
+  try { await api("/api/message", { text, seconds: Number($("#msg-secs").value) || 10, color: $("#msg-color").value }); $("#msg-text").value = ""; toast("Message sent"); }
+  catch (err) { toast(err.message, true); }
+};
+window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+reloadConfig().catch((e) => toast("Could not load config: " + e.message, true));
+setInterval(pollFrame, 120);
+setInterval(pollState, 1500);

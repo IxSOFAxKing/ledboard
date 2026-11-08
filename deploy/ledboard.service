@@ -1,0 +1,17 @@
+[Unit]
+Description=LEDBoard LED matrix scoreboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__DIR__
+Environment=PYTHONUNBUFFERED=1
+Environment=LEDBOARD_CACHE=/var/cache/ledboard
+ExecStart=__DIR__/venv/bin/python -m ledboard -c /etc/ledboard/config.json
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target
