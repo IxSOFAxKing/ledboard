@@ -144,6 +144,52 @@ def create_app(engine):
         engine.show_message(j["text"], j.get("seconds", 10), j.get("color", "#ffffff"), j.get("font", "7x13B"))
         return jsonify({"ok": True})
 
+    # -- software update + backup --------------------------------------------------
+    def _updater():
+        return getattr(engine, "updater", None)
+
+    @app.get("/api/update")
+    def update_status():
+        u = _updater()
+        return jsonify(u.status() if u else {"error": "updater not running"})
+
+    @app.post("/api/update/check")
+    def update_check():
+        u = _updater()
+        if not u:
+            return jsonify({"error": "updater not running"}), 400
+        u.check()
+        return jsonify(u.status())
+
+    @app.post("/api/update/apply")
+    def update_apply():
+        u = _updater()
+        if not u or not u.available():
+            return jsonify({"error": "LEDBoard isn't running from a git checkout"}), 400
+        if not u.apply():
+            return jsonify({"error": "an update is already running"}), 409
+        return jsonify({"ok": True})
+
+    @app.get("/api/config/export")
+    def config_export():
+        import json as _json
+        from datetime import date
+        body = _json.dumps(config.get(), indent=2)
+        name = f"ledboard-backup-{date.today().isoformat()}.json"
+        return Response(body, mimetype="application/json",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.post("/api/config/import")
+    def config_import():
+        data = request.get_json(force=True, silent=True)
+        try:
+            old_display = dict(config.data["display"])
+            config.replace(data)
+        except Exception as e:
+            return jsonify({"error": f"Couldn't restore: {e}"}), 400
+        engine.apply_config()
+        return jsonify({"ok": True, "restart_needed": _hw_changed(old_display, config.data["display"])})
+
     # -- alerts ------------------------------------------------------------------
     @app.post("/api/alert")
     def alert():

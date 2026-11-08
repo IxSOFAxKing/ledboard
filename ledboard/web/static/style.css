@@ -141,3 +141,11 @@ h4.section:first-child { margin-top: 0; }
 .alert-row { display: flex; gap: 8px; align-items: center; background: #2a1d0b; border: 1px solid #6b4c12; border-radius: 8px; padding: 6px 10px; }
 .alert-row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge.crit { background: #4a1012; color: #ff8c8f; }
+
+a.button, label.button { display: inline-block; background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 14px; text-decoration: none; cursor: pointer; font-size: 15px; }
+a.button:hover, label.button:hover { border-color: #3a4350; }
+#btn-update-badge { background: #1d3b22; border-color: #2c6b3a; color: #8be3a5; }
+.update-log { background: #0f1216; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 12px/1.5 ui-monospace, monospace;
+  white-space: pre-wrap; max-height: 220px; overflow: auto; margin-top: 10px; }
+.changes { margin: 6px 0 10px; padding-left: 20px; color: var(--muted); font-size: 13px; }

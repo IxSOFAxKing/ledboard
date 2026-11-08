@@ -39,6 +39,8 @@ def main(argv=None):
     from .mqtt_ha import MQTTBridge
     engine.mqtt = MQTTBridge(engine)
     engine.mqtt.start()
+    from .updater import Updater
+    engine.updater = Updater(engine)
     web = cfg.data["web"]
     srv = serve(engine, web.get("host", "0.0.0.0"), a.port or int(web.get("port", 8080)))
 

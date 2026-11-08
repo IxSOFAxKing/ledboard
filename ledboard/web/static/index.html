@@ -19,6 +19,7 @@
   <div class="brand"><span class="logo-dot"></span>LEDBoard</div>
   <div class="pills">
     <button id="btn-install" class="small primary hidden" title="Install LEDBoard as an app">Install app</button>
+    <button id="btn-update-badge" class="small hidden" title="Go to Settings → Software">Update available</button>
     <span id="pill-mode" class="pill">…</span>
     <span id="pill-fps" class="pill muted"></span>
   </div>
@@ -75,6 +76,14 @@
   </section>
 
   <section id="tab-schedule" class="tab">
+    <div class="card"><h3>Software</h3><div id="software"></div></div>
+    <div class="card"><h3>Backup &amp; restore</h3>
+      <div class="row">
+        <a class="button" href="/api/config/export" download>Download backup</a>
+        <label class="button">Restore from file…<input id="restore-file" type="file" accept="application/json,.json" hidden></label>
+      </div>
+      <p class="muted small">The backup contains all settings, including passwords and API tokens — keep the file private.</p>
+    </div>
     <div class="card"><h3>Home Assistant (MQTT)</h3><div id="mqtt-status" class="muted small" style="margin-bottom:10px"></div><div id="mqtt-form" class="form"></div>
       <p class="muted small">Uses your Home Assistant MQTT broker (e.g. the Mosquitto add-on). LEDBoard then appears under Settings → Devices as <b>LEDBoard</b> with a Display light, Board selector, Pause, Next, Message and an Alert notify entity.</p>
     </div>

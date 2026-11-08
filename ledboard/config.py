@@ -132,6 +132,17 @@ class Config:
         rot += [b for b in self.data["boards"] if b not in rot]
         self.data["rotation"] = list(dict.fromkeys(rot))
 
+    def replace(self, data):
+        """Restore a whole config (from a backup): migrate, merge over defaults, save."""
+        if not isinstance(data, dict) or not isinstance(data.get("boards", {}), dict):
+            raise ValueError("not a LEDBoard backup")
+        with self.lock:
+            if self.migrate:
+                self.migrate(data)
+            self.data = deep_merge(self.defaults, data)
+            self.load_rotation_fixup()
+            self.save()
+
     def public(self):
         """Config with secrets masked, for the web UI."""
         return _mask(self.get())

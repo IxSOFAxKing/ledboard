@@ -378,6 +378,7 @@ class Engine:
             "alert": self.alerts.current.title if self.alerts.current else None,
             "alerts": self.alerts.active(),
             "mqtt": self.mqtt.status() if getattr(self, "mqtt", None) else {"enabled": False},
+            "update_available": (getattr(self, "updater", None) and self.updater.info.get("behind")) or 0,
             "fps": round(self.fps_measured, 1),
             "perf": self.perf_info(),
             "boards": {n: b.status() for n, b in self.boards.items()},

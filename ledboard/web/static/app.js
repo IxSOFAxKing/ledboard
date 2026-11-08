@@ -128,6 +128,7 @@ async function pollState() {
   }
   renderStatus();
   renderActiveAlerts(st.alerts || []);
+  $("#btn-update-badge").classList.toggle("hidden", !st.update_available);
   const mq = st.mqtt || {};
   $("#mqtt-status").textContent = !mq.enabled ? "Off" : mq.connected ? `✅ Connected to ${mq.broker}` : `⚠ Not connected${mq.error ? " — " + mq.error : " (connecting…)"}`;
   const sa = document.querySelector("[data-spotify-status]");
@@ -163,6 +164,67 @@ function renderStatus() {
       warn.length ? h("div", { class: "err-line" }, "Pi power/heat warning — " + warn.join(" | ") + ". Under-voltage often causes flicker: check the Pi's power supply.") : null));
   $("#status").replaceChildren(h("div", { class: "status-grid" }, perfRow, rows));
 }
+
+// ---------------------------------------------------------------- software update + restore
+let updatePoll = null;
+async function renderSoftware(statusIn) {
+  let st = statusIn;
+  if (!st) { try { st = await api("/api/update"); } catch (e) { $("#software").textContent = e.message; return; } }
+  const cur = st.current || {};
+  const kids = [h("div", {}, h("strong", {}, `LEDBoard ${cur.version || ""}`),
+    cur.commit ? h("span", { class: "muted" }, ` · ${cur.commit} · ${cur.date || ""}`) : null)];
+  if (st.error) kids.push(h("div", { class: "err-line" }, st.error));
+  if (st.state === "updating" || st.state === "restarting" || (st.state === "error" && st.log?.length)) {
+    kids.push(h("div", { class: "update-log" }, (st.log || []).join("\n") || "Starting…"));
+  } else if (st.behind > 0) {
+    kids.push(h("div", { style: "margin-top:8px" }, h("strong", {}, `Update available: ${st.behind} new change${st.behind > 1 ? "s" : ""}`)),
+      h("ul", { class: "changes" }, (st.changes || []).map((c) => h("li", {}, c))));
+    if ((st.local_changes || []).length) kids.push(h("div", { class: "err-line" }, "Files were edited on the Pi, so automatic update is disabled: " + st.local_changes.join(", ")));
+    else kids.push(h("button", { class: "primary", onclick: startUpdate }, "Update now"));
+  } else if (st.last_check) {
+    kids.push(h("div", { class: "muted small", style: "margin-top:6px" }, `Up to date (checked ${new Date(st.last_check * 1000).toLocaleString()})`));
+  }
+  if (!["updating", "restarting"].includes(st.state)) {
+    kids.push(h("div", { class: "row", style: "margin-top:10px" }, h("button", { class: "small", onclick: async (ev) => {
+      ev.currentTarget.disabled = true; ev.currentTarget.textContent = "Checking…";
+      try { renderSoftware(await api("/api/update/check", {})); } catch (e) { toast(e.message, true); renderSoftware(); }
+    } }, "Check for updates")));
+  }
+  $("#software").replaceChildren(...kids.filter(Boolean));
+}
+
+async function startUpdate() {
+  if (!confirm("Update LEDBoard now? The display restarts when it's done.")) return;
+  try { await api("/api/update/apply", {}); } catch (e) { return toast(e.message, true); }
+  clearInterval(updatePoll);
+  updatePoll = setInterval(async () => {
+    try {
+      const st = await api("/api/update");
+      renderSoftware(st);
+      if (st.state === "error") clearInterval(updatePoll);
+    } catch {          // server is restarting: wait for it to come back, then reload
+      clearInterval(updatePoll);
+      $("#software").append(h("div", { class: "muted" }, "Restarting… the page reloads when LEDBoard is back."));
+      const wait = setInterval(async () => {
+        try { await api("/api/state"); clearInterval(wait); location.reload(); } catch {}
+      }, 2000);
+    }
+  }, 1500);
+}
+
+$("#restore-file").addEventListener("change", async (e) => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (!f) return;
+  let data;
+  try { data = JSON.parse(await f.text()); } catch { return toast("That file isn't a LEDBoard backup", true); }
+  if (!confirm(`Restore settings from ${f.name}? This replaces all current settings.`)) return;
+  try {
+    const j = await api("/api/config/import", data);
+    toast("Settings restored"); await reloadConfig();
+    if (j.restart_needed && confirm("Display hardware settings changed. Restart LEDBoard now?")) restart();
+  } catch (err) { toast(err.message, true); }
+});
+$("#btn-update-badge").onclick = () => document.querySelector('.tabs button[data-tab="schedule"]').click();
 
 // ---------------------------------------------------------------- alerts
 let alertIcons = [];
@@ -481,7 +543,7 @@ async function reloadConfig() {
   const j = await api("/api/config");
   CONFIG = j.config; SCHEMA = j.schema; FONTS = j.fonts; MAPPINGS = j.hardware_mappings;
   draft = clone(CONFIG); partitionRotation(draft); dirty = false; $("#savebar").classList.add("hidden");
-  renderBoards(); renderOtherTabs(); renderAlertForm();
+  renderBoards(); renderOtherTabs(); renderAlertForm(); renderSoftware();
 }
 
 async function save() {
