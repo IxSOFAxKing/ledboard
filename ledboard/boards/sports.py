@@ -70,6 +70,28 @@ def _athlete(obj):
     return a.get("shortName") or a.get("displayName") or ""
 
 
+def _linescore(items):
+    """[{'value': 1.0}, ...] -> [1, ...]; None when ESPN doesn't provide one."""
+    if not isinstance(items, list) or not items:
+        return None
+    out = []
+    for it in items:
+        v = it.get("value", it.get("displayValue")) if isinstance(it, dict) else it
+        try:
+            out.append(int(float(v)))
+        except (TypeError, ValueError):
+            out.append(None)
+    return out
+
+
+def _half(detail):
+    d = (detail or "").strip().lower()
+    for prefix, half in (("top", "top"), ("bot", "bottom"), ("mid", "mid"), ("end", "end")):
+        if d.startswith(prefix):
+            return half
+    return None
+
+
 def _stat(competitor, *names):
     for st in competitor.get("statistics") or []:
         if st.get("name") in names or st.get("abbreviation") in names:
@@ -110,6 +132,7 @@ def parse_event(ev, league_key):
             "shots": _stat(c, "shotsTotal", "shots", "shotsOnGoal", "SOG"),
             "leaders": leaders,
             "red_cards": 0,
+            "linescore": _linescore(c.get("linescores")),
         }
     if "home" not in teams or "away" not in teams:
         return None
@@ -159,6 +182,9 @@ def parse_event(ev, league_key):
         "bases": [bool(sit.get("onFirst")), bool(sit.get("onSecond")), bool(sit.get("onThird"))],
         "batter": _athlete(sit.get("batter")),
         "pitcher": _athlete(sit.get("pitcher")),
+        "batter_summary": (sit.get("batter") or {}).get("summary", "") if isinstance(sit.get("batter"), dict) else "",
+        "pitcher_summary": (sit.get("pitcher") or {}).get("summary", "") if isinstance(sit.get("pitcher"), dict) else "",
+        "half": _half(stype.get("shortDetail") or stype.get("detail") or ""),
         "last_play": ((sit.get("lastPlay") or {}).get("text") or "").strip(),
         "last_goal": "",
     }
@@ -291,17 +317,16 @@ class LeagueBoard(Board):
             "hockey": "Shots on goal.",
             "soccer": "Red cards and the latest goal scorer.",
         }[sport]
+        layouts = live_layouts(sport)
+        if layouts:
+            f.append({"key": "live_layout", "label": "Live game layout", "type": "select", "section": "Live games",
+                      "options": list(layouts), "option_labels": layouts})
         if sport == "football":
-            from .football_layouts import LAYOUTS
-            f += [
-                {"key": "live_layout", "label": "Live game layout", "type": "select", "section": "Live games",
-                 "options": list(LAYOUTS), "option_labels": LAYOUTS},
-                {"key": "show_win_probability", "label": "Show win probability bar (when ESPN provides it)",
-                 "type": "bool", "section": "Live games", "show_if": {"live_layout": "drive"}},
-            ]
+            f.append({"key": "show_win_probability", "label": "Show win probability bar (when ESPN provides it)",
+                      "type": "bool", "section": "Live games", "show_if": {"live_layout": "drive"}})
         f += [
             {"key": "detailed_live", "label": "Detailed live info", "type": "bool", "section": "Live games",
-             "help": live_help, "show_if": {"live_layout": "classic"} if sport == "football" else None},
+             "help": live_help, "show_if": {"live_layout": "classic"} if layouts else None},
             {"key": "show_last_play", "label": "Scroll the last play", "type": "bool", "section": "Live games"},
             {"key": "score_flash", "label": "Flash the score when it changes", "type": "bool", "section": "Live games"},
             {"key": "duration", "label": "Seconds per game", "type": "number", "section": "Timing"},
@@ -416,67 +441,61 @@ class LeagueBoard(Board):
         g = self._game(slide)
         if not g:
             return
-        if g["state"] == "in" and self.sport == "football":
-            from .football_layouts import RENDERERS
-            fn = RENDERERS.get(self.cfg.get("live_layout", "classic"))
+        if g["state"] == "in" and live_layouts(self.sport):
+            fn = live_renderers(self.sport).get(self.cfg.get("live_layout", "classic"))
             if fn:
                 fn(self, c, g, t, team_color, _cycle)
                 return
         H, W = c.height, c.width
         away, home = g["away"], g["home"]
-        c.paste(self.logos.get(away.get("logo_url")), -2, 0)
-        c.paste(self.logos.get(home.get("logo_url")), W - H + 2, 0)
-        x0, x1 = H - 1, W - H + 1
-        c.rect(x0, 0, x1 - 1, H - 1, (0, 0, 0))   # keep logo edges out of the text area
+        col = H                                    # width of each team column
+        x0, x1 = col, W - col                      # center area
         mid = (x0 + x1) // 2
         detailed = self.cfg.get("detailed_live", True)
 
-        self._abbrs(c, g, x0, x1, detailed)
+        self._team_columns(c, g, col, detailed)
         if g["state"] == "pre":
             if self.cfg.get("show_records", True):
-                c.text(x0 + 1, 10, away["record"], "4x6", GRAY)
-                c.text_right(x1 - 1, 10, home["record"], "4x6", GRAY)
-            c.text_centered(11, "v" if self.sport == "soccer" else "@", "6x10", WHITE, x0, x1)
+                c.text(x0 + 1, 2, away["record"], "4x6", GRAY)
+                c.text_right(x1 - 1, 2, home["record"], "4x6", GRAY)
+            c.text_centered(0, "v" if self.sport == "soccer" else "@", "6x10", GRAY, x0, x1)
+            c.scroll_text(x0, x1, 12, self._start_text(g), "5x8", WHITE, t, align="center")
+            items = self._info_items(g)[1:] or [(self._date_text(g), GRAY)]
         else:
-            self._scores_draw(c, g, mid)
+            self._scores_draw(c, g, mid, y=2)
             if g["state"] == "in" and detailed:
                 self._live_graphics(c, g, x0, x1, mid)
-
-        items = self._info_items(g)
+            items = self._info_items(g)
         text, color, local_t = _cycle(c, items, t, x1 - x0)
         c.scroll_text(x0, x1, H - 7, text, "5x7", color, local_t, speed=INFO_SPEED, align="center", pause=0.6, gap=200)
 
-    def _abbrs(self, c, g, x0, x1, detailed):
-        away, home = g["away"], g["home"]
+    def _team_columns(self, c, g, col, detailed):
+        """Logo with the team abbreviation centered underneath, for each side."""
+        from .football_layouts import small_logo
+        H, W = c.height, c.width
+        size = H - 8
         show_rank = self.league in COLLEGE and self.cfg.get("show_rankings", True)
-        x = x0 + 1
-        if show_rank and away["rank"]:
-            x += c.text(x, 2, str(away["rank"]), "4x6", GRAY) + 1
-        aw = c.text(x, 0, away["abbr"], "5x8", team_color(away))
-        a_end = x + aw
-        hw = c.text_width(home["abbr"], "5x8")
-        hx = x1 - 1 - hw
-        if show_rank and home["rank"]:
-            rw = c.text_width(str(home["rank"]), "4x6")
-            c.text(x1 - 1 - rw, 2, str(home["rank"]), "4x6", GRAY)
-            hx -= rw + 1
-        c.text(hx, 0, home["abbr"], "5x8", team_color(home))
-        if g["state"] != "in" or not detailed:
-            return
-        # possession marker (football)
-        if g["possession"]:
-            col = RED if g["redzone"] else YELLOW
-            if g["possession"] == "away":
-                c.rect(a_end + 1, 2, a_end + 2, 4, col)
-            else:
-                c.rect(hx - 3, 2, hx - 2, 4, col)
-        # red cards (soccer)
-        for i in range(min(3, away["red_cards"])):
-            c.rect(a_end + 2 + i * 3, 1, a_end + 3 + i * 3, 4, RED)
-        for i in range(min(3, home["red_cards"])):
-            c.rect(hx - 4 - i * 3, 1, hx - 3 - i * 3, 4, RED)
+        for side, cx0 in (("away", 0), ("home", W - col)):
+            team = g[side]
+            c.paste(small_logo(self, team, size), cx0 + (col - size) // 2, 0)
+            rank = str(team["rank"]) if show_rank and team["rank"] else ""
+            aw = c.text_width(team["abbr"], "5x8")
+            rw = c.text_width(rank, "4x6") + 1 if rank else 0
+            x = cx0 + (col - aw - rw) // 2
+            if rank:
+                c.text(x, H - 7, rank, "4x6", GRAY)
+                x += rw
+            c.text(x, H - 8, team["abbr"], "5x8", team_color(team))
+            if g["state"] != "in" or not detailed:
+                continue
+            # markers in the team's column: possession (football), red cards (soccer)
+            inner = cx0 + col - 3 if side == "away" else cx0 + 1
+            if g["possession"] == side:
+                c.rect(inner, H - 6, inner + 1, H - 4, RED if g["redzone"] else YELLOW)
+            for i in range(min(3, team["red_cards"])):
+                c.rect(inner, 1 + i * 5, inner + 1, 4 + i * 5, RED)
 
-    def _scores_draw(self, c, g, mid):
+    def _scores_draw(self, c, g, mid, y=9):
         away, home = g["away"], g["home"]
         a_s, h_s = str(away["score"]), str(home["score"])
         if self.cfg.get("hide_favorite_score") and self.is_favorite(g):
@@ -495,25 +514,30 @@ class LeagueBoard(Board):
                 h_col = YELLOW
         font = "7x13B"
         dash_w = c.text_width("-", font)
-        c.text(mid - dash_w // 2, 9, "-", font, GRAY)
-        c.text_right(mid - dash_w // 2 - 1, 9, a_s, font, a_col)
-        c.text(mid + dash_w // 2 + 2, 9, h_s, font, h_col)
+        c.text(mid - dash_w // 2, y, "-", font, GRAY)
+        c.text_right(mid - dash_w // 2 - 1, y, a_s, font, a_col)
+        c.text(mid + dash_w // 2 + 2, y, h_s, font, h_col)
 
     def _live_graphics(self, c, g, x0, x1, mid):
+        """Extras in the band between the score and the info line (y 16-22)."""
         if self.sport == "football":
-            # timeouts: three dots under each team's abbreviation
-            for side, xs in (("away", x0 + 1), ("home", x1 - 9)):
+            for side, xs in (("away", x0 + 2), ("home", x1 - 10)):
                 n = g["timeouts"].get(side)
                 if isinstance(n, int):
                     for i in range(3):
-                        c.rect(xs + i * 3, 23, xs + i * 3 + 1, 23, YELLOW if i < n else DIM)
+                        c.rect(xs + i * 3, 18, xs + i * 3 + 1, 18, YELLOW if i < n else DIM)
         elif self.sport == "baseball":
-            _bases(c, mid - 2, 0, g["bases"])
+            _bases(c, mid - 4, 16, g["bases"])
             outs = g["outs"]
             if isinstance(outs, int):
                 for i in range(3):
-                    x = mid + 6 + i * 3
-                    c.rect(x, 3, x + 1, 4, RED if i < outs else DIM)
+                    x = mid + 4 + i * 3
+                    c.rect(x, 19, x + 1, 20, RED if i < outs else DIM)
+
+    def _date_text(self, g):
+        if not g["start"]:
+            return ""
+        return g["start"].astimezone().strftime("%a %b %-d").upper()
 
     def _info_items(self, g):
         """Lines for the bottom info row; they rotate every few seconds."""
@@ -600,6 +624,27 @@ class LeagueBoard(Board):
         if (local.date() - now.date()).days < 7:
             return local.strftime("%a").upper() + " " + hm
         return local.strftime("%-m/%-d ") + hm
+
+
+def live_layouts(sport):
+    """{layout key: label} for sports that have graphical live layouts."""
+    if sport == "football":
+        from .football_layouts import LAYOUTS
+        return LAYOUTS
+    if sport == "baseball":
+        from .baseball_layouts import LAYOUTS
+        return LAYOUTS
+    return {}
+
+
+def live_renderers(sport):
+    if sport == "football":
+        from .football_layouts import RENDERERS
+        return RENDERERS
+    if sport == "baseball":
+        from .baseball_layouts import RENDERERS
+        return RENDERERS
+    return {}
 
 
 def _cycle(c, items, t, avail, font="5x7"):

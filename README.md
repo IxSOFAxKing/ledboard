@@ -81,6 +81,17 @@ With **detailed live info** on, the bottom line rotates through the game clock a
 | **Scorebug** | TV-style solid team-color panels with the score, timeout bars and a football icon for possession. The center shows the clock, down and distance, the spot and a mini field. |
 | **Drive** | Small logos and big scores, an arrow for the drive direction, a win-probability bar in team colors (when ESPN provides it), and a full-width field along the bottom |
 
+**Baseball live layouts.** The MLB board has the same **Live game layout** setting:
+
+| Layout | What it shows |
+|---|---|
+| **Classic** | Logos, the score, a small diamond with outs, and a rotating info line |
+| **Scorebug** | TV-style: stacked teams with team-color bars, a big diamond with base runners, the inning (▲/▼) and B/S/O count dots, plus a pitcher / batter / last-play ticker |
+| **Line Score** | Runs by inning plus R/H/E, with the current inning highlighted. A strip underneath shows the inning, base runners, count and outs. |
+| **Matchup** | Small logos and big scores, then pitcher vs. batter (with their stats for the game when ESPN sends them), a diamond and the count. It alternates with the last play. |
+
+**Classic view.** Every sport's standard view puts each team's abbreviation (and AP rank for college) under its logo.
+
 > **Note:** The live details read optional fields from ESPN's unofficial API. If ESPN doesn't send a field for a game, that detail is simply left out.
 
 Upgrading from an earlier LEDBoard with a single "Sports" board moves your settings over automatically. Each league keeps its favorites and on/off state, and the old config is saved as `config.json.bak`.
