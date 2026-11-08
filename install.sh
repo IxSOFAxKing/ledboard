@@ -18,6 +18,19 @@ python3 -m venv "$DIR/venv"
 "$DIR/venv/bin/pip" install --upgrade pip wheel
 "$DIR/venv/bin/pip" install -r "$DIR/requirements.txt"
 
+# Prefer a pre-built wheel (built by .github/workflows/rgbmatrix-wheels.yml) so the Pi
+# doesn't have to compile anything. Falls back to compiling if none matches.
+if ! "$DIR/venv/bin/python" -c "import rgbmatrix" 2>/dev/null; then
+  REPO=$(git -C "$DIR" config --get remote.origin.url 2>/dev/null | sed -E 's#(\.git)?$##; s#.*github\.com[:/]##')
+  REPO=${REPO:-IxSOFAxKing/ledboard}
+  echo "==> Looking for a pre-built rgbmatrix wheel in $REPO"
+  if WHEEL=$("$DIR/venv/bin/python" "$DIR/deploy/fetch_wheel.py" "$REPO" "$DIR/.build/wheels"); then
+    echo "    Installing $(basename "$WHEEL")"
+    "$DIR/venv/bin/pip" install "$WHEEL" || echo "    Pre-built wheel didn't install; will compile instead"
+  fi
+fi
+
+if ! "$DIR/venv/bin/python" -c "import rgbmatrix" 2>/dev/null; then
 MEM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
 JOBS=$(nproc)
 if [ "$MEM_MB" -lt 1500 ]; then
@@ -45,6 +58,7 @@ if ! "$DIR/venv/bin/python" -c "import rgbmatrix" 2>/dev/null; then
     git clone --depth 1 https://github.com/hzeller/rpi-rgb-led-matrix.git "$SRC"
   fi
   "$DIR/venv/bin/pip" install -v "$SRC" 2>&1 | grep --line-buffered -E "Building|\[ *[0-9]+%\]|error|Successfully" || true
+fi
 fi
 if ! "$DIR/venv/bin/python" -c "import rgbmatrix; print('rgbmatrix OK')"; then
   echo "!! Building the rgbmatrix bindings failed. Re-run with full output to see why:"

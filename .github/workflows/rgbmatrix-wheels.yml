@@ -1,0 +1,98 @@
+# Pre-compiles the hzeller/rpi-rgb-led-matrix Python bindings for Raspberry Pi OS
+# so install.sh can download them instead of compiling on the Pi.
+# Run it from the Actions tab ("Run workflow"); results go to the
+# "rgbmatrix-wheels" release.
+name: Build rgbmatrix wheels
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "rpi-rgb-led-matrix git ref (branch, tag or commit)"
+        default: "master"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.os }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 32-bit Raspberry Pi OS (armhf) - built under QEMU emulation
+          - { arch: armv7l,  platform: linux/arm/v7, os: bookworm, runner: ubuntu-24.04 }
+          - { arch: armv7l,  platform: linux/arm/v7, os: trixie,   runner: ubuntu-24.04 }
+          # 64-bit Raspberry Pi OS - built natively on ARM runners
+          - { arch: aarch64, platform: linux/arm64,  os: bookworm, runner: ubuntu-24.04-arm }
+          - { arch: aarch64, platform: linux/arm64,  os: trixie,   runner: ubuntu-24.04-arm }
+    steps:
+      - uses: docker/setup-qemu-action@v3
+        if: matrix.arch == 'armv7l'
+        with:
+          platforms: arm
+
+      - name: Build and test wheel
+        run: |
+          mkdir -p out
+          docker run --rm --platform ${{ matrix.platform }} -v "$PWD/out:/out" \
+            -e REF="${{ github.event.inputs.ref || 'master' }}" -e ARCH="${{ matrix.arch }}" \
+            debian:${{ matrix.os }} bash -euxc '
+              apt-get update
+              apt-get install -y --no-install-recommends python3 python3-dev python3-venv \
+                git build-essential cmake ninja-build ca-certificates file
+              git clone https://github.com/hzeller/rpi-rgb-led-matrix /src
+              git -C /src checkout "$REF"
+              git -C /src rev-parse HEAD > /out/COMMIT
+              python3 -m venv /v
+              /v/bin/pip install -U pip wheel
+              /v/bin/pip wheel /src -w /build -v
+              cd /build
+              if [ "$ARCH" = armv7l ]; then
+                # also tag for 32-bit userland on a 64-bit kernel (reports armv8l)
+                /v/bin/wheel tags --remove --platform-tag linux_armv7l.linux_armv8l rgbmatrix-*.whl
+              fi
+              cp rgbmatrix-*.whl /out/
+              # smoke test: install the wheel and import the compiled modules
+              /v/bin/pip install /out/rgbmatrix-*.whl
+              cd /
+              /v/bin/python -c "import rgbmatrix, rgbmatrix.graphics; from rgbmatrix import RGBMatrix, RGBMatrixOptions; o = RGBMatrixOptions(); print(\"import OK\", rgbmatrix.__file__)"
+              for so in $(/v/bin/python -c "import rgbmatrix, os; d=os.path.dirname(rgbmatrix.__file__); print(\" \".join(os.path.join(d,f) for f in os.listdir(d) if f.endswith(\".so\")))"); do
+                file "$so"; ldd "$so"
+              done
+            '
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.arch }}-${{ matrix.os }}
+          path: out/
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish to the rgbmatrix-wheels release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -l dist
+          COMMIT=$(cat dist/COMMIT)
+          NOTES="Pre-built rpi-rgb-led-matrix Python bindings (hzeller/rpi-rgb-led-matrix@${COMMIT}) for Raspberry Pi OS Bookworm (Python 3.11) and Trixie (Python 3.13), 32-bit and 64-bit. install.sh downloads these automatically. Licensed GPL-2.0-or-later; source: https://github.com/hzeller/rpi-rgb-led-matrix/tree/${COMMIT}"
+          if gh release view rgbmatrix-wheels >/dev/null 2>&1; then
+            gh release edit rgbmatrix-wheels --notes "$NOTES"
+            # drop old wheels so only the new build remains
+            for a in $(gh release view rgbmatrix-wheels --json assets --jq '.assets[].name'); do
+              gh release delete-asset rgbmatrix-wheels "$a" -y
+            done
+          else
+            gh release create rgbmatrix-wheels --title "rgbmatrix wheels" --notes "$NOTES" --target "$GITHUB_SHA"
+          fi
+          gh release upload rgbmatrix-wheels dist/*.whl --clobber

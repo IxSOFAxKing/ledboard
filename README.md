@@ -25,7 +25,7 @@ sudo ./install.sh
 
 The installer does the following:
 
-- Creates a Python venv and builds the [hzeller/rpi-rgb-led-matrix](https://github.com/hzeller/rpi-rgb-led-matrix) Python bindings. This takes a few minutes.
+- Creates a Python venv and installs the [hzeller/rpi-rgb-led-matrix](https://github.com/hzeller/rpi-rgb-led-matrix) Python bindings. It downloads a pre-built copy from this repo's `rgbmatrix-wheels` release, which takes seconds. It only compiles on the Pi if no pre-built copy matches your OS. To rebuild the pre-built copies, run the **Build rgbmatrix wheels** workflow from the Actions tab.
 - **Imports your panel settings from `/etc/sportsmatrix.conf`** if you were running rgb-led-matrix-sports-premium. This covers the hardware mapping, chain length, brightness and so on.
 - Offers to **stop and disable the `sportsmatrix` service**, because only one program can drive the panels at a time. To go back later, run `sudo systemctl disable --now ledboard && sudo systemctl enable --now sportsmatrix`.
 - Blacklists the onboard sound driver if it's loaded, which the matrix library requires. That step needs a reboot.
