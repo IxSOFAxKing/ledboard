@@ -7,6 +7,8 @@ CONF=/etc/ledboard/config.json
 if [ "$(id -u)" -ne 0 ]; then echo "Please run with sudo: sudo ./install.sh"; exit 1; fi
 
 echo "==> Installing system packages"
+# Finish any package install that was interrupted earlier (otherwise apt refuses to run)
+dpkg --configure -a
 apt-get update
 apt-get install -y python3-venv python3-dev cython3 git build-essential cmake \
   libjpeg-dev zlib1g-dev libfreetype6-dev
