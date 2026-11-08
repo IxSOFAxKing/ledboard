@@ -24,11 +24,16 @@ class Updater:
         threading.Thread(target=self._auto_check, name="update-check", daemon=True).start()
 
     # -- helpers --------------------------------------------------------------------
-    def _git(self, *args, timeout=60):
+    def _git(self, *args, timeout=60, strip=True):
         r = subprocess.run(["git", "-C", REPO, *args], capture_output=True, text=True, timeout=timeout)
         if r.returncode != 0:
             raise RuntimeError((r.stderr or r.stdout).strip() or f"git {' '.join(args)} failed")
-        return r.stdout.strip()
+        return r.stdout.strip() if strip else r.stdout
+
+    def _local_changes(self):
+        # porcelain lines are "XY path"; don't strip, the first column can be a space
+        out = self._git("status", "--porcelain", "--untracked-files=no", strip=False)
+        return [line[3:] for line in out.splitlines() if line.strip()]
 
     def available(self):
         return os.path.isdir(os.path.join(REPO, ".git"))
@@ -62,7 +67,7 @@ class Updater:
                 self._git("fetch", "--quiet", "origin", branch, timeout=90)
                 behind = int(self._git("rev-list", "--count", f"HEAD..origin/{branch}") or 0)
                 changes = self._git("log", "--format=%s", "-n", "15", f"HEAD..origin/{branch}").splitlines() if behind else []
-                dirty = [line[3:] for line in self._git("status", "--porcelain", "--untracked-files=no").splitlines()]
+                dirty = self._local_changes()
                 self.info = {"behind": behind, "changes": changes, "local_changes": dirty, "error": None,
                              "latest": self._git("rev-parse", "--short", f"origin/{branch}")}
             except Exception as e:
@@ -88,9 +93,9 @@ class Updater:
     def _apply(self):
         try:
             branch = self._git("rev-parse", "--abbrev-ref", "HEAD")
-            dirty = self._git("status", "--porcelain", "--untracked-files=no")
+            dirty = self._local_changes()
             if dirty:
-                raise RuntimeError("files in /opt/ledboard were edited locally; not overwriting them:\n" + dirty)
+                raise RuntimeError("these files were edited on the Pi; not overwriting them: " + ", ".join(dirty))
             self._step(f"Downloading the latest version ({branch})…")
             before = self._git("rev-parse", "--short", "HEAD")
             self._step(self._git("pull", "--ff-only", "origin", branch, timeout=180) or "pulled")
