@@ -75,6 +75,9 @@
   </section>
 
   <section id="tab-schedule" class="tab">
+    <div class="card"><h3>Home Assistant (MQTT)</h3><div id="mqtt-status" class="muted small" style="margin-bottom:10px"></div><div id="mqtt-form" class="form"></div>
+      <p class="muted small">Uses your Home Assistant MQTT broker (e.g. the Mosquitto add-on). LEDBoard then appears under Settings → Devices as <b>LEDBoard</b> with a Display light, Board selector, Pause, Next, Message and an Alert notify entity.</p>
+    </div>
     <div class="card"><h3>Send an alert</h3><div id="alert-form" class="form"></div>
       <p class="muted small">Alerts interrupt the display with an animated icon. <b>Critical</b> alerts repeat every minute (and wake the display) until dismissed. Home Assistant can send them through MQTT or <code>POST /api/alert</code>.</p>
     </div>

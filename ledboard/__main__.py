@@ -36,6 +36,9 @@ def main(argv=None):
     from .web import serve
 
     engine = Engine(cfg, simulate=a.simulate)
+    from .mqtt_ha import MQTTBridge
+    engine.mqtt = MQTTBridge(engine)
+    engine.mqtt.start()
     web = cfg.data["web"]
     srv = serve(engine, web.get("host", "0.0.0.0"), a.port or int(web.get("port", 8080)))
 
@@ -46,6 +49,7 @@ def main(argv=None):
     try:
         engine.run()
     finally:
+        engine.mqtt.stop()
         srv.shutdown()
     if engine.restart_requested:
         import os

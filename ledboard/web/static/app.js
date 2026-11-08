@@ -128,6 +128,8 @@ async function pollState() {
   }
   renderStatus();
   renderActiveAlerts(st.alerts || []);
+  const mq = st.mqtt || {};
+  $("#mqtt-status").textContent = !mq.enabled ? "Off" : mq.connected ? `✅ Connected to ${mq.broker}` : `⚠ Not connected${mq.error ? " — " + mq.error : " (connecting…)"}`;
   const sa = document.querySelector("[data-spotify-status]");
   if (sa) sa.textContent = st.boards.spotify.connected ? "✅ Connected" : "Not connected";
 }
@@ -453,7 +455,17 @@ function renderOtherTabs() {
     { key: "mode", label: "During quiet hours", type: "select", options: ["dim", "off"] },
     { key: "brightness", label: "Dimmed brightness", type: "number" },
   ].map((f) => renderField(draft.schedule, f)));
-  draft.scroll = draft.scroll || { speed: 20, gap: 16 };
+  draft.mqtt = draft.mqtt || {};
+  $("#mqtt-form").replaceChildren(...renderForm(draft.mqtt, [
+    { key: "enabled", label: "Connect to Home Assistant via MQTT", type: "bool" },
+    { key: "host", label: "Broker host", type: "text", show_if: { enabled: true }, help: "Your Home Assistant's IP or homeassistant.local" },
+    { key: "port", label: "Port", type: "number", show_if: { enabled: true } },
+    { key: "username", label: "Username", type: "text", show_if: { enabled: true }, help: "An MQTT user (in HA: a person/user allowed to use MQTT)" },
+    { key: "password", label: "Password", type: "password", show_if: { enabled: true } },
+    { key: "device_name", label: "Device name in Home Assistant", type: "text", show_if: { enabled: true } },
+    { key: "base_topic", label: "Topic prefix", type: "text", show_if: { enabled: true }, help: "Change only if you run more than one LEDBoard" },
+  ], renderOtherTabs));
+    draft.scroll = draft.scroll || { speed: 20, gap: 16 };
   $("#defaults-form").replaceChildren(
     renderField(draft.scroll, { key: "speed", label: "Scroll mode speed (pixels per second)", type: "number",
       help: "Used by every board in scroll mode unless that board sets its own speed." }),

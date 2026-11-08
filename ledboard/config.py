@@ -37,6 +37,8 @@ DEFAULTS = {
         "reserve_cpu_core": True,
     },
     "web": {"host": "0.0.0.0", "port": 8080, "password": ""},
+    "mqtt": {"enabled": False, "host": "", "port": 1883, "username": "", "password": "",
+             "discovery_prefix": "homeassistant", "base_topic": "ledboard", "device_name": "LEDBoard"},
     "schedule": {
         "enabled": False,
         "start": "22:00",

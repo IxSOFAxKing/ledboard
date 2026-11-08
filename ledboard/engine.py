@@ -76,6 +76,8 @@ class Engine:
                 b.poke()
             self._applied_brightness = None
             self.cur = None  # re-evaluate rotation right away
+        if getattr(self, "mqtt", None):
+            self.mqtt.reload()
 
     def save_board_value(self, board, key, value):
         self.config.update({"boards": {board: {key: value}}})
@@ -375,6 +377,7 @@ class Engine:
             "overlay": self.overlay["text"] if self.overlay else None,
             "alert": self.alerts.current.title if self.alerts.current else None,
             "alerts": self.alerts.active(),
+            "mqtt": self.mqtt.status() if getattr(self, "mqtt", None) else {"enabled": False},
             "fps": round(self.fps_measured, 1),
             "perf": self.perf_info(),
             "boards": {n: b.status() for n, b in self.boards.items()},
