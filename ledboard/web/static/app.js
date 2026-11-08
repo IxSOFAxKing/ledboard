@@ -129,6 +129,9 @@ async function pollState() {
   renderStatus();
   renderActiveAlerts(st.alerts || []);
   $("#btn-update-badge").classList.toggle("hidden", !st.update_available);
+  const sun = st.sun;
+  $("#sun-status").textContent = !sun ? "" : sun.error ? "⚠ " + sun.error :
+    `Sun ${sun.elevation}° ${sun.elevation >= 0 ? "above" : "below"} the horizon → brightness ${sun.brightness}`;
   const mq = st.mqtt || {};
   $("#mqtt-status").textContent = !mq.enabled ? "Off" : mq.connected ? `✅ Connected to ${mq.broker}` : `⚠ Not connected${mq.error ? " — " + mq.error : " (connecting…)"}`;
   const sa = document.querySelector("[data-spotify-status]");
@@ -514,9 +517,18 @@ function renderOtherTabs() {
     { key: "enabled", label: "Enable quiet hours", type: "bool" },
     { key: "start", label: "Start (HH:MM, 24h)", type: "text" },
     { key: "end", label: "End (HH:MM, 24h)", type: "text" },
-    { key: "mode", label: "During quiet hours", type: "select", options: ["dim", "off"] },
+    { key: "mode", label: "During quiet hours", type: "select", options: ["dim", "off", "ambient"],
+      option_labels: { dim: "Dim the display", off: "Turn the display off", ambient: "Show ambient animations (dimmed)" } },
     { key: "brightness", label: "Dimmed brightness", type: "number" },
   ].map((f) => renderField(draft.schedule, f)));
+  draft.auto_brightness = draft.auto_brightness || {};
+  $("#sun-form").replaceChildren(...renderForm(draft.auto_brightness, [
+    { key: "follow_sun", label: "Follow the sun", type: "bool", help: "Uses the brightness slider during the day and eases down to the night level after sunset." },
+    { key: "night", label: "Night brightness", type: "number", show_if: { follow_sun: true } },
+    { key: "latitude", label: "Latitude", type: "number", placeholder: "Weather board's", show_if: { follow_sun: true } },
+    { key: "longitude", label: "Longitude", type: "number", placeholder: "Weather board's", show_if: { follow_sun: true },
+      help: "Leave blank to use the Weather board's location." },
+  ], renderOtherTabs));
   draft.mqtt = draft.mqtt || {};
   $("#mqtt-form").replaceChildren(...renderForm(draft.mqtt, [
     { key: "enabled", label: "Connect to Home Assistant via MQTT", type: "bool" },

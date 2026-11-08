@@ -1,3 +1,4 @@
+from .ambient import AmbientBoard
 from .base import COMMON_DEFAULTS, COMMON_FIELDS
 
 __all__ = ["BOARD_CLASSES", "LEAGUES", "LeagueBoard", "board_defaults", "board_fields", "migrate"]
@@ -11,7 +12,7 @@ from .spotify import SpotifyBoard
 from .weather import WeatherBoard
 
 BOARD_CLASSES = {cls.name: cls for cls in (
-    *LEAGUE_BOARDS, WeatherBoard, SpotifyBoard, PlexBoard, HomeAssistantBoard, KlipperBoard, ClockBoard, MessageBoard)}
+    *LEAGUE_BOARDS, WeatherBoard, SpotifyBoard, PlexBoard, HomeAssistantBoard, KlipperBoard, ClockBoard, AmbientBoard, MessageBoard)}
 
 
 def board_defaults():

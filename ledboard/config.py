@@ -43,10 +43,11 @@ DEFAULTS = {
         "enabled": False,
         "start": "22:00",
         "end": "07:00",
-        "mode": "dim",          # "dim" or "off"
+        "mode": "dim",          # "dim", "off" or "ambient"
         "brightness": 15,
     },
-    "scroll": {"speed": 20, "gap": 16},   # used by boards whose own scroll settings are blank
+    "scroll": {"speed": 20, "gap": 16},
+    "auto_brightness": {"follow_sun": False, "night": 15, "latitude": "", "longitude": ""},   # used by boards whose own scroll settings are blank
     "fallback_board": "clock",  # shown when no board has anything to display
     "rotation": [],             # defaults to the board registry order
     "boards": {},               # filled from each board's DEFAULTS

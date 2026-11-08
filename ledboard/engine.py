@@ -247,16 +247,52 @@ class Engine:
         cur = self.alerts.current
         return bool((cur and cur.priority >= PRIORITIES["critical"]) or self.alerts.next_due(PRIORITIES["critical"]))
 
+    def _sun_location(self):
+        a = self.cfg.get("auto_brightness", {})
+        lat, lon = a.get("latitude"), a.get("longitude")
+        if lat in ("", None) or lon in ("", None):         # fall back to the Weather board's location
+            w = self.cfg["boards"].get("weather", {})
+            lat, lon = w.get("latitude"), w.get("longitude")
+        try:
+            return float(lat), float(lon)
+        except (TypeError, ValueError):
+            return None
+
+    def _base_brightness(self):
+        """Configured brightness, or the sun-following value (recomputed once a minute)."""
+        day = int(self.cfg["display"]["brightness"])
+        a = self.cfg.get("auto_brightness", {})
+        if not a.get("follow_sun"):
+            self.sun_info = None
+            return day
+        now = time.monotonic()
+        cache = getattr(self, "_sun_cache", None)
+        if cache and now - cache[0] < 60 and cache[1] == (day, a.get("night")):
+            return cache[2]
+        loc = self._sun_location()
+        if not loc:
+            self.sun_info = {"error": "Set a location (here or on the Weather board)"}
+            return day
+        from .sun import solar_elevation, sun_brightness
+        elev = solar_elevation(*loc)
+        value = sun_brightness(elev, day, int(a.get("night", 15) or 1))
+        self.sun_info = {"elevation": round(elev, 1), "brightness": value}
+        self._sun_cache = (now, (day, a.get("night")), value)
+        return value
+
+    def _quiet_mode(self):
+        return self.cfg["schedule"].get("mode", "dim") if self._in_quiet_hours() else None
+
     def _effective(self):
-        """(power_on, brightness) after manual power + schedule."""
-        bright = int(self.cfg["display"]["brightness"])
+        """(power_on, brightness) after manual power, sun-following brightness and quiet hours."""
+        bright = self._base_brightness()
         if not self.power:
             return False, bright
-        if self._in_quiet_hours():
-            s = self.cfg["schedule"]
-            if s.get("mode") == "off":
-                return False, bright
-            return True, int(s.get("brightness", 15))
+        mode = self._quiet_mode()
+        if mode == "off":
+            return False, bright
+        if mode in ("dim", "ambient"):
+            return True, int(self.cfg["schedule"].get("brightness", 15))
         return True, bright
 
     # -- main loop ---------------------------------------------------------------
@@ -268,6 +304,9 @@ class Engine:
         self._at_boundary = False
         if alert:
             render_alert(c, alert, at)
+            return c.image
+        if self._quiet_mode() == "ambient" and "ambient" in self.boards:
+            self.boards["ambient"].render(c, None, now)          # quiet hours: ambient only
             return c.image
         if self.overlay:
             if now < self.overlay["until"]:
@@ -372,6 +411,7 @@ class Engine:
             "simulated": self.display.simulated,
             "power": self.power, "display_on": on, "brightness": bright,
             "quiet_hours": self._in_quiet_hours(),
+            "sun": getattr(self, "sun_info", None),
             "paused": self.paused, "takeover": self.takeover_active,
             "current": {"board": cur[0], "slide": cur[2] + 1, "slides": len(cur[1])} if cur else None,
             "overlay": self.overlay["text"] if self.overlay else None,
