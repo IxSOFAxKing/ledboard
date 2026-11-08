@@ -179,6 +179,12 @@ Leave the time's size blank and it grows as large as fits around the other lines
 
 Time left averages the file-progress estimate and the slicer's estimate, the way Mainsail does.
 
+**When the board shows:**
+- **Printing or paused:** always.
+- **Finished:** for the configured number of minutes after the print *actually* ended. The end time comes from Moonraker's job history, so restarting LEDBoard or power-cycling the printer doesn't restart the timer.
+- **Switched off:** never. That covers Klipper being unable to reach the printer and the printer's computer being unreachable.
+- **Failure:** if Klipper loses the printer in the middle of a print, the error shows for the same window.
+
 ### Plex
 1. Enter your server URL, for example `http://192.168.1.10:32400`.
 2. Enter your **X-Plex-Token**. To find it, open Plex Web, go to any item → **⋯** → **Get Info** → **View XML**, and copy the `X-Plex-Token=…` value from the URL.

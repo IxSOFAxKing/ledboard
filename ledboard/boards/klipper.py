@@ -68,9 +68,12 @@ class KlipperBoard(Board):
         self.printer = None          # parsed printer status (dict) or None
         self.meta: dict = {}         # filename -> metadata
         self.thumbs: dict = {}       # filename -> PIL image
-        self.finished_at = None
+        self.finished_at = None      # epoch when the last print ended (None = not finished)
+        self.error_at = None         # epoch when a print failed
         self.fetched_at = 0
-        self._last_state = None
+        self.connection = None       # Moonraker's klippy_state, or "offline"
+        self._history_for = None     # (filename, state) the cached history lookup belongs to
+        self._history_end = None
 
     # -- data -----------------------------------------------------------------
     def _base(self):
@@ -84,10 +87,40 @@ class KlipperBoard(Board):
         if not self._base():
             self.printer = None
             return
-        q = "&".join(OBJECTS)
-        r = requests.get(f"{self._base()}/printer/objects/query?{q}", headers=self._headers(), timeout=8)
+        prev = self.printer["state"] if self.printer else None
+        # 1) Is Moonraker reachable, and is Klipper connected to the printer?
+        try:
+            r = requests.get(f"{self._base()}/server/info", headers=self._headers(), timeout=8)
+        except requests.RequestException:
+            # printer (or its Pi) is off: forget everything so nothing stale is shown
+            self.printer = {"state": "offline", "klippy_message": ""}
+            self.connection = "offline"
+            return
         if r.status_code in (401, 403):
             raise RuntimeError("Moonraker refused the request - set the API key")
+        r.raise_for_status()
+        info = r.json().get("result", {})
+        klippy = info.get("klippy_state", "ready")
+        self.connection = klippy
+        if klippy != "ready":
+            # Klipper can't talk to the printer: normally the printer is just switched off.
+            # Only if that happened in the middle of a print is it worth showing (as a failure).
+            if prev in ("printing", "paused"):
+                self.error_at = time.time()
+                old = dict(self.printer)
+                old.update(state="error", klippy_message=info.get("state_message") or f"Klipper {klippy}")
+                self.printer = old
+            elif prev == "error" and self.error_at:
+                pass        # keep showing the failure until its window runs out
+            else:
+                self.printer = {"state": "off", "klippy_message": info.get("state_message", "")}
+            return
+        # 2) Klipper is ready: full status
+        q = "&".join(OBJECTS)
+        r = requests.get(f"{self._base()}/printer/objects/query?{q}", headers=self._headers(), timeout=8)
+        if r.status_code == 503:         # Klipper went away between the two requests
+            self.printer = {"state": "off", "klippy_message": ""}
+            return
         r.raise_for_status()
         st = self.parse(r.json().get("result", {}).get("status", {}))
         fn = st["filename"]
@@ -96,11 +129,39 @@ class KlipperBoard(Board):
             if self.cfg.get("show_thumbnail", True):
                 self.thumbs[fn] = self._thumbnail(fn, self.meta[fn])
         st["meta"] = self.meta.get(fn) or {}
-        if st["state"] == "complete" and self._last_state != "complete":
-            self.finished_at = time.time()
-        self._last_state = st["state"]
+        if st["state"] in ("complete", "error", "cancelled"):
+            # when did it really end? Moonraker's job history knows, even across our restarts
+            if self._history_for != (fn, st["state"]):
+                self._history_end = self._history_end_time(fn)
+                self._history_for = (fn, st["state"])
+            end = self._history_end
+            if end:
+                self.finished_at = end
+            elif prev in ("printing", "paused"):
+                self.finished_at = time.time()      # saw it finish ourselves
+            elif self.finished_at is None:
+                self.finished_at = 0                # finished before we started watching: don't show
+            if st["state"] == "error" and not self.error_at:
+                self.error_at = self.finished_at
+        else:
+            self.finished_at = None
+            self.error_at = None
+            self._history_for = None
         self.printer = st
         self.fetched_at = time.time()
+
+    def _history_end_time(self, fn):
+        """End time (epoch) of the most recent job for this file, from Moonraker's history."""
+        try:
+            r = requests.get(f"{self._base()}/server/history/list", params={"limit": 1, "order": "desc"},
+                             headers=self._headers(), timeout=8)
+            r.raise_for_status()
+            jobs = r.json().get("result", {}).get("jobs") or []
+        except (requests.RequestException, ValueError):
+            return None
+        if jobs and jobs[0].get("end_time") and (not fn or jobs[0].get("filename") == fn):
+            return float(jobs[0]["end_time"])
+        return None
 
     @staticmethod
     def parse(s):
@@ -115,11 +176,9 @@ class KlipperBoard(Board):
         if not progress and disp.get("progress"):
             progress = disp.get("progress")
         klippy = hooks.get("state", "ready")
-        state = ps.get("state", "standby")
-        if klippy in ("shutdown", "error"):
-            state = "error"
+        state = ps.get("state", "standby")       # standby printing paused complete cancelled error
         return {
-            "state": state,                                  # standby printing paused complete cancelled error
+            "state": state,
             "klippy_message": hooks.get("state_message", "") if klippy != "ready" else "",
             "message": ps.get("message") or disp.get("message") or "",
             "filename": ps.get("filename") or "",
@@ -169,15 +228,22 @@ class KlipperBoard(Board):
             guesses.append(max(0.0, est - dur))
         return sum(guesses) / len(guesses) if guesses else None
 
+    def _within_window(self, since):
+        window = float(self.cfg.get("show_finished_minutes", 15) or 0) * 60
+        return bool(since) and time.time() - since < window
+
     def _visible_state(self):
         st = self.printer
         if not st:
             return None
         s = st["state"]
-        if s in ("printing", "paused", "error"):
+        if s in ("off", "offline"):
+            return None                         # printer switched off / unreachable: never shown
+        if s in ("printing", "paused"):
             return s
-        if s == "complete" and self.finished_at and \
-                time.time() - self.finished_at < float(self.cfg.get("show_finished_minutes", 15) or 0) * 60:
+        if s == "complete" and self._within_window(self.finished_at):
+            return s
+        if s == "error" and self._within_window(self.error_at or self.finished_at):
             return s
         if self.cfg.get("show_when_idle"):
             return "idle"
@@ -195,6 +261,7 @@ class KlipperBoard(Board):
         s = super().status()
         p = self.printer or {}
         s["printer"] = {k: p.get(k) for k in ("state", "filename", "progress", "nozzle", "bed")} if p else None
+        s["connection"] = self.connection
         return s
 
     # -- drawing ------------------------------------------------------------------
