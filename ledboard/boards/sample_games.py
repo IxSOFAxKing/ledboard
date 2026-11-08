@@ -148,10 +148,25 @@ def make_event(league, sport, state, away, home, teams):
         else:   # soccer
             sa, sh = 1, 2
             comp["status"] = {"type": {"state": "in", "shortDetail": "67'"}, "period": 2, "displayClock": "67'"}
+            aid = teams.get(away, {}).get("id") or away
+            hid = teams.get(home, {}).get("id") or home
+
+            def ev(tid, minute, **kw):
+                return dict({"team": {"id": tid}, "clock": {"displayValue": f"{minute}'", "value": minute * 60}}, **kw)
             comp["details"] = [
-                {"team": {"id": teams.get(away, {}).get("id") or away}, "redCard": True},
-                {"team": {"id": teams.get(home, {}).get("id") or home}, "scoringPlay": True,
-                 "clock": {"displayValue": "61'"}, "athletesInvolved": [{"shortName": "L. Garcia"}]}]
+                ev(hid, 12, scoringPlay=True, athletesInvolved=[{"shortName": "L. Garcia"}]),
+                ev(aid, 29, yellowCard=True, athletesInvolved=[{"shortName": "T. Reed"}]),
+                ev(aid, 38, scoringPlay=True, penaltyKick=True, athletesInvolved=[{"shortName": "M. Silva"}]),
+                ev(hid, 52, yellowCard=True, athletesInvolved=[{"shortName": "D. Park"}]),
+                ev(aid, 58, redCard=True, athletesInvolved=[{"shortName": "T. Reed"}]),
+                ev(hid, 61, scoringPlay=True, athletesInvolved=[{"shortName": "A. Lopez"}])]
+
+            def stats(poss, shots, on, corners, fouls, saves):
+                return [{"name": n, "displayValue": str(v)} for n, v in (
+                    ("possessionPct", poss), ("totalShots", shots), ("shotsOnTarget", on),
+                    ("wonCorners", corners), ("foulsCommitted", fouls), ("saves", saves))]
+            a_extra["statistics"] = stats(41.6, 7, 3, 2, 12, 4)
+            h_extra["statistics"] = stats(58.4, 13, 6, 7, 9, 2)
         comp["situation"] = sit
     comp["competitors"] = [_competitor("home", home, sh if state != "pre" else "", league, teams, h_extra),
                            _competitor("away", away, sa if state != "pre" else "", league, teams, a_extra)]

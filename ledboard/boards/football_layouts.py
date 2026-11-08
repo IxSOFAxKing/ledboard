@@ -37,6 +37,11 @@ def panel_color(team):
     v = min(v, 0.62) if s > 0.2 else min(v, 0.35)
     v = max(v, 0.22)
     r, g, b = colorsys.hsv_to_rgb(h, s, v)
+    # light colors (pink, yellow, sky blue...) need extra darkening for white text to stand out
+    lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    if lum > 0.24:
+        k = 0.24 / lum
+        r, g, b = r * k, g * k, b * k
     return (int(r * 255), int(g * 255), int(b * 255))
 
 

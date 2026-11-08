@@ -141,6 +141,17 @@ With **detailed live info** on, the bottom line rotates through the game clock a
 | **Period Score** | Goals by period (1st / 2nd / 3rd / OT / SO) with the total and shots on goal, and the current period highlighted |
 | **Rink** | A mini hockey rink drawn across the display (boards, red and blue lines, goal creases), with each team's logo and score in its own end and the period, clock and shots in the neutral zone |
 
+**Soccer live layouts** (MLS, Premier League, La Liga, Bundesliga, Serie A, Ligue 1, Champions League). Each league has its own **Live game layout** setting:
+
+| Layout | What it shows |
+|---|---|
+| **Classic** | Logos, the score, red cards, and a rotating info line |
+| **Scorebug** | TV-style: each team's logo, a color bar and a big score, with the match clock (or HT / FT) in the middle. Below that are a possession bar in team colors, yellow and red cards under each team, and a ticker of goal scorers (with penalty/own-goal markers) and match stats. |
+| **Match Stats** | A compact scoreline, then head-to-head comparison bars for possession, shots, shots on target, corners, fouls and saves. It pages through them if there are more than three. |
+| **Timeline** | The match as a line from 0 to 90 minutes (120 in extra time), filled in up to the current minute, with goals and cards at the minute they happened: one team above the line, the other below |
+
+Match stats and events come from ESPN when it provides them. If it doesn't, those parts are simply left out.
+
 **Goal celebration.** When a team scores, an NHL or soccer game shows a flashing **GOAL!** with the team's logo and colors for a few seconds. Turn it off with **Goal celebration** on the league's board.
 
 **Previewing games.** Every league board has **Preview** buttons: Live game, Upcoming, Final, and All three. They're useful in the off-season.

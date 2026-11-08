@@ -139,6 +139,14 @@ def parse_event(ev, league_key):
             "hits": c.get("hits"),
             "errors": c.get("errors"),
             "shots": _stat(c, "shotsTotal", "shots", "shotsOnGoal", "SOG"),
+            # soccer match stats (None when ESPN doesn't send them)
+            "possession": _fnum(_stat(c, "possessionPct", "possession")),
+            "shots_total": _fnum(_stat(c, "totalShots", "shotsTotal")),
+            "shots_on": _fnum(_stat(c, "shotsOnTarget", "shotsOnGoal")),
+            "corners": _fnum(_stat(c, "wonCorners", "cornerKicks", "corners")),
+            "fouls": _fnum(_stat(c, "foulsCommitted", "fouls")),
+            "saves": _fnum(_stat(c, "saves")),
+            "yellow_cards": 0,
             "leaders": leaders,
             "red_cards": 0,
             "linescore": _linescore(c.get("linescores")),
@@ -206,16 +214,45 @@ def parse_event(ev, league_key):
     hw, aw = prob.get("homeWinPercentage"), prob.get("awayWinPercentage")
     game["win_prob"] = (float(aw), float(hw)) if isinstance(hw, (int, float)) and isinstance(aw, (int, float)) else None
     # soccer: goals / cards are listed in competition "details"
+    game["events"] = []
     for d in comp.get("details") or []:
         tid = str((d.get("team") or {}).get("id", ""))
         side = "home" if tid == teams["home"]["id"] else "away" if tid == teams["away"]["id"] else None
+        clock = d.get("clock") or {}
+        minute_txt = clock.get("displayValue", "")
+        who = _athlete((d.get("athletesInvolved") or [{}])[0])
         if d.get("redCard") and side:
             teams[side]["red_cards"] += 1
+        if d.get("yellowCard") and side:
+            teams[side]["yellow_cards"] += 1
+        kind = ("goal" if d.get("scoringPlay") else "red" if d.get("redCard") else
+                "yellow" if d.get("yellowCard") else None)
+        if kind and side:
+            game["events"].append({"kind": kind, "side": side, "minute": _minute(minute_txt, clock.get("value")),
+                                   "minute_txt": minute_txt, "player": who,
+                                   "own_goal": bool(d.get("ownGoal")), "penalty": bool(d.get("penaltyKick"))})
         if d.get("scoringPlay"):
-            who = _athlete((d.get("athletesInvolved") or [{}])[0])
-            minute = (d.get("clock") or {}).get("displayValue", "")
-            game["last_goal"] = " ".join(x for x in ("GOAL", teams[side]["abbr"] if side else "", who, minute) if x)
+            game["last_goal"] = " ".join(x for x in ("GOAL", teams[side]["abbr"] if side else "", who, minute_txt) if x)
+    game["minute"] = _minute(game["clock"]) if game["sport"] == "soccer" else None
     return game
+
+
+def _fnum(v):
+    try:
+        return float(str(v).rstrip("%"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _minute(text, seconds=None):
+    """Match minute from ESPN's '67'' / '45'+2'' style clock (or a seconds value)."""
+    m = re.match(r"\s*(\d+)'?\s*(?:\+\s*(\d+))?", text or "")
+    if m:
+        return int(m.group(1)) + int(m.group(2) or 0)
+    try:
+        return int(float(seconds) // 60) + 1 if seconds is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def field_position(g):
@@ -798,6 +835,9 @@ def live_layouts(sport):
     if sport == "hockey":
         from .hockey_layouts import LAYOUTS
         return LAYOUTS
+    if sport == "soccer":
+        from .soccer_layouts import LAYOUTS
+        return LAYOUTS
     return {}
 
 
@@ -810,6 +850,9 @@ def live_renderers(sport):
         return RENDERERS
     if sport == "hockey":
         from .hockey_layouts import RENDERERS
+        return RENDERERS
+    if sport == "soccer":
+        from .soccer_layouts import RENDERERS
         return RENDERERS
     return {}
 
