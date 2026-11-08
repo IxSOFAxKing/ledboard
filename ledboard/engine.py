@@ -15,6 +15,24 @@ from .gfx import Canvas, RED, hex_to_rgb
 log = logging.getLogger(__name__)
 
 
+class ScrollSlide:
+    """All of a board's slides joined into one horizontal ticker.
+
+    Compares equal to any other ScrollSlide of the same board, so content
+    refreshes mid-scroll don't cut the scroll short.
+    """
+    __slots__ = ("board", "slides")
+
+    def __init__(self, board, slides):
+        self.board, self.slides = board, list(slides)
+
+    def __eq__(self, other):
+        return isinstance(other, ScrollSlide) and other.board == self.board
+
+    def __hash__(self):
+        return hash(("scroll", self.board))
+
+
 class Engine:
     def __init__(self, config, simulate=False):
         self.config = config
@@ -106,6 +124,8 @@ class Engine:
             if b and b.enabled:
                 s = b.slides()
                 if s:
+                    if b.cfg.get("scroll_mode"):
+                        s = [ScrollSlide(name, s)]
                     normal.append((name, s))
         return normal, False
 
@@ -137,6 +157,35 @@ class Engine:
             start = names.index(nxt)
         name, slides = cands[start]
         self.cur = (name, slides, 0, now)
+
+    # -- scroll mode -------------------------------------------------------------
+    def _scroll_params(self, board):
+        speed = max(5.0, float(board.cfg.get("scroll_speed", 30) or 30))
+        gap = max(0, int(board.cfg.get("scroll_gap", 16) or 0))
+        return speed, gap
+
+    def _duration(self, board, slide):
+        if isinstance(slide, ScrollSlide):
+            speed, gap = self._scroll_params(board)
+            n = len(slide.slides)
+            strip = n * self.width + (n - 1) * gap
+            return (strip + self.width) / speed  # enter from the right, exit left
+        return board.slide_duration(slide)
+
+    def _render_scroll(self, board, scroll, c, t):
+        speed, gap = self._scroll_params(board)
+        offset = int(t * speed)
+        step = self.width + gap
+        if not hasattr(self, "_scratch"):
+            self._scratch = Canvas(self.width, self.height)
+        for i, slide in enumerate(scroll.slides):
+            x = self.width - offset + i * step
+            if x >= self.width or x + self.width <= 0:
+                continue
+            self._scratch.clear()
+            # t=0: text inside each slide stays still while the whole slide moves
+            board.render(self._scratch, slide, 0.0)
+            c.image.paste(self._scratch.image, (x, 0))
 
     def _check_rotation(self):
         """Once a second: handle takeover changes and vanished content."""
@@ -202,12 +251,15 @@ class Engine:
                 return c.image
             name, slides, idx, started = self.cur
             board = self.boards[name]
-            if not self.paused and now - started >= board.slide_duration(slides[idx]):
+            if not self.paused and now - started >= self._duration(board, slides[idx]):
                 self._advance()
                 name, slides, idx, started = self.cur
                 board = self.boards[name]
         try:
-            board.render(c, slides[idx], now - started)
+            if isinstance(slides[idx], ScrollSlide):
+                self._render_scroll(board, slides[idx], c, now - started)
+            else:
+                board.render(c, slides[idx], now - started)
         except Exception as e:
             log.exception("render error in %s", name)
             c.clear()

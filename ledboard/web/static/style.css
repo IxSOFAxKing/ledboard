@@ -77,6 +77,11 @@ input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
 .field.bool { grid-template-columns: 240px auto; justify-content: start; }
 .err-line { color: #ff8c8f; font-size: 13px; margin-bottom: 10px; word-break: break-word; }
 
+h4.section { margin: 10px 0 -2px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
+h4.section:first-child { margin-top: 0; }
+.row.between { justify-content: space-between; flex-wrap: nowrap; gap: 16px; }
+.row.between p { margin: 0 0 12px; }
+.row.nowrap { flex-wrap: nowrap; } .row.nowrap input { flex: 1; min-width: 0; }
 .leagues { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
 .league { display: flex; align-items: center; gap: 8px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
 .league .lname { width: 110px; font-size: 13px; flex: none; }

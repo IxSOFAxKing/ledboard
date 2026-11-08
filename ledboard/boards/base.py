@@ -16,6 +16,30 @@ import traceback
 log = logging.getLogger(__name__)
 
 
+#: Settings every board gets (merged into DEFAULTS / FIELDS automatically).
+COMMON_DEFAULTS = {"scroll_mode": False, "scroll_speed": 30, "scroll_gap": 16}
+COMMON_FIELDS = [
+    {"key": "scroll_mode", "label": "Scroll mode (slides scroll across like a ticker)", "type": "bool", "section": "Scroll mode"},
+    {"key": "scroll_speed", "label": "Scroll speed (pixels per second)", "type": "number", "section": "Scroll mode",
+     "show_if": {"scroll_mode": True}},
+    {"key": "scroll_gap", "label": "Gap between slides (pixels)", "type": "number", "section": "Scroll mode",
+     "show_if": {"scroll_mode": True}},
+]
+
+
+def short_error(e):
+    """Readable one-line error; network errors get a short summary instead of urllib3's dump."""
+    import requests
+    if isinstance(e, requests.HTTPError) and e.response is not None:
+        return f"HTTP {e.response.status_code} from {requests.utils.urlparse(e.response.url).netloc}"
+    if isinstance(e, requests.Timeout):
+        return "Timed out connecting to the server"
+    if isinstance(e, requests.ConnectionError):
+        host = requests.utils.urlparse(getattr(e.request, "url", "") or "").netloc
+        return f"Can't connect to {host or 'the server'} (check the URL / network)"
+    return f"{type(e).__name__}: {e}"
+
+
 class Board:
     name = "base"
     title = "Base"
@@ -74,7 +98,7 @@ class Board:
                 self.last_update = time.time()
                 self.last_error = None
             except Exception as e:
-                self.last_error = f"{type(e).__name__}: {e}"
+                self.last_error = short_error(e)
                 log.warning("[%s] update failed: %s", self.name, self.last_error)
                 log.debug(traceback.format_exc())
             self._wake.wait(self.interval())

@@ -1,19 +1,28 @@
-"""Live scores from ESPN's public scoreboard API (no API key required)."""
+"""Live scores from ESPN's public scoreboard API (no API key required).
+
+Every league is its own board (NFL, NBA, MLB...), so each one has its own
+place in the rotation, its own favorites, scroll mode, takeover and display
+options. All of ESPN's fields are treated as optional: when a field is missing
+the corresponding detail is simply not drawn.
+"""
 from __future__ import annotations
 
+import colorsys
 import logging
+import re
+import time
 from datetime import datetime, timedelta, timezone
 
 import requests
 
 from .base import Board
-from ..gfx import (GRAY, DIM, RED, WHITE, YELLOW, fetch_image, hex_to_rgb, readable)
+from ..gfx import DIM, GRAY, RED, WHITE, YELLOW, fetch_image, hex_to_rgb, readable
 
 log = logging.getLogger(__name__)
 
 ESPN = "https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/scoreboard"
 
-# key: (sport, espn league, display name, extra query params)
+# key: (sport, espn league path, display name, extra query params when favorites are set)
 LEAGUES = {
     "nfl": ("football", "nfl", "NFL", {}),
     "ncaaf": ("football", "college-football", "College Football", {"groups": "80"}),
@@ -21,8 +30,8 @@ LEAGUES = {
     "wnba": ("basketball", "wnba", "WNBA", {}),
     "ncaam": ("basketball", "mens-college-basketball", "Men's College Basketball", {"groups": "50"}),
     "ncaaw": ("basketball", "womens-college-basketball", "Women's College Basketball", {"groups": "50"}),
-    "mlb": ("baseball", "mlb", "MLB", {}),
     "nhl": ("hockey", "nhl", "NHL", {}),
+    "mlb": ("baseball", "mlb", "MLB", {}),
     "mls": ("soccer", "usa.1", "MLS", {}),
     "epl": ("soccer", "eng.1", "Premier League", {}),
     "laliga": ("soccer", "esp.1", "La Liga", {}),
@@ -31,8 +40,14 @@ LEAGUES = {
     "ligue1": ("soccer", "fra.1", "Ligue 1", {}),
     "ucl": ("soccer", "uefa.champions", "Champions League", {}),
 }
+COLLEGE = {"ncaaf", "ncaam", "ncaaw"}
+DEFAULT_ON = {"nfl", "nba", "mlb", "nhl"}
+ORANGE = (255, 140, 0)
+INFO_SECONDS = 3.0      # how long each line of the rotating info line shows
+INFO_SPEED = 28.0       # px/s for info lines too long to fit
 
 
+# ---------------------------------------------------------------------------- parsing
 def parse_time(s):
     if not s:
         return None
@@ -47,6 +62,21 @@ def parse_time(s):
     return None
 
 
+def _athlete(obj):
+    """Short name from a situation.batter / pitcher style object."""
+    if not isinstance(obj, dict):
+        return ""
+    a = obj.get("athlete") or obj
+    return a.get("shortName") or a.get("displayName") or ""
+
+
+def _stat(competitor, *names):
+    for st in competitor.get("statistics") or []:
+        if st.get("name") in names or st.get("abbreviation") in names:
+            return st.get("displayValue")
+    return None
+
+
 def parse_event(ev, league_key):
     """Normalise one ESPN event into a compact dict (pure function, easy to test)."""
     comp = (ev.get("competitions") or [{}])[0]
@@ -57,6 +87,13 @@ def parse_event(ev, league_key):
         t = c.get("team", {})
         rec = c.get("records") or []
         side = c.get("homeAway", "home")
+        rank = (c.get("curatedRank") or {}).get("current")
+        leaders = []
+        for cat in c.get("leaders") or []:
+            top = (cat.get("leaders") or [{}])[0]
+            if top.get("athlete"):
+                leaders.append((cat.get("abbreviation") or cat.get("shortDisplayName") or cat.get("name", ""),
+                                _athlete(top), top.get("displayValue", "")))
         teams[side] = {
             "id": str(t.get("id", c.get("id", ""))),
             "abbr": t.get("abbreviation") or (t.get("shortDisplayName") or "?")[:4].upper(),
@@ -67,10 +104,31 @@ def parse_event(ev, league_key):
             "logo_url": t.get("logo"),
             "record": rec[0].get("summary", "") if rec else "",
             "winner": bool(c.get("winner")),
+            "rank": rank if isinstance(rank, int) and 0 < rank <= 25 else None,
+            "hits": c.get("hits"),
+            "errors": c.get("errors"),
+            "shots": _stat(c, "shotsTotal", "shots", "shotsOnGoal", "SOG"),
+            "leaders": leaders,
+            "red_cards": 0,
         }
     if "home" not in teams or "away" not in teams:
         return None
+
     sit = comp.get("situation") or {}
+    odds = (comp.get("odds") or [{}])[0] or {}
+    network = ""
+    for b in comp.get("broadcasts") or []:
+        if b.get("names"):
+            network = b["names"][0]
+            break
+    if not network:
+        for b in comp.get("geoBroadcasts") or []:
+            network = (b.get("media") or {}).get("shortName", "")
+            if network:
+                break
+    if not network and isinstance(comp.get("broadcast"), str):
+        network = comp["broadcast"]
+
     game = {
         "id": str(ev.get("id")),
         "league": league_key,
@@ -78,117 +136,188 @@ def parse_event(ev, league_key):
         "state": stype.get("state", "pre"),          # pre | in | post
         "detail": stype.get("shortDetail") or stype.get("detail") or "",
         "description": stype.get("description", ""),
-        "period": status.get("period", 0),
+        "period": status.get("period", 0) or 0,
         "clock": status.get("displayClock", ""),
         "start": parse_time(ev.get("date") or comp.get("date")),
         "away": teams["away"],
         "home": teams["home"],
+        "time_tbd": comp.get("timeValid") is False,
+        "network": network,
+        "odds": odds.get("details", "") if isinstance(odds, dict) else "",
+        "over_under": odds.get("overUnder") if isinstance(odds, dict) else None,
+        # live situation (football / baseball / some basketball)
         "possession": None,
-        "situation": "",
+        "down": sit.get("down"),
+        "distance": sit.get("distance"),
+        "spot": sit.get("possessionText", ""),
+        "down_text": sit.get("shortDownDistanceText") or sit.get("downDistanceText") or "",
         "redzone": bool(sit.get("isRedZone")),
+        "timeouts": {"home": sit.get("homeTimeouts"), "away": sit.get("awayTimeouts")},
         "outs": sit.get("outs"),
         "balls": sit.get("balls"),
         "strikes": sit.get("strikes"),
         "bases": [bool(sit.get("onFirst")), bool(sit.get("onSecond")), bool(sit.get("onThird"))],
-        "time_tbd": bool(comp.get("timeValid") is False),
+        "batter": _athlete(sit.get("batter")),
+        "pitcher": _athlete(sit.get("pitcher")),
+        "last_play": ((sit.get("lastPlay") or {}).get("text") or "").strip(),
+        "last_goal": "",
     }
     poss = str(sit.get("possession", "") or "")
     if poss:
-        game["possession"] = "home" if poss == teams["home"]["id"] else ("away" if poss == teams["away"]["id"] else None)
-    game["situation"] = sit.get("shortDownDistanceText") or sit.get("downDistanceText") or ""
+        game["possession"] = ("home" if poss == teams["home"]["id"]
+                              else "away" if poss == teams["away"]["id"] else None)
+    # soccer: goals / cards are listed in competition "details"
+    for d in comp.get("details") or []:
+        tid = str((d.get("team") or {}).get("id", ""))
+        side = "home" if tid == teams["home"]["id"] else "away" if tid == teams["away"]["id"] else None
+        if d.get("redCard") and side:
+            teams[side]["red_cards"] += 1
+        if d.get("scoringPlay"):
+            who = _athlete((d.get("athletesInvolved") or [{}])[0])
+            minute = (d.get("clock") or {}).get("displayValue", "")
+            game["last_goal"] = " ".join(x for x in ("GOAL", teams[side]["abbr"] if side else "", who, minute) if x)
     return game
 
 
-class SportsBoard(Board):
-    name = "sports"
-    title = "Sports Scores"
-    description = "Live, upcoming and final scores from ESPN. Add favorite teams by abbreviation (e.g. BUF, KC, NYY)."
+def short_down(text):
+    """'2nd & 7 at KC 35' -> '2&7 KC35' so it fits between the logos."""
+    m = re.match(r"\s*(\d)\w*\s*&\s*(\w+)(?:\s+at\s+(\w+)\s*(\d+))?", text or "")
+    if not m:
+        return text
+    out = f"{m.group(1)}&{m.group(2).replace('Goal', 'G')}"
+    if m.group(3):
+        out += f" {m.group(3)}{m.group(4)}"
+    return out
+
+
+def team_color(team):
+    """Pick whichever of the team's colors is most visible on black, then brighten it."""
+    def val(c):
+        h, s, v = colorsys.rgb_to_hsv(*(x / 255 for x in c))
+        return v * (0.5 + s / 2)
+    base = team["color"]
+    if val(base) < 0.35 and val(team["alt"]) > val(base) and team["alt"] not in ((255, 255, 255), (0, 0, 0)):
+        base = team["alt"]
+    return readable(base, min_value=0.9)
+
+
+def _num(s):
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return 0
+
+
+# ---------------------------------------------------------------------------- board
+class LeagueBoard(Board):
+    """One league. Concrete classes are generated per league at the bottom of this file."""
+    league = "nfl"
     refresh = 60
-    DEFAULTS = {
-        "enabled": True,
-        "duration": 7,
-        "refresh": 60,
-        "live_refresh": 15,
-        "favorites_only": False,
-        "show_pregame": True,
-        "show_final": True,
-        "final_hours": 18,
-        "upcoming_hours": 48,
-        "max_games": 20,
-        "takeover": False,
+
+    COMMON = {
+        "enabled": False, "duration": 7, "refresh": 60, "live_refresh": 15,
+        "favorites": [], "favorites_only": False, "live_only": False, "takeover": False,
+        "show_pregame": True, "show_final": True, "final_hours": 18, "upcoming_hours": 48, "max_games": 20,
+        "show_records": True, "show_rankings": True, "show_odds": False, "show_network": True,
+        "hide_favorite_score": False, "detailed_live": True, "show_last_play": True, "score_flash": True,
         "use_dark_logos": True,
-        "leagues": {k: {"enabled": k in ("nfl", "nba", "mlb", "nhl"), "favorites": []} for k in LEAGUES},
     }
-    FIELDS = [
-        {"key": "duration", "label": "Seconds per game", "type": "number"},
-        {"key": "leagues", "label": "Leagues & favorite teams", "type": "leagues",
-         "options": {k: v[2] for k, v in LEAGUES.items()}},
-        {"key": "favorites_only", "label": "Only show favorite teams (leagues with no favorites show all games)", "type": "bool"},
-        {"key": "takeover", "label": "Take over the display while a favorite team is playing", "type": "bool"},
-        {"key": "show_pregame", "label": "Show upcoming games", "type": "bool"},
-        {"key": "show_final", "label": "Show final scores", "type": "bool"},
-        {"key": "final_hours", "label": "Hide finals older than (hours)", "type": "number"},
-        {"key": "upcoming_hours", "label": "Hide games starting more than (hours) away", "type": "number"},
-        {"key": "max_games", "label": "Max games per rotation", "type": "number"},
-        {"key": "use_dark_logos", "label": "Prefer logos designed for dark backgrounds", "type": "bool"},
-        {"key": "refresh", "label": "Refresh interval (s)", "type": "number"},
-        {"key": "live_refresh", "label": "Refresh interval while games are live (s)", "type": "number"},
-    ]
+
+    @classmethod
+    def build_fields(cls):
+        sport = LEAGUES[cls.league][0]
+        f = [
+            {"key": "favorites", "label": "Favorite teams (ESPN abbreviations, comma-separated)", "type": "list",
+             "section": "Teams", "help": "e.g. BUF, KC. Favorites are shown first."},
+            {"key": "favorites_only", "label": "Only show favorite teams", "type": "bool", "section": "Teams"},
+            {"key": "takeover", "label": "Take over the display while a favorite is playing", "type": "bool",
+             "section": "Teams", "help": "Only that game is shown until it ends (like 'favorite sticky')."},
+            {"key": "hide_favorite_score", "label": "Spoiler mode: hide scores of favorite teams' games",
+             "type": "bool", "section": "Teams"},
+            {"key": "live_only", "label": "Only show live games", "type": "bool", "section": "Which games"},
+            {"key": "show_pregame", "label": "Show upcoming games", "type": "bool", "section": "Which games",
+             "show_if": {"live_only": False}},
+            {"key": "upcoming_hours", "label": "...starting within (hours)", "type": "number", "section": "Which games",
+             "show_if": {"live_only": False, "show_pregame": True}},
+            {"key": "show_final", "label": "Show final scores", "type": "bool", "section": "Which games",
+             "show_if": {"live_only": False}},
+            {"key": "final_hours", "label": "...that started within (hours)", "type": "number", "section": "Which games",
+             "show_if": {"live_only": False, "show_final": True}},
+            {"key": "max_games", "label": "Max games per rotation", "type": "number", "section": "Which games"},
+            {"key": "show_records", "label": "Show team records before the game", "type": "bool", "section": "Upcoming games"},
+            {"key": "show_network", "label": "Show TV network", "type": "bool", "section": "Upcoming games"},
+            {"key": "show_odds", "label": "Show betting line / over-under", "type": "bool", "section": "Upcoming games"},
+        ]
+        if cls.league in COLLEGE:
+            f.append({"key": "show_rankings", "label": "Show AP Top 25 rankings", "type": "bool", "section": "Upcoming games"})
+        live_help = {
+            "football": "Possession marker, timeouts, down & distance with field position.",
+            "baseball": "Base runners, outs, ball/strike count, batter and pitcher, hits/errors.",
+            "basketball": "Top scorer for each team.",
+            "hockey": "Shots on goal.",
+            "soccer": "Red cards and the latest goal scorer.",
+        }[sport]
+        f += [
+            {"key": "detailed_live", "label": "Detailed live info", "type": "bool", "section": "Live games",
+             "help": live_help},
+            {"key": "show_last_play", "label": "Scroll the last play", "type": "bool", "section": "Live games"},
+            {"key": "score_flash", "label": "Flash the score when it changes", "type": "bool", "section": "Live games"},
+            {"key": "duration", "label": "Seconds per game", "type": "number", "section": "Timing"},
+            {"key": "refresh", "label": "Refresh interval (s)", "type": "number", "section": "Timing"},
+            {"key": "live_refresh", "label": "Refresh interval while games are live (s)", "type": "number", "section": "Timing"},
+            {"key": "use_dark_logos", "label": "Prefer logos designed for dark backgrounds", "type": "bool", "section": "Logos"},
+        ]
+        return f
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)
         self.games: list[dict] = []
         self.logos: dict[str, object] = {}
+        self.flash: dict[str, float] = {}     # "gameid|side" -> until (monotonic)
+        self._scores: dict[str, str] = {}
         self.session = requests.Session()
         self.session.headers["User-Agent"] = "ledboard/1.0"
 
+    @property
+    def sport(self):
+        return LEAGUES[self.league][0]
+
     def interval(self):
         if any(g["state"] == "in" for g in self.games):
-            return float(self.cfg.get("live_refresh", 15))
-        return float(self.cfg.get("refresh", 60))
+            return float(self.cfg.get("live_refresh", 15) or 15)
+        return float(self.cfg.get("refresh", 60) or 60)
 
-    def _favorites(self, league):
-        lc = self.cfg.get("leagues", {}).get(league, {})
-        return {f.strip().upper() for f in lc.get("favorites", []) if f.strip()}
+    def favorites(self):
+        return {f.strip().upper() for f in self.cfg.get("favorites", []) if f and f.strip()}
 
     def is_favorite(self, g):
-        fav = self._favorites(g["league"])
+        fav = self.favorites()
         return g["home"]["abbr"].upper() in fav or g["away"]["abbr"].upper() in fav
 
+    # -- data ---------------------------------------------------------------
     def update(self):
-        games, errors = [], []
-        for key, lc in self.cfg.get("leagues", {}).items():
-            if not lc.get("enabled") or key not in LEAGUES:
-                continue
-            sport, league, _, extra = LEAGUES[key]
-            params = {"limit": 200}
-            if lc.get("favorites"):
-                params.update(extra)  # e.g. all FBS games so non-ranked favorites show up
-            try:
-                r = self.session.get(ESPN.format(sport=sport, league=league), params=params, timeout=10)
-                r.raise_for_status()
-                for ev in r.json().get("events", []):
-                    g = parse_event(ev, key)
-                    if g:
-                        games.append(g)
-            except requests.RequestException as e:
-                errors.append(f"{key}: {type(e).__name__}")
-            except Exception as e:
-                errors.append(f"{key}: {e}")
+        sport, path, _, extra = LEAGUES[self.league]
+        params = {"limit": 200}
+        if self.favorites():
+            params.update(extra)  # e.g. all FBS games so unranked favorites show up
+        r = self.session.get(ESPN.format(sport=sport, league=path), params=params, timeout=15)
+        r.raise_for_status()
+        games = [g for g in (parse_event(ev, self.league) for ev in r.json().get("events", [])) if g]
+        now = time.monotonic()
         for g in games:
             for side in ("home", "away"):
                 self._load_logo(g[side])
+                key = f"{g['id']}|{side}"
+                score = str(g[side]["score"])
+                old = self._scores.get(key)
+                if old is not None and g["state"] == "in" and _num(score) > _num(old):
+                    self.flash[key] = now + 8
+                self._scores[key] = score
         self.games = games
-        if errors and not games:
-            raise RuntimeError("; ".join(errors))
-        if errors:
-            self.last_error = "; ".join(errors)
 
     def _load_logo(self, team):
         url = team.get("logo_url")
-        if not url:
-            return
-        if url in self.logos:
+        if not url or url in self.logos:
             return
         size = self.app.height
         img = None
@@ -200,113 +329,213 @@ class SportsBoard(Board):
 
     def visible_games(self):
         now = datetime.now(timezone.utc)
-        fav_only = self.cfg.get("favorites_only")
+        c = self.cfg
         out = []
         for g in self.games:
-            if fav_only and self._favorites(g["league"]) and not self.is_favorite(g):
+            if c.get("favorites_only") and self.favorites() and not self.is_favorite(g):
+                continue
+            if c.get("live_only") and g["state"] != "in":
                 continue
             start = g["start"]
             if g["state"] == "pre":
-                if not self.cfg.get("show_pregame", True):
+                if not c.get("show_pregame", True):
                     continue
-                if start and start - now > timedelta(hours=float(self.cfg.get("upcoming_hours", 48))):
+                if start and start - now > timedelta(hours=float(c.get("upcoming_hours", 48) or 48)):
                     continue
             if g["state"] == "post":
-                if not self.cfg.get("show_final", True):
+                if not c.get("show_final", True):
                     continue
-                if start and now - start > timedelta(hours=float(self.cfg.get("final_hours", 18)) + 3):
+                if start and now - start > timedelta(hours=float(c.get("final_hours", 18) or 18) + 3):
                     continue
             out.append(g)
         order = {"in": 0, "pre": 1, "post": 2}
-        out.sort(key=lambda g: (order.get(g["state"], 3), not self.is_favorite(g),
-                                g["start"] or now))
-        return out[: int(self.cfg.get("max_games", 20))]
+        out.sort(key=lambda g: (not self.is_favorite(g), order.get(g["state"], 3), g["start"] or now))
+        return out[: int(c.get("max_games", 20) or 20)]
 
     def slides(self):
-        return [g["id"] + "|" + g["league"] for g in self.visible_games()]
+        return [g["id"] for g in self.visible_games()]
 
     def takeover_slides(self):
         if not self.cfg.get("takeover"):
             return []
-        return [g["id"] + "|" + g["league"] for g in self.visible_games()
-                if g["state"] == "in" and self.is_favorite(g)]
+        return [g["id"] for g in self.visible_games() if g["state"] == "in" and self.is_favorite(g)]
 
     def _game(self, slide):
-        for g in self.games:
-            if g["id"] + "|" + g["league"] == slide:
-                return g
-        return None
+        return next((g for g in self.games if g["id"] == slide), None)
 
-    # -- drawing ------------------------------------------------------------
+    def status(self):
+        s = super().status()
+        s["games"] = len(self.games)
+        s["live"] = sum(1 for g in self.games if g["state"] == "in")
+        return s
+
+    # -- drawing --------------------------------------------------------------
     def render(self, c, slide, t):
         g = self._game(slide)
         if not g:
             return
         H, W = c.height, c.width
-        L = H  # logo size
         away, home = g["away"], g["home"]
-        # logos sit at the far edges, nudged outward so the center has room
         c.paste(self.logos.get(away.get("logo_url")), -2, 0)
-        c.paste(self.logos.get(home.get("logo_url")), W - L + 2, 0)
-        x0, x1 = L - 1, W - L + 1
-        # darken behind the center text so overlapping logo edges don't clash
-        c.rect(x0, 0, x1 - 1, H - 1, (0, 0, 0))
-
-        acol, hcol = team_color(away), team_color(home)
-        if g["state"] == "pre":
-            self._abbrs(c, g, x0, x1, acol, hcol)
-            c.text(x0 + 1, 10, away["record"], "4x6", GRAY)
-            c.text_right(x1 - 1, 10, home["record"], "4x6", GRAY)
-            c.text_centered(11, "@" if g["sport"] != "soccer" else "v", "6x10", WHITE, x0, x1)
-            c.scroll_text(x0, x1, H - 7, self._start_text(g), "5x7", WHITE, t, align="center")
-            return
-
-        self._abbrs(c, g, x0, x1, acol, hcol)
-        a_s, h_s = str(away["score"]), str(home["score"])
-        a_col = h_col = WHITE
-        if g["state"] == "post":
-            if away["winner"] or (_num(a_s) > _num(h_s)):
-                h_col = GRAY
-            elif home["winner"] or (_num(h_s) > _num(a_s)):
-                a_col = GRAY
-        score_font = "7x13B"
+        c.paste(self.logos.get(home.get("logo_url")), W - H + 2, 0)
+        x0, x1 = H - 1, W - H + 1
+        c.rect(x0, 0, x1 - 1, H - 1, (0, 0, 0))   # keep logo edges out of the text area
         mid = (x0 + x1) // 2
-        dash_w = c.text_width("-", score_font)
-        c.text(mid - dash_w // 2, 9, "-", score_font, GRAY)
-        c.text_right(mid - dash_w // 2 - 1, 9, a_s, score_font, a_col)
-        c.text(mid + dash_w // 2 + 2, 9, h_s, score_font, h_col)
+        detailed = self.cfg.get("detailed_live", True)
 
-        # football possession: small marker beside the team abbreviation
-        if g["state"] == "in" and g["possession"]:
-            color = RED if g["redzone"] else YELLOW
+        self._abbrs(c, g, x0, x1, detailed)
+        if g["state"] == "pre":
+            if self.cfg.get("show_records", True):
+                c.text(x0 + 1, 10, away["record"], "4x6", GRAY)
+                c.text_right(x1 - 1, 10, home["record"], "4x6", GRAY)
+            c.text_centered(11, "v" if self.sport == "soccer" else "@", "6x10", WHITE, x0, x1)
+        else:
+            self._scores_draw(c, g, mid)
+            if g["state"] == "in" and detailed:
+                self._live_graphics(c, g, x0, x1, mid)
+
+        items = self._info_items(g)
+        text, color, local_t = _cycle(c, items, t, x1 - x0)
+        c.scroll_text(x0, x1, H - 7, text, "5x7", color, local_t, speed=INFO_SPEED, align="center", pause=0.6, gap=200)
+
+    def _abbrs(self, c, g, x0, x1, detailed):
+        away, home = g["away"], g["home"]
+        show_rank = self.league in COLLEGE and self.cfg.get("show_rankings", True)
+        x = x0 + 1
+        if show_rank and away["rank"]:
+            x += c.text(x, 2, str(away["rank"]), "4x6", GRAY) + 1
+        aw = c.text(x, 0, away["abbr"], "5x8", team_color(away))
+        a_end = x + aw
+        hw = c.text_width(home["abbr"], "5x8")
+        hx = x1 - 1 - hw
+        if show_rank and home["rank"]:
+            rw = c.text_width(str(home["rank"]), "4x6")
+            c.text(x1 - 1 - rw, 2, str(home["rank"]), "4x6", GRAY)
+            hx -= rw + 1
+        c.text(hx, 0, home["abbr"], "5x8", team_color(home))
+        if g["state"] != "in" or not detailed:
+            return
+        # possession marker (football)
+        if g["possession"]:
+            col = RED if g["redzone"] else YELLOW
             if g["possession"] == "away":
-                ax = x0 + 2 + c.text_width(away["abbr"], "5x8")
-                c.rect(ax, 2, ax + 1, 4, color)
+                c.rect(a_end + 1, 2, a_end + 2, 4, col)
             else:
-                hx = x1 - 3 - c.text_width(home["abbr"], "5x8")
-                c.rect(hx - 1, 2, hx, 4, color)
+                c.rect(hx - 3, 2, hx - 2, 4, col)
+        # red cards (soccer)
+        for i in range(min(3, away["red_cards"])):
+            c.rect(a_end + 2 + i * 3, 1, a_end + 3 + i * 3, 4, RED)
+        for i in range(min(3, home["red_cards"])):
+            c.rect(hx - 4 - i * 3, 1, hx - 3 - i * 3, 4, RED)
 
-        if g["state"] == "in" and g["sport"] == "baseball":
-            self._bases(c, mid, 1, g["bases"])
+    def _scores_draw(self, c, g, mid):
+        away, home = g["away"], g["home"]
+        a_s, h_s = str(away["score"]), str(home["score"])
+        if self.cfg.get("hide_favorite_score") and self.is_favorite(g):
+            a_s = h_s = "?"
+        a_col = h_col = WHITE
+        if g["state"] == "post" and a_s != "?":
+            if away["winner"] or _num(a_s) > _num(h_s):
+                h_col = GRAY
+            elif home["winner"] or _num(h_s) > _num(a_s):
+                a_col = GRAY
+        if self.cfg.get("score_flash", True) and int(time.monotonic() * 3) % 2 == 0:
+            now = time.monotonic()
+            if self.flash.get(f"{g['id']}|away", 0) > now:
+                a_col = YELLOW
+            if self.flash.get(f"{g['id']}|home", 0) > now:
+                h_col = YELLOW
+        font = "7x13B"
+        dash_w = c.text_width("-", font)
+        c.text(mid - dash_w // 2, 9, "-", font, GRAY)
+        c.text_right(mid - dash_w // 2 - 1, 9, a_s, font, a_col)
+        c.text(mid + dash_w // 2 + 2, 9, h_s, font, h_col)
 
-        status, scol = self._status(g, t)
-        c.scroll_text(x0, x1, H - 7, status, "5x7", scol, t % 3, align="center", pause=0.3)
+    def _live_graphics(self, c, g, x0, x1, mid):
+        if self.sport == "football":
+            # timeouts: three dots under each team's abbreviation
+            for side, xs in (("away", x0 + 1), ("home", x1 - 9)):
+                n = g["timeouts"].get(side)
+                if isinstance(n, int):
+                    for i in range(3):
+                        c.rect(xs + i * 3, 23, xs + i * 3 + 1, 23, YELLOW if i < n else DIM)
+        elif self.sport == "baseball":
+            _bases(c, mid - 2, 0, g["bases"])
+            outs = g["outs"]
+            if isinstance(outs, int):
+                for i in range(3):
+                    x = mid + 6 + i * 3
+                    c.rect(x, 3, x + 1, 4, RED if i < outs else DIM)
 
-    @staticmethod
-    def _bases(c, mid, y, bases):
-        # tiny diamond: 2nd base on top, 3rd left, 1st right
-        for (dx, dy), on in zip(((4, 3), (0, 0), (-4, 3)), bases):
-            cx, cy = mid + dx, y + dy
-            col = YELLOW if on else DIM
-            c.pixel(cx, cy, col)
-            c.pixel(cx - 1, cy + 1, col); c.pixel(cx + 1, cy + 1, col)
-            c.pixel(cx, cy + 2, col)
-            if on:
-                c.pixel(cx, cy + 1, col)
+    def _info_items(self, g):
+        """Lines for the bottom info row; they rotate every few seconds."""
+        c = self.cfg
+        items = []
+        if g["state"] == "pre":
+            items.append((self._start_text(g), WHITE))
+            if c.get("show_network", True) and g["network"]:
+                items.append((g["network"].upper(), GRAY))
+            if c.get("show_odds"):
+                parts = [g["odds"]] if g["odds"] else []
+                ou = g["over_under"]
+                if ou not in (None, ""):
+                    parts.append(f"O/U {ou:g}" if isinstance(ou, (int, float)) else f"O/U {ou}")
+                if parts:
+                    items.append((" ".join(parts), (120, 200, 120)))
+            return items
+        if g["state"] == "post":
+            d = g["detail"].upper()
+            return [("FINAL" + d[5:] if d.startswith("FINAL") else d or "FINAL", GRAY)]
 
-    def _abbrs(self, c, g, x0, x1, acol, hcol):
-        c.text(x0 + 1, 0, g["away"]["abbr"], "5x8", acol)
-        c.text_right(x1 - 1, 0, g["home"]["abbr"], "5x8", hcol)
+        items.append((self._clock_text(g), YELLOW))
+        if c.get("detailed_live", True):
+            sport = self.sport
+            if sport == "football":
+                if g["down"] and g["distance"] is not None:
+                    dist = "G" if "goal" in g["down_text"].lower() else g["distance"]
+                    txt = f"{g['down']}&{dist}" + (f" {g['spot'].replace(' ', '')}" if g["spot"] else "")
+                    items.append((txt, RED if g["redzone"] else ORANGE))
+                elif g["down_text"]:
+                    items.append((short_down(g["down_text"]), RED if g["redzone"] else ORANGE))
+            elif sport == "baseball":
+                if g["balls"] is not None and g["strikes"] is not None:
+                    items.append((f"COUNT {g['balls']}-{g['strikes']}", ORANGE))
+                if g["pitcher"]:
+                    items.append((f"P: {g['pitcher']}", GRAY))
+                if g["batter"]:
+                    items.append((f"AB: {g['batter']}", GRAY))
+                a, h = g["away"], g["home"]
+                if a["hits"] is not None and h["hits"] is not None:
+                    items.append((f"H {a['hits']}-{h['hits']}  E {a['errors'] or 0}-{h['errors'] or 0}", GRAY))
+            elif sport == "basketball":
+                for side in ("away", "home"):
+                    t = g[side]
+                    pts = next((l for l in t["leaders"] if l[0].upper() in ("PTS", "POINTS")), None)
+                    if pts:
+                        items.append((f"{t['abbr']} {pts[1]} {pts[2]}", GRAY))
+            elif sport == "hockey":
+                a, h = g["away"]["shots"], g["home"]["shots"]
+                if a is not None and h is not None:
+                    items.append((f"SOG {a}-{h}", GRAY))
+            elif sport == "soccer" and g["last_goal"]:
+                items.append((g["last_goal"], ORANGE))
+        if c.get("show_last_play", True) and g["last_play"] and self.sport != "soccer":
+            items.append((g["last_play"], WHITE))
+        return items
+
+    def _clock_text(self, g):
+        detail = g["detail"]
+        sport = self.sport
+        if sport in ("basketball", "hockey", "football") and g["clock"] and g["period"] \
+                and "half" not in detail.lower() and "end" not in detail.lower():
+            prefix = {"football": "Q", "basketball": "Q", "hockey": "P"}[sport]
+            if self.league in ("ncaam",):
+                prefix = "H"
+            per = g["period"]
+            limit = {"Q": 4, "P": 3, "H": 2}[prefix]
+            label = f"{prefix}{per}" if per <= limit else ("OT" if per == limit + 1 else f"{per - limit}OT")
+            return f"{label} {g['clock']}"
+        return detail.upper()
 
     def _start_text(self, g):
         if g["start"] is None:
@@ -324,54 +553,43 @@ class SportsBoard(Board):
             return local.strftime("%a").upper() + " " + hm
         return local.strftime("%-m/%-d ") + hm
 
-    def _status(self, g, t):
-        if g["state"] == "post":
-            d = g["detail"].upper()
-            return ("FINAL" + d[5:] if d.startswith("FINAL") else d or "FINAL"), GRAY
-        detail = g["detail"]
-        if g["sport"] == "football" and g["situation"] and int(t) // 3 % 2 == 1:
-            return short_down(g["situation"]), (RED if g["redzone"] else YELLOW)
-        if g["sport"] == "baseball" and g["outs"] is not None and int(t) // 3 % 2 == 1:
-            return f"{g['balls'] or 0}-{g['strikes'] or 0}  {g['outs']} OUT", YELLOW
-        if g["sport"] == "basketball" or g["sport"] == "hockey" or g["sport"] == "football":
-            # "Q3 5:21" style is shorter than ESPN's "5:21 - 3rd Quarter"
-            if g["clock"] and g["period"] and "half" not in detail.lower() and "end" not in detail.lower():
-                prefix = {"football": "Q", "basketball": "Q", "hockey": "P"}[g["sport"]]
-                if g["league"] in ("ncaam", "ncaaw"):
-                    prefix = "H"
-                per = g["period"]
-                limit = 4 if prefix == "Q" else (3 if prefix == "P" else 2)
-                label = f"{prefix}{per}" if per <= limit else ("OT" if per == limit + 1 else f"{per - limit}OT")
-                return f"{label} {g['clock']}", YELLOW
-        return detail.upper(), YELLOW
+
+def _cycle(c, items, t, avail):
+    """Pick the info line to show at time t. Long lines get enough time to scroll fully."""
+    if not items:
+        return "", WHITE, 0.0
+    durs = []
+    for text, _ in items:
+        w = c.text_width(text, "5x7")
+        durs.append(INFO_SECONDS if w <= avail else 0.6 + (w - avail) / INFO_SPEED + 1.2)
+    t = t % sum(durs)
+    for (text, color), d in zip(items, durs):
+        if t < d:
+            return text, color, t
+        t -= d
+    return items[0][0], items[0][1], 0.0
 
 
-def team_color(team):
-    """Pick whichever of the team's colors is most visible on black, then brighten it."""
-    import colorsys
-    def val(c):
-        h, s, v = colorsys.rgb_to_hsv(*(x / 255 for x in c))
-        return v * (0.5 + s / 2)
-    base = team["color"]
-    if val(base) < 0.35 and val(team["alt"]) > val(base) and team["alt"] not in ((255, 255, 255), (0, 0, 0)):
-        base = team["alt"]
-    return readable(base, min_value=0.9)
+def _bases(c, mid, y, bases):
+    """Tiny diamond: 2nd base on top, 3rd left, 1st right."""
+    for (dx, dy), on in zip(((4, 3), (0, 0), (-4, 3)), bases):
+        cx, cy = mid + dx, y + dy
+        col = YELLOW if on else DIM
+        for px, py in ((cx, cy), (cx - 1, cy + 1), (cx + 1, cy + 1), (cx, cy + 2)):
+            c.pixel(px, py, col)
+        if on:
+            c.pixel(cx, cy + 1, col)
 
 
-def short_down(text):
-    """'2nd & 7 at KC 35' -> '2&7 KC35' so it fits between the logos."""
-    import re
-    m = re.match(r"\s*(\d)\w*\s*&\s*(\w+)(?:\s+at\s+(\w+)\s*(\d+))?", text or "")
-    if not m:
-        return text
-    out = f"{m.group(1)}&{m.group(2).replace('Goal', 'G')}"
-    if m.group(3):
-        out += f" {m.group(3)}{m.group(4)}"
-    return out
+def _make(key):
+    sport, _, title, _ = LEAGUES[key]
+    cls = type(f"{key.upper()}Board", (LeagueBoard,), {
+        "name": key, "league": key, "title": title,
+        "description": f"{title} scores from ESPN: live, upcoming and final games.",
+        "DEFAULTS": dict(LeagueBoard.COMMON, enabled=key in DEFAULT_ON),
+    })
+    cls.FIELDS = cls.build_fields()
+    return cls
 
 
-def _num(s):
-    try:
-        return float(s)
-    except (TypeError, ValueError):
-        return 0
+LEAGUE_BOARDS = [_make(k) for k in LEAGUES]

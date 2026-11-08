@@ -6,8 +6,8 @@ It's built for two chained 64×32 panels (128×32), and the layouts scale to oth
 
 | Board | What it shows |
 |---|---|
-| **Sports** | Live, upcoming and final scores from ESPN (no API key needed): NFL, NBA, MLB, NHL, college football and basketball, WNBA, MLS, EPL, La Liga, Bundesliga, Serie A, Ligue 1, Champions League. It shows team logos and colors, the game clock, football possession and down-and-distance, and baseball bases, count and outs. You can mark favorite teams, show only your favorites, and let a favorite's live game take over the display. |
-| **Spotify** | Album art, scrolling title and artist, and a progress bar. It's skipped when nothing is playing and can take over the display while music plays. |
+| **Sports** | One board per league, using ESPN's free API (no key needed): NFL, NBA, MLB, NHL, college football and basketball, WNBA, MLS, EPL, La Liga, Bundesliga, Serie A, Ligue 1, Champions League. See [Sports](#sports) for the settings and the live-game details each sport shows. |
+| **Now Playing** | Album art, scrolling title and artist, and a progress bar, from a **Home Assistant media player** (HA's Spotify integration, Sonos and so on) or directly from the Spotify API. It's skipped when nothing is playing and can take over the display while music plays. |
 | **Plex** | Active streams (movies, TV, music) with the poster, title, S/E or artist, who's watching, and progress. You can filter by user. |
 | **Home Assistant** | Any entities (sensors, locks, doors, lights, thermostats, and so on) at 1, 2 or 3 per screen, with automatic formatting and colors. |
 | **Clock** | The time and date. It's also the fallback when nothing else has content. |
@@ -43,17 +43,47 @@ sudo nano /etc/ledboard/config.json  # everything in the UI is stored here
 
 ## Setting up integrations
 
-All of this is done in the web UI under **Boards → ⚙**.
+All of this is done in the web UI under **Boards → ⚙**. Disabled boards are hidden until you click **Show disabled boards**.
+
+### Scroll mode (every board)
+Every board has a **Scroll mode** switch. When it's on, the board's slides scroll across the display one after another, like a ticker, instead of showing one at a time. You can set the scroll speed and the gap between slides.
 
 ### Sports
-1. Tick the leagues you want.
-2. Add favorite teams as ESPN abbreviations, for example `BUF, KC` for the NFL or `NYY` for MLB.
-3. Optionally turn on:
-   - **"Only show favorite teams"**: leagues with no favorites listed still show every game.
-   - **"Take over the display while a favorite team is playing"**.
+Each league is its own board, so it has its own place in the rotation and its own settings. Turn on the leagues you want, then open one with ⚙. Settings are grouped like this:
 
-### Spotify
-Spotify only allows `http://` redirect addresses for `127.0.0.1`, so there's one copy-and-paste step.
+- **Teams**
+  - Favorite teams, as ESPN abbreviations such as `BUF, KC`. Favorites are shown first.
+  - Only show favorites.
+  - **Take over** the display while a favorite is playing.
+  - **Spoiler mode**: hides the scores of your favorites' games.
+- **Which games**: live only, upcoming games (and how far ahead), final scores (and how long they stay), and the maximum number of games.
+- **Upcoming games**: team records, TV network, betting line and over/under, and AP Top 25 rankings (college leagues only).
+- **Live games**: detailed live info, scroll the last play, and flash the score when it changes.
+- **Timing**: seconds per game, and how often scores refresh, normally and during live games.
+- **Logos**: prefer logos designed for dark backgrounds.
+
+With **detailed live info** on, the bottom line rotates through the game clock and these extras:
+
+| Sport | Extras |
+|---|---|
+| Football | Possession marker (red in the red zone), timeouts left (dots), down and distance with field position (e.g. `3&4 KC35`), last play |
+| Baseball | Base runners (diamond), outs (dots), ball and strike count, pitcher, batter, hits and errors, last play |
+| Basketball | Each team's top scorer, last play |
+| Hockey | Shots on goal, last play |
+| Soccer | Red cards, latest goal scorer and minute |
+
+> **Note:** The live details read optional fields from ESPN's unofficial API. If ESPN doesn't send a field for a game, that detail is simply left out.
+
+Upgrading from an earlier LEDBoard with a single "Sports" board moves your settings over automatically. Each league keeps its favorites and on/off state, and the old config is saved as `config.json.bak`.
+
+### Now Playing
+
+**Through Home Assistant (recommended if HA already has your Spotify):**
+1. Set the URL and token on the **Home Assistant** board.
+2. On **Now Playing**, choose **Home Assistant media player**.
+3. Enter your media player entity, for example `media_player.spotify_yourname`. The **Load from HA** button fills in suggestions. You can list several players; each one that's playing gets its own slide.
+
+**Directly from Spotify** (choose **Spotify Web API**): Spotify only allows `http://` redirect addresses for `127.0.0.1`, so there's one copy-and-paste step.
 
 1. Create an app at <https://developer.spotify.com/dashboard> and select **Web API**.
 2. Add the redirect URI `http://127.0.0.1:8080/spotify/callback` to the app.
@@ -105,7 +135,7 @@ Then you can use it in automations, for example: `service: rest_command.ledboard
 | GET | `/api/state` | Returns the current board, fps, per-board status and errors |
 | GET | `/api/frame.png` | Returns the current frame |
 | POST | `/api/message` | `{"text": "...", "seconds": 10, "color": "#ff0000", "font": "7x13B"}` |
-| POST | `/api/control` | `{"action": "next"}`, `"pause"`, `"resume"`, `"refresh"`, `{"action": "power", "on": false}`, `{"action": "brightness", "value": 40}`, `{"action": "jump", "board": "sports"}` |
+| POST | `/api/control` | `{"action": "next"}`, `"pause"`, `"resume"`, `"refresh"`, `{"action": "power", "on": false}`, `{"action": "brightness", "value": 40}`, `{"action": "jump", "board": "nfl"}` |
 | GET/POST | `/api/config` | GET returns the config with secrets masked. POST takes a partial config and merges it in. |
 | POST | `/api/restart` | Restarts the process |
 
@@ -141,7 +171,7 @@ ledboard/
   fonts.py         BDF bitmap font renderer (crisp pixel text)
   gfx.py           drawing helpers, marquee text, image cache
   config.py        JSON config + sportsmatrix.conf importer
-  boards/          sports, spotify, plex, homeassistant, clock, message
+  boards/          sports (one board per league), spotify (now playing), plex, homeassistant, clock, message
   web/             Flask API + single-page UI (static/)
 ```
 

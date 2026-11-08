@@ -115,9 +115,22 @@ function field(label, input, help, cls = "") {
   return h("div", { class: "field " + cls }, h("label", {}, label), input, help ? h("div", { class: "help" }, help) : null);
 }
 
-function renderField(obj, f) {
+// Settings form with section headings; fields with show_if only appear when relevant.
+function renderForm(obj, fields, rerender) {
+  const deps = new Set(fields.flatMap((f) => Object.keys(f.show_if || {})));
+  const out = [];
+  let section = null;
+  for (const f of fields) {
+    if (f.show_if && !Object.entries(f.show_if).every(([k, v]) => (obj[k] ?? false) === v)) continue;
+    if (f.section && f.section !== section) { section = f.section; out.push(h("h4", { class: "section" }, section)); }
+    out.push(renderField(obj, f, deps.has(f.key) ? rerender : null));
+  }
+  return out;
+}
+
+function renderField(obj, f, onDepChange) {
   const key = f.key, val = obj[key];
-  const set = (v) => { obj[key] = v; markDirty(); };
+  const set = (v) => { obj[key] = v; markDirty(); if (onDepChange) onDepChange(); };
   switch (f.type) {
     case "bool": {
       const sw = h("label", { class: "switch" }, h("input", { type: "checkbox", checked: !!val, onchange: (e) => set(e.target.checked) }), h("span"));
@@ -134,31 +147,21 @@ function renderField(obj, f) {
       return field(f.label, h("input", { type: "color", value: val || "#ffffff", oninput: (e) => set(e.target.value) }), f.help);
     case "select": {
       const sel = h("select", { onchange: (e) => set(typeof f.options[0] === "number" ? Number(e.target.value) : e.target.value) },
-        f.options.map((o) => h("option", { value: o, selected: String(o) === String(val) }, String(o))));
+        f.options.map((o) => h("option", { value: o, selected: String(o) === String(val) }, (f.option_labels || {})[o] || String(o))));
       return field(f.label, sel, f.help);
     }
-    case "list":
-      return field(f.label, h("input", { type: "text", value: (val || []).join(", "),
-        oninput: (e) => set(e.target.value.split(",").map((s) => s.trim()).filter(Boolean)) }), f.help);
-    case "leagues": return leaguesField(obj, f);
+    case "list": {
+      const input = h("input", { type: "text", value: (val || []).join(", "), list: f.datalist || null,
+        oninput: (e) => set(e.target.value.split(",").map((s) => s.trim()).filter(Boolean)) });
+      if (!f.datalist) return field(f.label, input, f.help);
+      return field(f.label, h("div", { class: "row nowrap" }, input,
+        h("button", { class: "small", onclick: () => loadHaEntities() }, "Load from HA")), f.help);
+    }
     case "entities": return entitiesField(obj, f);
     case "spotify_auth": return spotifyAuthField(obj);
     default:
       return field(f.label, h("input", { type: "text", value: val ?? "", oninput: (e) => set(e.target.value) }), f.help);
   }
-}
-
-function leaguesField(obj, f) {
-  obj.leagues = obj.leagues || {};
-  const items = Object.entries(f.options).map(([k, name]) => {
-    const lc = obj.leagues[k] = obj.leagues[k] || { enabled: false, favorites: [] };
-    return h("div", { class: "league" },
-      h("input", { type: "checkbox", checked: !!lc.enabled, onchange: (e) => { lc.enabled = e.target.checked; markDirty(); } }),
-      h("span", { class: "lname" }, name),
-      h("input", { type: "text", placeholder: "favorites e.g. BUF, KC", value: (lc.favorites || []).join(", "),
-        oninput: (e) => { lc.favorites = e.target.value.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean); markDirty(); } }));
-  });
-  return h("div", {}, h("div", { class: "muted small", style: "margin-bottom:8px" }, f.label + " — use ESPN team abbreviations"), h("div", { class: "leagues" }, items));
 }
 
 function entitiesField(obj, f) {
@@ -181,17 +184,22 @@ function entitiesField(obj, f) {
       h("table", {}, h("tr", {}, ["Entity ID", "Label", "Attribute", "Color", "Decimals", "", ""].map((t) => h("th", {}, t))), rows),
       h("div", { class: "row", style: "margin-top:8px" },
         h("button", { class: "small", onclick: () => { obj.entities.push({ entity_id: "", label: "" }); markDirty(); draw(); } }, "+ Add entity"),
-        h("button", { class: "small", onclick: loadHaEntities }, "Load entity list from Home Assistant")));
+        h("button", { class: "small", onclick: () => loadHaEntities(obj) }, "Load entity list from Home Assistant")));
   };
-  async function loadHaEntities() {
-    try {
-      const j = await api("/api/homeassistant/entities", { url: obj.url, token: obj.token, verify_ssl: obj.verify_ssl });
-      $("#ha-entities").replaceChildren(...j.entities.map((e) => h("option", { value: e.entity_id }, `${e.name} (${e.state})`)));
-      toast(`Loaded ${j.entities.length} entities — start typing in an Entity ID box`);
-    } catch (e) { toast("Home Assistant: " + e.message, true); }
-  }
   draw();
   return h("div", {}, h("div", { class: "muted small", style: "margin-bottom:6px" }, f.label), wrap);
+}
+
+// Fills the entity autocomplete lists from Home Assistant (unsaved URL/token from the HA form win).
+async function loadHaEntities(ha) {
+  ha = ha || draft.boards.homeassistant || {};
+  try {
+    const j = await api("/api/homeassistant/entities", { url: ha.url, token: ha.token, verify_ssl: ha.verify_ssl });
+    const opt = (e) => h("option", { value: e.entity_id }, `${e.name} (${e.state})`);
+    $("#ha-entities").replaceChildren(...j.entities.map(opt));
+    $("#ha-media-players").replaceChildren(...j.entities.filter((e) => e.entity_id.startsWith("media_player.")).map(opt));
+    toast(`Loaded ${j.entities.length} entities from Home Assistant — start typing to pick one`);
+  } catch (e) { toast("Home Assistant: " + e.message, true); }
 }
 
 function spotifyAuthField(obj) {
@@ -216,18 +224,29 @@ function spotifyAuthField(obj) {
 }
 
 // ---------------------------------------------------------------- boards tab
+let showDisabled = localStorageGet("showDisabled") === "1";
+
 function renderBoards() {
   const root = $("#boards");
+  const visible = (n) => SCHEMA[n] && (showDisabled || draft.boards[n].enabled || openBoards.has(n));
+  const nDisabled = draft.rotation.filter((n) => SCHEMA[n] && !draft.boards[n].enabled).length;
+  $("#toggle-disabled").textContent = showDisabled ? "Hide disabled boards" : `Show ${nDisabled} disabled board${nDisabled === 1 ? "" : "s"}`;
   root.replaceChildren(...draft.rotation.map((name, idx) => {
     const sch = SCHEMA[name], bc = draft.boards[name];
-    if (!sch) return null;
+    if (!visible(name)) return null;
     const card = h("div", { class: "board" + (openBoards.has(name) ? " open" : "") + (bc.enabled ? "" : " disabled") });
     const toggleOpen = () => { card.classList.toggle("open"); card.classList.contains("open") ? openBoards.add(name) : openBoards.delete(name); localStorageSet("openBoards", JSON.stringify([...openBoards])); };
-    const move = (d) => { const j = idx + d; if (j < 0 || j >= draft.rotation.length) return; [draft.rotation[idx], draft.rotation[j]] = [draft.rotation[j], draft.rotation[idx]]; markDirty(); renderBoards(); };
+    const move = (d) => {
+      // swap with the nearest board that is visible in that direction
+      let j = idx + d;
+      while (j >= 0 && j < draft.rotation.length && !visible(draft.rotation[j])) j += d;
+      if (j < 0 || j >= draft.rotation.length) return;
+      [draft.rotation[idx], draft.rotation[j]] = [draft.rotation[j], draft.rotation[idx]]; markDirty(); renderBoards();
+    };
     const body = h("div", { class: "board-body" },
       h("div", { class: "err-line hidden", "data-err": name }),
       h("p", { class: "muted small", style: "margin-top:0" }, sch.description),
-      h("div", { class: "form" }, sch.fields.map((f) => renderField(bc, f))),
+      h("div", { class: "form" }, renderForm(bc, sch.fields, renderBoards)),
       name === "plex" ? h("div", { class: "row", style: "margin-top:12px" }, h("button", { onclick: async () => {
         try { toast((await api("/api/plex/test", { url: bc.url, token: bc.token, verify_ssl: bc.verify_ssl })).message); } catch (e) { toast("Plex: " + e.message, true); }
       } }, "Test connection")) : null);
@@ -241,19 +260,26 @@ function renderBoards() {
         h("button", { class: "small", onclick: toggleOpen }, "⚙")),
       body);
     return card;
-  }));
+  }).filter(Boolean));
   pollState();
 }
 
 function summary(name, bc) {
-  if (name === "sports") {
-    const on = Object.entries(bc.leagues || {}).filter(([, l]) => l.enabled).map(([k]) => k.toUpperCase());
-    return on.length ? on.join(" · ") : "no leagues selected";
-  }
-  if (name === "homeassistant") return `${(bc.entities || []).length} entities`;
-  if (name === "message") return bc.text || "";
-  if (name === "spotify" || name === "plex") return bc.takeover ? "takes over while playing" : `${bc.duration}s in rotation`;
-  return `${bc.duration}s`;
+  const tags = [];
+  if (SCHEMA[name].group === "Sports") {
+    tags.push((bc.favorites || []).length ? "★ " + bc.favorites.join(", ") : "all teams");
+    if (bc.favorites_only) tags.push("favorites only");
+    if (bc.live_only) tags.push("live only");
+    if (bc.takeover) tags.push("takeover");
+  } else if (name === "homeassistant") tags.push(`${(bc.entities || []).length} entities`);
+  else if (name === "message") tags.push(bc.text || "");
+  else if (name === "spotify") {
+    tags.push(bc.source === "spotify" ? "Spotify API" : "via Home Assistant");
+    if (bc.takeover) tags.push("takes over while playing");
+  } else if (name === "plex") tags.push(bc.takeover ? "takes over while playing" : `${bc.duration}s`);
+  else tags.push(`${bc.duration}s`);
+  if (bc.scroll_mode) tags.push("scroll mode");
+  return tags.join(" · ");
 }
 
 // ---------------------------------------------------------------- other tabs
@@ -336,6 +362,7 @@ $("#btn-power").onclick = () => api("/api/control", { action: "power", on: !STAT
 $("#btn-refresh").onclick = () => api("/api/control", { action: "refresh" }).then(() => toast("Refreshing data…"));
 $("#btn-restart").onclick = () => confirm("Restart LEDBoard?") && restart();
 $("#btn-save").onclick = save;
+$("#toggle-disabled").onclick = () => { showDisabled = !showDisabled; localStorageSet("showDisabled", showDisabled ? "1" : "0"); renderBoards(); };
 $("#btn-discard").onclick = reloadConfig;
 let brTimer;
 $("#brightness").oninput = (e) => {

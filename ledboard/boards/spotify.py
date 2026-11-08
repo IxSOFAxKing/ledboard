@@ -1,6 +1,10 @@
-"""Spotify "now playing" via the Spotify Web API.
+"""Now Playing: from Home Assistant media players (e.g. HA's Spotify integration)
+or directly from the Spotify Web API.
 
-Setup (done from the web UI):
+Home Assistant source: pick media_player entities; uses the URL/token from the
+Home Assistant board. Works with any HA media player (Spotify, Sonos, ...).
+
+Spotify API source setup (done from the web UI):
   1. Create an app at https://developer.spotify.com/dashboard
   2. Add the redirect URI shown in the web UI (default http://127.0.0.1:8080/spotify/callback)
   3. Paste Client ID + Secret into the web UI and click "Connect Spotify".
@@ -28,20 +32,30 @@ GREEN = (30, 215, 96)
 
 class SpotifyBoard(Board):
     name = "spotify"
-    title = "Spotify"
-    description = "Shows what's playing on your Spotify account. Skipped when nothing is playing."
+    title = "Now Playing (Spotify)"
+    description = ("Shows what's playing. Get it from Home Assistant (e.g. its Spotify integration, "
+                   "Sonos, or any media player) or straight from Spotify. Skipped when nothing is playing.")
     refresh = 5
     DEFAULTS = {
         "enabled": False, "duration": 15, "refresh": 5, "takeover": True, "show_paused": False,
+        "source": "homeassistant", "ha_entities": [],
         "client_id": "", "client_secret": "", "refresh_token": "",
         "redirect_uri": "http://127.0.0.1:8080/spotify/callback",
         "title_color": "#ffffff", "artist_color": "#1ed760",
     }
     FIELDS = [
-        {"key": "spotify_auth", "label": "Account", "type": "spotify_auth"},
-        {"key": "client_id", "label": "Client ID", "type": "text"},
-        {"key": "client_secret", "label": "Client Secret", "type": "password"},
-        {"key": "redirect_uri", "label": "Redirect URI (must match your Spotify app)", "type": "text"},
+        {"key": "source", "label": "Get now-playing info from", "type": "select",
+         "options": ["homeassistant", "spotify"],
+         "option_labels": {"homeassistant": "Home Assistant media player", "spotify": "Spotify Web API"}},
+        {"key": "ha_entities", "label": "Media player entities (comma-separated)", "type": "list",
+         "show_if": {"source": "homeassistant"}, "datalist": "ha-media-players",
+         "help": "e.g. media_player.spotify_adam. Uses the URL and token from the Home Assistant board. "
+                 "If several are playing, each gets its own slide."},
+        {"key": "spotify_auth", "label": "Account", "type": "spotify_auth", "show_if": {"source": "spotify"}},
+        {"key": "client_id", "label": "Client ID", "type": "text", "show_if": {"source": "spotify"}},
+        {"key": "client_secret", "label": "Client Secret", "type": "password", "show_if": {"source": "spotify"}},
+        {"key": "redirect_uri", "label": "Redirect URI (must match your Spotify app)", "type": "text",
+         "show_if": {"source": "spotify"}},
         {"key": "takeover", "label": "Take over the display while music is playing", "type": "bool"},
         {"key": "show_paused", "label": "Keep showing when paused", "type": "bool"},
         {"key": "duration", "label": "Seconds on screen (in rotation)", "type": "number"},
@@ -54,8 +68,9 @@ class SpotifyBoard(Board):
         super().__init__(cfg, app)
         self.access_token = None
         self.token_expiry = 0
-        self.now = None      # dict describing current track
+        self.now = None      # dict describing current track (first player)
         self.fetched_at = 0
+        self.players = {}    # slide key -> (now dict, fetched_at)
 
     # -- auth -----------------------------------------------------------------
     def auth_url(self, state="ledboard"):
@@ -103,6 +118,10 @@ class SpotifyBoard(Board):
 
     # -- data -----------------------------------------------------------------
     def update(self):
+        if self.cfg.get("source", "homeassistant") == "homeassistant":
+            self._update_ha()
+            return
+        self.players = {}
         if not (self.cfg.get("client_id") and self.cfg.get("refresh_token")):
             self.now = None
             return
@@ -120,6 +139,66 @@ class SpotifyBoard(Board):
         r.raise_for_status()
         self.now = self.parse(r.json(), self.app.height)
         self.fetched_at = time.time()
+        self.players = {"spotify": (self.now, self.fetched_at)} if self.now else {}
+
+    def _update_ha(self):
+        ha = self.app.boards.get("homeassistant")
+        hcfg = ha.cfg if ha else {}
+        base = (hcfg.get("url") or "").rstrip("/")
+        ents = [e.strip() for e in self.cfg.get("ha_entities", []) if e and e.strip()]
+        if not (base and hcfg.get("token") and ents):
+            self.players, self.now = {}, None
+            if ents and not (base and hcfg.get("token")):
+                raise RuntimeError("Set the Home Assistant URL and token on the Home Assistant board")
+            return
+        headers = {"Authorization": f"Bearer {hcfg['token']}"}
+        verify = bool(hcfg.get("verify_ssl", True))
+        players = {}
+        for ent in ents:
+            r = requests.get(f"{base}/api/states/{ent}", headers=headers, timeout=10, verify=verify)
+            if r.status_code == 404:
+                raise RuntimeError(f"Home Assistant has no entity {ent}")
+            r.raise_for_status()
+            now = self.parse_ha(r.json(), base, headers, verify, self.app.height)
+            if now:
+                players[ent] = (now, time.time())
+        self.players = players
+        self.now = next(iter(players.values()))[0] if players else None
+        self.fetched_at = time.time()
+
+    @staticmethod
+    def parse_ha(st, base, headers, verify, art_size=32):
+        """HA media_player state -> now-playing dict (None if idle/off)."""
+        state = st.get("state")
+        if state not in ("playing", "paused"):
+            return None
+        a = st.get("attributes", {})
+        title = a.get("media_title") or ""
+        if not title:
+            return None
+        artist = a.get("media_artist") or a.get("media_series_title") or a.get("media_album_artist") or ""
+        pos = float(a.get("media_position") or 0)
+        upd = a.get("media_position_updated_at")
+        if state == "playing" and upd:
+            try:
+                from datetime import datetime, timezone
+                then = datetime.fromisoformat(upd.replace("Z", "+00:00"))
+                pos += max(0.0, (datetime.now(timezone.utc) - then).total_seconds())
+            except ValueError:
+                pass
+        pic = a.get("entity_picture") or ""
+        art = None
+        if pic:
+            url = pic if pic.startswith("http") else base + pic
+            # cache by the picture path minus the rotating access token
+            key = "ha|" + url.split("token=")[0] + "|" + (url.split("cache=")[-1] if "cache=" in url else "")
+            art = fetch_image(url, art_size, art_size, headers=headers, verify=verify, cache_key=key)
+        dur = float(a.get("media_duration") or 0)
+        return {"id": a.get("media_content_id") or title, "title": title, "artist": artist,
+                "album": a.get("media_album_name") or "", "duration": int(dur * 1000),
+                "progress": int(min(pos, dur) * 1000 if dur else pos * 1000),
+                "playing": state == "playing", "art": art,
+                "player": a.get("friendly_name") or st.get("entity_id", "")}
 
     @staticmethod
     def parse(j, art_size=32):
@@ -146,10 +225,7 @@ class SpotifyBoard(Board):
         }
 
     def slides(self):
-        n = self.now
-        if not n or not (n["playing"] or self.cfg.get("show_paused")):
-            return []
-        return ["now"]
+        return [k for k, (n, _) in self.players.items() if n["playing"] or self.cfg.get("show_paused")]
 
     def takeover_slides(self):
         return self.slides() if self.cfg.get("takeover") else []
@@ -158,7 +234,7 @@ class SpotifyBoard(Board):
         return self.duration
 
     def render(self, c, slide, t):
-        n = self.now
+        n, fetched_at = self.players.get(slide, (None, 0))
         if not n:
             return
         H, W = c.height, c.width
@@ -166,7 +242,7 @@ class SpotifyBoard(Board):
         x0 = H + 2
         progress = n["progress"]
         if n["playing"]:
-            progress += (time.time() - self.fetched_at) * 1000
+            progress += (time.time() - fetched_at) * 1000
         progress = min(progress, n["duration"] or progress)
         c.scroll_text(x0, W, 1, n["title"], "6x10", hex_to_rgb(self.cfg.get("title_color"), WHITE), t)
         c.scroll_text(x0, W, 11, n["artist"], "5x8", hex_to_rgb(self.cfg.get("artist_color"), GREEN), t)
@@ -180,5 +256,6 @@ class SpotifyBoard(Board):
     def status(self):
         s = super().status()
         s["connected"] = self.connected
+        s["source"] = self.cfg.get("source", "homeassistant")
         s["now"] = {k: v for k, v in (self.now or {}).items() if k != "art"} or None
         return s

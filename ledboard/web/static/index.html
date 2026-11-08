@@ -46,7 +46,10 @@
   </nav>
 
   <section id="tab-boards" class="tab active">
-    <p class="muted small">Boards rotate in this order. Use the arrows to reorder. Boards with nothing to show (e.g. Spotify when paused) are skipped automatically.</p>
+    <div class="row between">
+      <p class="muted small">Boards rotate in this order. Use the arrows to reorder. Boards with nothing to show (e.g. no games today, nothing playing) are skipped automatically.</p>
+      <button id="toggle-disabled" class="small"></button>
+    </div>
     <div id="boards"></div>
   </section>
 
@@ -75,6 +78,7 @@
 </div>
 <div id="toast" class="toast hidden"></div>
 <datalist id="ha-entities"></datalist>
+<datalist id="ha-media-players"></datalist>
 <script src="/static/app.js"></script>
 </body>
 </html>

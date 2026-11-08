@@ -44,7 +44,7 @@ DEFAULTS = {
         "brightness": 15,
     },
     "fallback_board": "clock",  # shown when no board has anything to display
-    "rotation": ["sports", "spotify", "plex", "homeassistant", "clock", "message"],
+    "rotation": [],             # defaults to the board registry order
     "boards": {},               # filled from each board's DEFAULTS
 }
 
@@ -64,11 +64,13 @@ def deep_merge(base, override):
 
 
 class Config:
-    def __init__(self, path=DEFAULT_PATH, board_defaults=None):
+    def __init__(self, path=DEFAULT_PATH, board_defaults=None, migrate=None):
         self.path = path
+        self.migrate = migrate
         self.lock = threading.RLock()
         defaults = copy.deepcopy(DEFAULTS)
         defaults["boards"] = copy.deepcopy(board_defaults or {})
+        defaults["rotation"] = list(defaults["boards"])
         self.defaults = defaults
         self.data = copy.deepcopy(defaults)
         self.load()
@@ -78,7 +80,15 @@ class Config:
             if os.path.exists(self.path):
                 try:
                     with open(self.path) as f:
-                        self.data = deep_merge(self.defaults, json.load(f))
+                        raw = json.load(f)
+                    migrated = bool(self.migrate and self.migrate(raw))
+                    self.data = deep_merge(self.defaults, raw)
+                    if migrated:
+                        import shutil
+                        shutil.copy2(self.path, self.path + ".bak")
+                        log.info("Upgraded config format in %s (old copy saved as .bak)", self.path)
+                        self.load_rotation_fixup()
+                        self.save()
                 except Exception as e:
                     log.error("Failed to read %s (%s); using defaults", self.path, e)
             else:

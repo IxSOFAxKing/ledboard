@@ -6,7 +6,7 @@ import logging
 import signal
 import sys
 
-from .boards import board_defaults
+from .boards import board_defaults, migrate
 from .config import DEFAULT_PATH, Config, import_sportsmatrix
 
 
@@ -25,7 +25,7 @@ def main(argv=None):
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
-    cfg = Config(a.config, board_defaults())
+    cfg = Config(a.config, board_defaults(), migrate)
 
     if a.command == "import-sportsmatrix":
         found = import_sportsmatrix(a.path, cfg)

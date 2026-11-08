@@ -10,7 +10,7 @@ import requests
 from flask import Flask, Response, jsonify, redirect, request, send_from_directory
 
 from .. import fonts
-from ..boards import BOARD_CLASSES
+from ..boards import BOARD_CLASSES, LeagueBoard, board_fields
 from ..config import MASK
 
 log = logging.getLogger(__name__)
@@ -58,7 +58,8 @@ def create_app(engine):
     # -- config -------------------------------------------------------------------
     @app.get("/api/config")
     def get_config():
-        schema = {name: {"title": cls.title, "description": cls.description, "fields": cls.FIELDS}
+        schema = {name: {"title": cls.title, "description": cls.description, "fields": board_fields(cls),
+                         "group": "Sports" if issubclass(cls, LeagueBoard) else "Other"}
                   for name, cls in BOARD_CLASSES.items()}
         return jsonify({"config": config.public(), "schema": schema, "fonts": fonts.available(),
                         "hardware_mappings": HARDWARE_MAPPINGS})
@@ -157,6 +158,7 @@ def create_app(engine):
         engine.save_board_value("spotify", "refresh_token", "")
         engine.boards["spotify"].access_token = None
         engine.boards["spotify"].now = None
+        engine.boards["spotify"].players = {}
         return jsonify({"ok": True})
 
     # -- home assistant / plex helpers ------------------------------------------------
