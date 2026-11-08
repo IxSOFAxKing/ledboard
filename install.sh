@@ -18,15 +18,39 @@ python3 -m venv "$DIR/venv"
 "$DIR/venv/bin/pip" install --upgrade pip wheel
 "$DIR/venv/bin/pip" install -r "$DIR/requirements.txt"
 
+MEM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+JOBS=$(nproc)
+if [ "$MEM_MB" -lt 1500 ]; then
+  # Low-RAM boards (Pi Zero 2 W, Pi 3): compiling with every core at once runs the
+  # Pi out of memory and makes it unresponsive. Use one compiler job and more swap.
+  JOBS=1
+  if [ -f /etc/dphys-swapfile ]; then
+    CUR=$(awk -F= '/^CONF_SWAPSIZE/ {print $2}' /etc/dphys-swapfile)
+    if [ "${CUR:-0}" -lt 1024 ]; then
+      echo "==> Low memory (${MEM_MB} MB): raising swap to 1 GB for the build"
+      sed -i 's/^#\?CONF_SWAPSIZE=.*/CONF_SWAPSIZE=1024/' /etc/dphys-swapfile
+      grep -q '^CONF_SWAPSIZE' /etc/dphys-swapfile || echo 'CONF_SWAPSIZE=1024' >> /etc/dphys-swapfile
+      grep -q '^CONF_MAXSWAP' /etc/dphys-swapfile || echo 'CONF_MAXSWAP=2048' >> /etc/dphys-swapfile
+      systemctl restart dphys-swapfile || true
+    fi
+  fi
+fi
+export CMAKE_BUILD_PARALLEL_LEVEL=$JOBS MAKEFLAGS="-j$JOBS"
+
 if ! "$DIR/venv/bin/python" -c "import rgbmatrix" 2>/dev/null; then
-  echo "==> Building hzeller/rpi-rgb-led-matrix Python bindings (takes a few minutes)"
+  echo "==> Building hzeller/rpi-rgb-led-matrix Python bindings ($JOBS compile job(s))"
+  echo "    This can take 20-40 minutes on a Pi Zero 2 W. Don't interrupt it."
   SRC="$DIR/.build/rpi-rgb-led-matrix"
   if [ ! -d "$SRC" ]; then
     git clone --depth 1 https://github.com/hzeller/rpi-rgb-led-matrix.git "$SRC"
   fi
-  "$DIR/venv/bin/pip" install "$SRC"
+  "$DIR/venv/bin/pip" install -v "$SRC" 2>&1 | grep --line-buffered -E "Building|\[ *[0-9]+%\]|error|Successfully" || true
 fi
-"$DIR/venv/bin/python" -c "import rgbmatrix; print('rgbmatrix OK')"
+if ! "$DIR/venv/bin/python" -c "import rgbmatrix; print('rgbmatrix OK')"; then
+  echo "!! Building the rgbmatrix bindings failed. Re-run with full output to see why:"
+  echo "   sudo $DIR/venv/bin/pip install -v $DIR/.build/rpi-rgb-led-matrix"
+  exit 1
+fi
 
 echo "==> Config"
 mkdir -p /etc/ledboard /var/cache/ledboard
