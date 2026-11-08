@@ -1,7 +1,7 @@
 // LEDBoard service worker: makes the web UI installable and lets it open instantly.
 // The app shell is served network-first (so updates show up right away) with a cached
 // fallback; API calls and the live preview always go to the network and are never cached.
-const CACHE = "ledboard-shell-v1";
+const CACHE = "ledboard-shell-v2";
 const SHELL = ["/", "/static/style.css", "/static/app.js", "/manifest.webmanifest",
   "/static/icons/icon-192.png", "/static/icons/icon-512.png"];
 

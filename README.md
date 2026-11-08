@@ -15,7 +15,7 @@ It's built for two chained 64×32 panels (128×32), and the layouts scale to oth
 | **Clock** | The time and date. Every piece of text (time, AM/PM, date, an optional extra line) has its own font size, color and format. It's also the fallback when nothing else has content. |
 | **Custom message** | Your own text in the rotation. You can also flash a one-off message from the UI or API. |
 
-The web UI also covers: board order, enable and disable, per-board settings, "show now", next and pause, power, a brightness slider, quiet hours (dim or off on a schedule), global scroll defaults, hardware settings, optional password protection, and a status page with errors.
+A compact live preview stays pinned under the header as you scroll down. Tap it to jump back to the controls. The web UI also covers: board order, enable and disable, per-board settings, "show now", next and pause, power, a brightness slider, quiet hours (dim or off on a schedule), global scroll defaults, hardware settings, optional password protection, and a status page with errors.
 
 ## Install on the Pi
 

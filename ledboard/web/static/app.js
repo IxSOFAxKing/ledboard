@@ -51,22 +51,56 @@ async function pollFrame() {
   } catch {} finally { previewBusy = false; }
 }
 
+// Pinned mini preview: appears under the header once the main preview is scrolled away.
+const mini = $("#mini-live"), miniCanvas = $("#mini-preview"), mctx = miniCanvas.getContext("2d");
+let mainVisible = true;
+
 function drawLeds(bmp) {
   const W = bmp.width, H = bmp.height;
   scratch.width = W; scratch.height = H;
   sctx.drawImage(bmp, 0, 0);
   const px = sctx.getImageData(0, 0, W, H).data;
-  const avail = preview.parentElement.clientWidth - 20;
-  const s = Math.max(2, Math.floor(avail / W));
-  if (preview.width !== W * s) { preview.width = W * s; preview.height = H * s; preview.style.width = W * s + "px"; }
-  pctx.fillStyle = "#050505"; pctx.fillRect(0, 0, preview.width, preview.height);
+  if (mainVisible) {
+    paintLeds(preview, pctx, px, W, H, preview.parentElement.clientWidth - 20, Infinity, 2);
+  } else {
+    // compact: at most ~13% of the screen height so it never crowds the page
+    const maxH = Math.min(120, Math.max(40, window.innerHeight * 0.13));
+    paintLeds(miniCanvas, mctx, px, W, H, mini.clientWidth - 24, maxH, 1);
+  }
+}
+
+function paintLeds(canvas, ctx, px, W, H, availW, maxH, minScale) {
+  const s = Math.max(minScale, Math.floor(Math.min(availW / W, maxH / H)));
+  if (canvas.width !== W * s) { canvas.width = W * s; canvas.height = H * s; canvas.style.width = W * s + "px"; }
+  ctx.fillStyle = "#050505"; ctx.fillRect(0, 0, canvas.width, canvas.height);
   const r = s * 0.42;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const i = (y * W + x) * 4, R = px[i], G = px[i + 1], B = px[i + 2];
-    pctx.fillStyle = (R | G | B) ? `rgb(${R},${G},${B})` : "#141414";
-    pctx.beginPath(); pctx.arc(x * s + s / 2, y * s + s / 2, r, 0, 6.2832); pctx.fill();
+    ctx.fillStyle = (R | G | B) ? `rgb(${R},${G},${B})` : "#141414";
+    if (s < 3) { ctx.fillRect(x * s, y * s, s, s); continue; }       // tiny: square pixels read better
+    ctx.beginPath(); ctx.arc(x * s + s / 2, y * s + s / 2, r, 0, 6.2832); ctx.fill();
   }
 }
+
+function headerHeight() { return document.querySelector("header").offsetHeight; }
+function placeMini() { document.documentElement.style.setProperty("--header-h", headerHeight() + "px"); }
+placeMini();
+window.addEventListener("resize", placeMini);
+
+// Show the mini preview when the main one is (mostly) hidden behind the header / off screen.
+let miniObserver;
+function watchPreview() {
+  if (miniObserver) miniObserver.disconnect();
+  miniObserver = new IntersectionObserver(([entry]) => {
+    mainVisible = entry.isIntersecting;
+    mini.classList.toggle("show", !mainVisible);
+    mini.setAttribute("aria-hidden", mainVisible ? "true" : "false");
+  }, { rootMargin: `-${headerHeight()}px 0px 0px 0px`, threshold: 0.35 });
+  miniObserver.observe($(".preview-wrap"));
+}
+watchPreview();
+window.addEventListener("resize", watchPreview);
+mini.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
 
 // ---------------------------------------------------------------- state
 async function pollState() {
@@ -78,6 +112,8 @@ async function pollState() {
   const cur = st.current;
   $("#now-board").textContent = st.overlay ? "Message" : cur ? (SCHEMA?.[cur.board]?.title || cur.board) : "—";
   $("#now-slide").textContent = !st.overlay && cur && cur.slides > 1 ? `${cur.slide} / ${cur.slides}` : "";
+  $("#mini-board").textContent = $("#now-board").textContent;
+  $("#mini-slide").textContent = $("#now-slide").textContent;
   $("#badge-takeover").classList.toggle("hidden", !st.takeover);
   $("#badge-quiet").classList.toggle("hidden", !st.quiet_hours);
   $("#btn-pause").textContent = st.paused ? "Resume" : "Pause";
