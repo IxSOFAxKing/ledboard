@@ -29,6 +29,8 @@ jobs:
           - { arch: aarch64, platform: linux/arm64,  os: bookworm, runner: ubuntu-24.04-arm }
           - { arch: aarch64, platform: linux/arm64,  os: trixie,   runner: ubuntu-24.04-arm }
     steps:
+      - uses: actions/checkout@v4
+
       - uses: docker/setup-qemu-action@v3
         if: matrix.arch == 'armv7l'
         with:
@@ -37,7 +39,7 @@ jobs:
       - name: Build and test wheel
         run: |
           mkdir -p out
-          docker run --rm --platform ${{ matrix.platform }} -v "$PWD/out:/out" \
+          docker run --rm --platform ${{ matrix.platform }} -v "$PWD/out:/out" -v "$PWD/deploy:/deploy:ro" \
             -e REF="${{ github.event.inputs.ref || 'master' }}" -e ARCH="${{ matrix.arch }}" \
             debian:${{ matrix.os }} bash -euxc '
               apt-get update
@@ -48,7 +50,9 @@ jobs:
               git -C /src rev-parse HEAD > /out/COMMIT
               python3 -m venv /v
               /v/bin/pip install -U pip wheel
-              /v/bin/pip wheel /src -w /build -v
+              # the bindings #include Pillow's Imaging.h, which Pillow wheels do not ship
+              INC=$(/v/bin/python /deploy/pillow_headers.py /pillow)
+              CFLAGS="-I$INC" /v/bin/pip wheel /src -w /build -v
               cd /build
               if [ "$ARCH" = armv7l ]; then
                 # also tag for 32-bit userland on a 64-bit kernel (reports armv8l)

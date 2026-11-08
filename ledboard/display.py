@@ -69,14 +69,22 @@ class MatrixDisplay:
         self.width = self.matrix.width
         self.height = self.matrix.height
         self.brightness = cfg["brightness"]
+        self._last = None
 
     def set_brightness(self, value):
         self.brightness = int(value)
         self.matrix.brightness = self.brightness
         self.offscreen.brightness = self.brightness
+        self._last = None  # brightness is applied when pixels are set, so re-push
 
     def show(self, image):
-        self.offscreen.SetImage(image)
+        data = image.tobytes()
+        if data == self._last:
+            return  # nothing changed (e.g. the clock between seconds): skip the copy
+        self._last = data
+        # unsafe=False: the "unsafe" fast path reads Pillow's private C struct, whose
+        # layout changes between Pillow versions; the safe path works with any version.
+        self.offscreen.SetImage(image, unsafe=False)
         self.offscreen = self.matrix.SwapOnVSync(self.offscreen)
 
     def clear(self):

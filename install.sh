@@ -57,6 +57,8 @@ if ! "$DIR/venv/bin/python" -c "import rgbmatrix" 2>/dev/null; then
   if [ ! -d "$SRC" ]; then
     git clone --depth 1 https://github.com/hzeller/rpi-rgb-led-matrix.git "$SRC"
   fi
+  # the bindings #include Pillow's Imaging.h, which Pillow wheels do not ship
+  export CFLAGS="-I$("$DIR/venv/bin/python" "$DIR/deploy/pillow_headers.py" "$DIR/.build/pillow")"
   "$DIR/venv/bin/pip" install -v "$SRC" 2>&1 | grep --line-buffered -E "Building|\[ *[0-9]+%\]|error|Successfully" || true
 fi
 fi
