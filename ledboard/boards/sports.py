@@ -132,7 +132,7 @@ def parse_event(ev, league_key):
             "score": c.get("score", ""),
             "color": hex_to_rgb(t.get("color"), GRAY),
             "alt": hex_to_rgb(t.get("alternateColor"), WHITE),
-            "logo_url": t.get("logo"),
+            "logo_url": t.get("logo") or ((t.get("logos") or [{}])[0].get("href")),
             "record": rec[0].get("summary", "") if rec else "",
             "winner": bool(c.get("winner")),
             "rank": rank if isinstance(rank, int) and 0 < rank <= 25 else None,
@@ -347,6 +347,7 @@ class LeagueBoard(Board):
         "hide_favorite_score": False, "detailed_live": True, "show_last_play": True, "score_flash": True,
         "use_dark_logos": True, "live_layout": "classic", "show_win_probability": True, "goal_animation": True,
         "celebrations": True, "celebrate_field_goals": False, "celebrate_runs": False,
+        "next_game": "no_games", "show_standings": False,
     }
 
     @classmethod
@@ -414,6 +415,13 @@ class LeagueBoard(Board):
             f.append({"key": "simulate", "label": "Simulate", "type": "simulate", "section": "Celebrations",
                       "options": SIM_KINDS[sport]})
         f += [
+            {"key": "next_game", "label": "Next-game countdown for favorite teams", "type": "select", "section": "Off days",
+             "options": ["no_games", "always", "off"],
+             "option_labels": {"no_games": "When there are no games to show", "always": "Always (in addition to games)",
+                               "off": "Off"},
+             "help": "Logos, a countdown (live h:mm:ss in the last day), kickoff time, opponent and TV network."},
+            {"key": "show_standings", "label": "Show standings (favorite team's division / group)", "type": "bool",
+             "section": "Off days", "help": "Paged table, 4 teams per page, your team highlighted."},
             {"key": "preview", "label": "Preview", "type": "actions", "section": "Preview", "action": "preview",
              "options": {"live": "Live game", "pre": "Upcoming", "post": "Final", "all": "All three"},
              "help": "Shows sample games with your current settings and layout for 3 minutes, even in the "
@@ -433,6 +441,9 @@ class LeagueBoard(Board):
         self.flash: dict[str, float] = {}     # "gameid|side" -> until (monotonic)
         self._scores: dict[str, str] = {}
         self.pending = []                     # queued Celebration slides
+        self.next_games: dict = {}            # favorite abbr -> next scheduled game
+        self.standings_data: list = []        # [(group name, rows)]
+        self._offday_at = 0.0
         self.preview_state = ([], 0.0)        # (sample games, show until epoch)
         self._cel_lock = threading.Lock()
         self._last_td: dict[str, float] = {}
@@ -476,6 +487,50 @@ class LeagueBoard(Board):
                     self._maybe_celebrate(g, side, int(_num(score) - _num(old)))
                 self._scores[key] = score
         self.games = games
+        self._update_offdays()
+
+    OFFDAY_REFRESH = 3 * 3600
+
+    def _update_offdays(self):
+        """Schedules (next game) and standings, refreshed every few hours; failures never break scores."""
+        c = self.cfg
+        want_next = c.get("next_game", "no_games") != "off" and self.favorites()
+        want_table = c.get("show_standings")
+        key = (bool(want_next), bool(want_table), tuple(sorted(self.favorites())))
+        if not (want_next or want_table):
+            return
+        if key == getattr(self, "_offday_key", None) and time.time() - self._offday_at < self.OFFDAY_REFRESH:
+            return
+        self._offday_key = key
+        from . import offdays
+        from .sample_games import fetch_teams
+        sport, path, _, _ = LEAGUES[self.league]
+        self._offday_at = time.time()
+        if want_next:
+            teams = fetch_teams(sport, path)
+            found = {}
+            for fav in list(self.favorites())[:3]:
+                tid = (teams.get(fav) or {}).get("id")
+                if not tid:
+                    continue
+                try:
+                    g = offdays.next_game(sport, path, self.league, tid, parse_event)
+                except Exception as e:
+                    log.info("[%s] schedule for %s unavailable: %s", self.name, fav, e)
+                    continue
+                if g:
+                    for side in ("home", "away"):
+                        self._load_logo(g[side])
+                    found[fav] = g
+            self.next_games = found
+        if want_table:
+            try:
+                self.standings_data = offdays.standings(sport, path, self.favorites())
+                for _, rows in self.standings_data:
+                    for row in rows:
+                        self._load_logo({"logo_url": row["logo_url"]})
+            except Exception as e:
+                log.info("[%s] standings unavailable: %s", self.name, e)
 
     # -- celebrations ----------------------------------------------------------
     def _maybe_celebrate(self, g, side, diff):
@@ -577,7 +632,19 @@ class LeagueBoard(Board):
         return self._preview_games() + out
 
     def slides(self):
-        return [g["id"] for g in self.visible_games()]
+        games = [g["id"] for g in self.visible_games()]
+        out = list(games)
+        mode = self.cfg.get("next_game", "no_games")
+        if mode == "always" or (mode == "no_games" and not games):
+            for fav, g in self.next_games.items():
+                if g["id"] not in games and (g["start"] is None or g["start"] > datetime.now(timezone.utc)):
+                    out.append(f"next:{fav}")
+        if self.cfg.get("show_standings"):
+            from .offdays import ROWS_PER_PAGE
+            for gi, (_, rows) in enumerate(self.standings_data):
+                for p in range(max(1, -(-len(rows) // ROWS_PER_PAGE))):
+                    out.append(f"standings:{gi}:{p}")
+        return out
 
     def takeover_slides(self):
         if not self.cfg.get("takeover"):
@@ -626,6 +693,19 @@ class LeagueBoard(Board):
         if isinstance(slide, Celebration):
             from . import celebrations
             celebrations.render(self, c, slide, t, team_color)
+            return
+        if isinstance(slide, str) and slide.startswith("next:"):
+            g = self.next_games.get(slide[5:])
+            if g:
+                from .offdays import render_next_game
+                render_next_game(self, c, g, slide[5:], t, team_color)
+            return
+        if isinstance(slide, str) and slide.startswith("standings:"):
+            _, gi, page = slide.split(":")
+            if int(gi) < len(self.standings_data):
+                from .offdays import render_standings
+                name, rows = self.standings_data[int(gi)]
+                render_standings(self, c, name, rows, int(page), self.sport, team_color)
             return
         g = self._game(slide)
         if not g:
