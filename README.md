@@ -45,7 +45,7 @@ sudo nano /etc/ledboard/config.json  # everything in the UI is stored here
 
 ## Setting up integrations
 
-All of this is done in the web UI under **Boards → ⚙**. Disabled boards are hidden until you click **Show disabled boards**.
+All of this is done in the web UI under **Boards → ⚙**. Enabled boards are listed first, in rotation order. Disabled boards sit below them and are hidden until you click **Show disabled boards**. Turning a board on adds it to the end of the rotation.
 
 ### Scroll mode (every board)
 Every board has a **Scroll mode** switch. When it's on, the board's slides scroll across the display one after another, like a ticker, instead of showing one at a time.
@@ -148,7 +148,19 @@ LEDBoard saves the refresh token, so you only do this once.
    - turn the **Now**, **4-day forecast** and **Next 24 hours** screens on or off
 
 ### Clock
-The time, AM/PM, date and an optional extra line each have their own font, from tiny (4×6) up to huge (10×20), and their own color. You can also set:
+The time, AM/PM, date and an optional extra line each have their own font, size and color.
+
+There are two kinds of font:
+- **Scalable fonts**, which take any pixel size:
+  - Bebas Neue, Anton, Oswald, Big Shoulders and Teko (tall and condensed styles)
+  - Orbitron (futuristic)
+  - DSEG7 and DSEG14 (7- and 14-segment "digital clock" displays)
+  - Doto (dot matrix)
+  - Pixelify Sans, Press Start 2P, VT323 and Silkscreen (pixel and retro)
+  - Share Tech Mono and Righteous
+- **Fixed-size pixel fonts**, from 4×6 up to 10×20.
+
+Leave the time's size blank and it grows as large as fits around the other lines. **Smooth edges** turns on anti-aliasing for scalable fonts. Scalable fonts look best at about 10 px and up, so the fixed pixel fonts are better for small dates. Font licenses are in `ledboard/fonts/ttf/LICENSES.txt`. You can also set:
 - the date format, from presets or a custom `strftime` pattern
 - 24-hour time, seconds, a leading zero and a blinking colon
 - uppercase or lowercase

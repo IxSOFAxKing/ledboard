@@ -6,12 +6,86 @@ as RGBA images, so drawing text every frame is cheap.
 """
 from __future__ import annotations
 
+import math
 import os
 from functools import lru_cache
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
+TTF_DIR = os.path.join(FONT_DIR, "ttf")
+
+# Scalable fonts (all SIL Open Font License, see fonts/ttf/LICENSES.txt):
+# key: (label, file, variable-font weight to use or None). True pixel fonts are listed in
+# PIXEL_GRID: they only look clean at multiples of their design size.
+SCALABLE = {
+    "bebas": ("Bebas Neue - tall condensed", "BebasNeue-Regular.ttf", None),
+    "anton": ("Anton - heavy condensed", "Anton-Regular.ttf", None),
+    "oswald": ("Oswald - condensed", "Oswald[wght].ttf", "SemiBold"),
+    "bigshoulders": ("Big Shoulders - stadium", "BigShouldersDisplay[wght].ttf", "Bold"),
+    "teko": ("Teko - sporty", "Teko[wght].ttf", "SemiBold"),
+    "orbitron": ("Orbitron - futuristic", "Orbitron[wght].ttf", "Bold"),
+    "dseg7": ("DSEG7 - 7-segment digital clock", "DSEG7Classic-Bold.ttf", None),
+    "dseg14": ("DSEG14 - 14-segment display", "DSEG14Classic-Bold.ttf", None),
+    "doto": ("Doto - dot matrix", "Doto[ROND,wght].ttf", "Black"),
+    "pixelify": ("Pixelify Sans - pixel", "PixelifySans[wght].ttf", "SemiBold"),
+    "pressstart": ("Press Start 2P - 8-bit arcade", "PressStart2P-Regular.ttf", None),
+    "vt323": ("VT323 - retro terminal", "VT323-Regular.ttf", None),
+    "silkscreen": ("Silkscreen - tiny pixel", "Silkscreen-Regular.ttf", None),
+    "sharetech": ("Share Tech Mono - tech", "ShareTechMono-Regular.ttf", None),
+    "righteous": ("Righteous - rounded retro", "Righteous-Regular.ttf", None),
+}
+
+
+PIXEL_GRID = {"pressstart": 8, "silkscreen": 8}
+
+
+class TTFFont:
+    """A scalable font rendered at one pixel size, with the same interface as BDFFont.
+
+    `ref` is the set of characters whose ink defines the line box, so lines are as tight
+    as possible (digits only for a clock, letters with descenders for a date).
+    `smooth` keeps anti-aliased edges; otherwise pixels are on/off for crisp LEDs.
+    """
+
+    def __init__(self, key, size, ref="Ay0g", smooth=False):
+        label, file, weight = SCALABLE[key]
+        self.name = f"{key}:{size}"
+        self.font = ImageFont.truetype(os.path.join(TTF_DIR, file), size)
+        if weight:
+            try:
+                self.font.set_variation_by_name(weight)
+            except Exception:
+                pass
+        self.smooth = smooth
+        boxes = [self.font.getbbox(ch) for ch in ref if ch.strip()]
+        self.top = min(b[1] for b in boxes)
+        bottom = max(b[3] for b in boxes)
+        self.height = max(1, bottom - self.top)
+        self.ascent = self.font.getmetrics()[0] - self.top
+        self.descent = self.height - self.ascent
+
+    def width(self, text: str) -> int:
+        if not text:
+            return 0
+        b = self.font.getbbox(text)
+        return max(1, math.ceil(max(self.font.getlength(text), b[2])) - min(0, b[0]))
+
+    def render(self, text: str, color) -> Image.Image:
+        return _render_ttf(self, text, tuple(color))
+
+
+@lru_cache(maxsize=512)
+def _render_ttf(font: "TTFFont", text: str, color) -> Image.Image:
+    w = max(1, font.width(text))
+    b = font.font.getbbox(text) if text else (0, 0, 0, 0)
+    mask = Image.new("L", (w, font.height), 0)
+    d = ImageDraw.Draw(mask)
+    d.fontmode = "L" if font.smooth else "1"
+    d.text((-min(0, b[0]), -font.top), text, font=font.font, fill=255)
+    img = Image.new("RGBA", (w, font.height), color + (0,))
+    img.putalpha(mask)
+    return img
 
 
 class Glyph:
@@ -118,12 +192,28 @@ def _render_cached(font: BDFFont, text: str, color) -> Image.Image:
 _fonts: dict[str, BDFFont] = {}
 
 
-def get(name: str) -> BDFFont:
-    """Load a font by short name ('4x6', '5x8', '6x10', '7x13B', 'tom-thumb'...)."""
+def get(name: str):
+    """Load a font by name.
+
+    Bitmap fonts: '4x6', '5x8', '6x10', '7x13B', '10x20', 'tom-thumb', ...
+    Scalable fonts: 'ttf:<key>:<pixel size>[:<ref chars>][:smooth]', e.g. 'ttf:bebas:24:0123456789:'.
+    """
     if name not in _fonts:
-        path = name if os.path.isfile(name) else os.path.join(FONT_DIR, name + ".bdf")
-        _fonts[name] = BDFFont(path)
+        if name.startswith("ttf:"):
+            parts = name.split(":")
+            key, size = parts[1], int(parts[2])
+            smooth = parts[-1] == "smooth"
+            ref = ":".join(parts[3:-1] if smooth else parts[3:]) or "Ay0g"
+            _fonts[name] = TTFFont(key, size, ref=ref, smooth=smooth)
+        else:
+            path = name if os.path.isfile(name) else os.path.join(FONT_DIR, name + ".bdf")
+            _fonts[name] = BDFFont(path)
     return _fonts[name]
+
+
+def scalable(key, size, ref="Ay0g", smooth=False):
+    """Shortcut for get('ttf:...')."""
+    return get(f"ttf:{key}:{int(size)}:{ref}" + (":smooth" if smooth else ""))
 
 
 def available() -> list[str]:

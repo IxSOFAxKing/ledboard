@@ -262,6 +262,13 @@ function spotifyAuthField(obj) {
 // ---------------------------------------------------------------- boards tab
 let showDisabled = localStorageGet("showDisabled") === "1";
 
+// Enabled boards first (in their rotation order), then disabled ones. Disabled boards are
+// never shown, so this doesn't change what appears on the display.
+function partitionRotation(d) {
+  const on = d.rotation.filter((n) => d.boards[n]?.enabled);
+  d.rotation = on.concat(d.rotation.filter((n) => !d.boards[n]?.enabled));
+}
+
 function renderBoards() {
   const root = $("#boards");
   const visible = (n) => SCHEMA[n] && (showDisabled || draft.boards[n].enabled || openBoards.has(n));
@@ -275,7 +282,9 @@ function renderBoards() {
     const move = (d) => {
       // swap with the nearest board that is visible in that direction
       let j = idx + d;
-      while (j >= 0 && j < draft.rotation.length && !visible(draft.rotation[j])) j += d;
+      // only within the same group (enabled boards stay above disabled ones)
+      const same = (n) => visible(n) && !!draft.boards[n].enabled === !!bc.enabled;
+      while (j >= 0 && j < draft.rotation.length && !same(draft.rotation[j])) j += d;
       if (j < 0 || j >= draft.rotation.length) return;
       [draft.rotation[idx], draft.rotation[j]] = [draft.rotation[j], draft.rotation[idx]]; markDirty(); renderBoards();
     };
@@ -292,7 +301,14 @@ function renderBoards() {
         h("span", { class: "dot", "data-dot": name }),
         h("div", { class: "board-title", onclick: toggleOpen }, sch.title, h("span", { class: "sub" }, summary(name, bc))),
         h("button", { class: "small", title: "Show this board now", onclick: () => api("/api/control", { action: "jump", board: name }).catch((e) => toast(e.message, true)) }, "Show"),
-        h("label", { class: "switch", title: "Enabled" }, h("input", { type: "checkbox", checked: !!bc.enabled, onchange: (e) => { bc.enabled = e.target.checked; card.classList.toggle("disabled", !bc.enabled); markDirty(); } }), h("span")),
+        h("label", { class: "switch", title: "Enabled" }, h("input", { type: "checkbox", checked: !!bc.enabled, onchange: (e) => {
+          bc.enabled = e.target.checked;
+          // re-enabled boards go to the end of the enabled group; disabled ones sink below it
+          draft.rotation = draft.rotation.filter((n) => n !== name);
+          const lastEnabled = draft.rotation.reduce((acc, n, i) => (draft.boards[n]?.enabled ? i : acc), -1);
+          draft.rotation.splice(bc.enabled ? lastEnabled + 1 : draft.rotation.length, 0, name);
+          markDirty(); renderBoards();
+        } }), h("span")),
         h("button", { class: "small", onclick: toggleOpen }, "⚙")),
       body);
     return card;
@@ -368,7 +384,7 @@ function renderOtherTabs() {
 async function reloadConfig() {
   const j = await api("/api/config");
   CONFIG = j.config; SCHEMA = j.schema; FONTS = j.fonts; MAPPINGS = j.hardware_mappings;
-  draft = clone(CONFIG); dirty = false; $("#savebar").classList.add("hidden");
+  draft = clone(CONFIG); partitionRotation(draft); dirty = false; $("#savebar").classList.add("hidden");
   renderBoards(); renderOtherTabs();
 }
 
