@@ -54,6 +54,8 @@ class Engine:
         self._frame_image = None
         self.fps_measured = 0.0
         self.restart_requested = False
+        self.perf = {"render_ms": 0.0, "push_ms": 0.0}
+        self._sys_cache = (0.0, {})
         self._applied_brightness = None
 
     # -- config ---------------------------------------------------------------
@@ -295,7 +297,12 @@ class Engine:
             else:
                 self.canvas.clear()
                 img = self.canvas.image
+            t1 = time.monotonic()
             self.display.show(img)
+            t2 = time.monotonic()
+            # smoothed per-frame costs, shown on the Status tab
+            self.perf["render_ms"] = self.perf["render_ms"] * 0.95 + (t1 - t0) * 1000 * 0.05
+            self.perf["push_ms"] = self.perf["push_ms"] * 0.95 + (t2 - t1) * 1000 * 0.05
             with self._frame_lock:
                 self._frame_image = img.copy()
                 self._frame_png = None
@@ -311,6 +318,16 @@ class Engine:
 
     def stop(self):
         self.running = False
+
+    def perf_info(self):
+        """Frame timings plus Pi health (CPU temperature, throttling), refreshed every 10 s."""
+        now = time.monotonic()
+        if now - self._sys_cache[0] > 10:
+            self._sys_cache = (now, _system_health())
+        fps = max(1, int(self.cfg["display"].get("fps", 30)))
+        busy = (self.perf["render_ms"] + self.perf["push_ms"]) / (1000 / fps) * 100
+        return {"render_ms": round(self.perf["render_ms"], 2), "push_ms": round(self.perf["push_ms"], 2),
+                "frame_budget_pct": round(busy), **self._sys_cache[1]}
 
     def frame_png(self):
         with self._frame_lock:
@@ -334,5 +351,40 @@ class Engine:
             "current": {"board": cur[0], "slide": cur[2] + 1, "slides": len(cur[1])} if cur else None,
             "overlay": self.overlay["text"] if self.overlay else None,
             "fps": round(self.fps_measured, 1),
+            "perf": self.perf_info(),
             "boards": {n: b.status() for n, b in self.boards.items()},
         }
+
+
+def _system_health():
+    """CPU temperature, Pi throttling flags, load and CPU affinity (best effort, Linux only)."""
+    import os
+    import shutil
+    import subprocess
+    info = {}
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp") as f:
+            info["cpu_temp_c"] = round(int(f.read().strip()) / 1000, 1)
+    except (OSError, ValueError):
+        pass
+    if shutil.which("vcgencmd"):
+        try:
+            out = subprocess.run(["vcgencmd", "get_throttled"], capture_output=True, text=True, timeout=2).stdout
+            flags = int(out.strip().split("=")[1], 16)
+            now = [name for bit, name in ((0x1, "under-voltage"), (0x2, "freq capped"), (0x4, "throttled"),
+                                          (0x8, "temp limit")) if flags & bit]
+            past = [name for bit, name in ((0x10000, "under-voltage"), (0x40000, "throttled"),
+                                           (0x80000, "temp limit")) if flags & bit]
+            info["throttled_now"] = now
+            info["throttled_since_boot"] = past
+        except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+            pass
+    try:
+        info["load"] = round(os.getloadavg()[0], 2)
+        info["cpus_used"] = sorted(os.sched_getaffinity(0))
+        info["cpu_count"] = os.cpu_count()
+        with open("/sys/devices/system/cpu/isolated") as f:
+            info["isolated_cpus"] = f.read().strip()
+    except (OSError, AttributeError):
+        pass
+    return info

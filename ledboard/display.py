@@ -2,8 +2,48 @@
 from __future__ import annotations
 
 import logging
+import os
 
 log = logging.getLogger(__name__)
+
+CHUNK = 8                 # pixels compared at once (as a byte slice) before going pixel by pixel
+FULL_REPAINT_RATIO = 0.5  # above this share of changed chunks, a full repaint is cheaper
+
+
+def changed_pixels(new: bytes, old: bytes | None, width: int, height: int):
+    """Pixels that differ between two RGB frames, as [(x, y, r, g, b), ...].
+
+    Returns None when a full repaint is the better choice (no previous frame, or most
+    of the screen changed). Pure Python, but compares 8-pixel byte slices first so
+    unchanged areas cost almost nothing.
+    """
+    if old is None or len(old) != len(new):
+        return None
+    if new == old:
+        return []
+    row_bytes = width * 3
+    step = CHUNK * 3
+    chunks_total = height * ((width + CHUNK - 1) // CHUNK)
+    limit = chunks_total * FULL_REPAINT_RATIO
+    dirty_chunks = 0
+    out = []
+    for y in range(height):
+        r0 = y * row_bytes
+        r1 = r0 + row_bytes
+        if new[r0:r1] == old[r0:r1]:
+            continue
+        for c0 in range(r0, r1, step):
+            c1 = min(c0 + step, r1)
+            if new[c0:c1] == old[c0:c1]:
+                continue
+            dirty_chunks += 1
+            if dirty_chunks > limit:
+                return None
+            for i in range(c0, c1, 3):
+                r, g, b = new[i], new[i + 1], new[i + 2]
+                if r != old[i] or g != old[i + 1] or b != old[i + 2]:
+                    out.append(((i - r0) // 3, y, r, g, b))
+    return out
 
 
 class NullDisplay:
@@ -69,22 +109,38 @@ class MatrixDisplay:
         self.width = self.matrix.width
         self.height = self.matrix.height
         self.brightness = cfg["brightness"]
-        self._last = None
+        self._last = None          # frame currently on screen
+        self._prev = None          # frame from two swaps ago = what the offscreen canvas holds
+        self.stats = {"pixels": 0, "full": 0, "partial": 0}
+        reserve_refresh_core(cfg)
 
     def set_brightness(self, value):
         self.brightness = int(value)
         self.matrix.brightness = self.brightness
         self.offscreen.brightness = self.brightness
-        self._last = None  # brightness is applied when pixels are set, so re-push
+        # brightness is applied when pixels are set, so both buffers need a full repaint
+        self._last = self._prev = None
 
     def show(self, image):
         data = image.tobytes()
         if data == self._last:
             return  # nothing changed (e.g. the clock between seconds): skip the copy
-        self._last = data
-        # unsafe=False: the "unsafe" fast path reads Pillow's private C struct, whose
-        # layout changes between Pillow versions; the safe path works with any version.
-        self.offscreen.SetImage(image, unsafe=False)
+        # Double buffering: the offscreen canvas still holds the frame from two swaps ago,
+        # so only the pixels that differ from *that* frame need setting.
+        diff = changed_pixels(data, self._prev, self.width, self.height)
+        if diff is None:
+            # unsafe=False: the "unsafe" fast path reads Pillow's private C struct, whose
+            # layout changes between Pillow versions; the safe path works with any version.
+            self.offscreen.SetImage(image, unsafe=False)
+            self.stats["full"] += 1
+            self.stats["pixels"] += self.width * self.height
+        else:
+            set_pixel = self.offscreen.SetPixel
+            for x, y, r, g, b in diff:
+                set_pixel(x, y, r, g, b)
+            self.stats["partial"] += 1
+            self.stats["pixels"] += len(diff)
+        self._prev, self._last = self._last, data
         self.offscreen = self.matrix.SwapOnVSync(self.offscreen)
 
     def clear(self):
@@ -95,6 +151,27 @@ class MatrixDisplay:
             self.matrix.Clear()
         except Exception:
             pass
+
+
+def reserve_refresh_core(cfg):
+    """Keep LEDBoard's own threads off the core the LED refresh thread should own.
+
+    The matrix library starts its refresh thread when the matrix is created (before this
+    runs), so that thread keeps access to every core while everything LEDBoard starts
+    afterwards (web server, data fetchers, render loop) avoids the last one. If the kernel
+    has isolated a core (isolcpus=3), the library pins its refresh thread there itself.
+    """
+    if not cfg.get("reserve_cpu_core", True) or not hasattr(os, "sched_setaffinity"):
+        return
+    try:
+        cpus = sorted(os.sched_getaffinity(0))
+        if len(cpus) < 2:
+            return
+        keep = set(cpus[:-1])
+        os.sched_setaffinity(0, keep)
+        log.info("Reserved CPU %d for the LED refresh thread (LEDBoard uses CPUs %s)", cpus[-1], sorted(keep))
+    except OSError as e:
+        log.debug("could not set CPU affinity: %s", e)
 
 
 def create(cfg, simulate=False):

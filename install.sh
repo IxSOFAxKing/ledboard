@@ -88,6 +88,19 @@ if lsmod | grep -q snd_bcm2835; then
   NEED_REBOOT=1
 fi
 
+# Reserving a CPU core for the LED refresh thread is the single biggest flicker fix on
+# multi-core Pis (recommended by the rpi-rgb-led-matrix author).
+CMDLINE=/boot/firmware/cmdline.txt; [ -f "$CMDLINE" ] || CMDLINE=/boot/cmdline.txt
+if [ -f "$CMDLINE" ] && [ "$(nproc)" -ge 4 ] && ! grep -q "isolcpus=" "$CMDLINE"; then
+  read -r -p "==> Reserve CPU core 3 for the LED panels to reduce flicker (needs a reboot)? [Y/n] " ans
+  if [ "${ans:-Y}" != "n" ] && [ "${ans:-Y}" != "N" ]; then
+    cp "$CMDLINE" "$CMDLINE.bak-ledboard"
+    sed -i '1 s/$/ isolcpus=3/' "$CMDLINE"
+    echo "    Added isolcpus=3 to $CMDLINE (backup: $CMDLINE.bak-ledboard)"
+    NEED_REBOOT=1
+  fi
+fi
+
 # Only one program can drive the panels at a time.
 for svc in sportsmatrix; do
   if systemctl list-unit-files | grep -q "^$svc.service"; then

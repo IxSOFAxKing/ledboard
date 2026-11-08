@@ -211,13 +211,38 @@ Open <http://localhost:8080> to see the live LED preview. If the `rgbmatrix` mod
 
 | Symptom | Fix |
 |---|---|
-| Flicker or garbage on the panels | Raise **GPIO slowdown** under Display. A Pi 4 usually needs 3–4. |
+| Flicker | See [Reducing flicker](#reducing-flicker) below. |
+| Random sparkles or garbage pixels | Raise **GPIO slowdown** under Display by 1. |
 | Wrong colors | Change the **RGB sequence** setting. |
 | Some panels need an init sequence | Set **Panel type** to `FM6126A`. |
 | Panels only half-lit, or wrong layout | Check **rows**, **cols**, **panels chained**, and the **multiplexing** / **row address type** settings. |
 | "snd_bcm2835" error in the logs | Reboot after running the installer (it blacklists the sound module). |
 | Board shows in the UI preview but not on the panels | The pill at the top says "Simulator". Check `journalctl -u ledboard` for the matrix init error. Usually it's a wrong hardware mapping or the service isn't running as root. |
 | Sports shows nothing | Check the Status tab for errors. Off-season leagues simply have no games. |
+
+## Reducing flicker
+
+Work through these in order, checking the panels after each step.
+
+1. **Check the Status tab.** The Performance row shows:
+   - frame times
+   - CPU temperature
+   - whether the Pi has reported **under-voltage** or throttling
+
+   Under-voltage makes the refresh uneven, so fix the power supply first if it's flagged.
+2. **Set GPIO slowdown** (Display tab): 2 for a Pi Zero 2 W or Pi 3, 3–4 for a Pi 4. A value that's too high slows the refresh rate and causes flicker. A value that's too low causes sparkles. Use the lowest value that looks clean.
+3. **Reserve a CPU core for the panels.** LEDBoard already keeps its own work off the last core. For the full effect, have the kernel keep everything else off it too. `install.sh` offers this, or you can do it by hand:
+   ```bash
+   sudo sed -i '1 s/$/ isolcpus=3/' /boot/firmware/cmdline.txt && sudo reboot
+   ```
+4. **Raise the refresh rate.** Turn on **Print refresh rate to log** and watch `journalctl -u ledboard -f`. Then try these, one at a time:
+   - **PWM bits** 8–9: this roughly doubles the refresh rate.
+   - **PWM dither bits** 1.
+   - **PWM LSB nanoseconds** around 100.
+5. **Make the brightness steady.** Set **Limit refresh rate** a little below the lowest rate you saw in step 4.
+6. **Lower Render FPS** to 20–25. That's plenty for scrolling at 20 px/s and frees up CPU.
+
+LEDBoard only sends the pixels that changed to the panels, and skips frames that are identical. A scrolling line of text is typically under 10% of the screen per frame.
 
 ## Project layout
 

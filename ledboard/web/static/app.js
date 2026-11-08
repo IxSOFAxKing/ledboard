@@ -107,7 +107,22 @@ function renderStatus() {
       h("span", { class: "nm" }, SCHEMA?.[n]?.title || n),
       h("span", { class: "info" }, info, b.last_error ? h("div", { class: "err-line" }, b.last_error) : null));
   });
-  $("#status").replaceChildren(h("div", { class: "status-grid" }, rows));
+  const pf = STATE.perf || {};
+  const health = [];
+  if (pf.cpu_temp_c != null) health.push(`CPU ${pf.cpu_temp_c}°C`);
+  if (pf.load != null) health.push(`load ${pf.load}`);
+  if (pf.cpus_used) health.push(`LEDBoard on CPUs ${pf.cpus_used.join(",")} of ${pf.cpu_count}` + (pf.isolated_cpus ? ` (isolated: ${pf.isolated_cpus})` : ""));
+  const warn = [];
+  if ((pf.throttled_now || []).length) warn.push("Now: " + pf.throttled_now.join(", "));
+  if ((pf.throttled_since_boot || []).length) warn.push("Since boot: " + pf.throttled_since_boot.join(", "));
+  const perfRow = h("div", { class: "status-row" },
+    h("span", { class: "dot " + (warn.length || pf.frame_budget_pct > 60 ? "err" : "ok") }),
+    h("span", { class: "nm" }, "Performance"),
+    h("span", { class: "info" },
+      `${STATE.fps} fps · render ${pf.render_ms ?? "?"} ms · panel push ${pf.push_ms ?? "?"} ms · ${pf.frame_budget_pct ?? "?"}% of frame time`,
+      health.length ? h("div", {}, health.join(" · ")) : null,
+      warn.length ? h("div", { class: "err-line" }, "Pi power/heat warning — " + warn.join(" | ") + ". Under-voltage often causes flicker: check the Pi's power supply.") : null));
+  $("#status").replaceChildren(h("div", { class: "status-grid" }, perfRow, rows));
 }
 
 // ---------------------------------------------------------------- fields
@@ -290,11 +305,11 @@ const DISPLAY_FIELDS = [
   { key: "chain_length", label: "Panels chained", type: "number" },
   { key: "parallel", label: "Parallel chains", type: "number" },
   { key: "hardware_mapping", label: "Hardware mapping", type: "select" },
-  { key: "gpio_slowdown", label: "GPIO slowdown", type: "number", help: "Pi 4: 3–4, Pi 3: 2, Pi Zero/1: 0–1. Raise if you see flicker/garbage." },
-  { key: "pwm_bits", label: "PWM bits", type: "number" },
-  { key: "pwm_lsb_nanoseconds", label: "PWM LSB nanoseconds", type: "number" },
-  { key: "pwm_dither_bits", label: "PWM dither bits", type: "number" },
-  { key: "limit_refresh_rate_hz", label: "Limit refresh rate (Hz, 0 = off)", type: "number" },
+  { key: "gpio_slowdown", label: "GPIO slowdown", type: "number", help: "Pi 4: 3–4 · Pi 3 / Zero 2 W: 2 · Pi Zero/1: 0–1. Too high = slow refresh (flicker); too low = random sparkles/garbage. Use the lowest value that looks clean." },
+  { key: "pwm_bits", label: "PWM bits", type: "number", help: "11 = most colors. 8–9 roughly doubles the refresh rate (less flicker, esp. on camera) with little visible difference." },
+  { key: "pwm_lsb_nanoseconds", label: "PWM LSB nanoseconds", type: "number", help: "Lower (50–100) = faster refresh; too low adds ghosting." },
+  { key: "pwm_dither_bits", label: "PWM dither bits", type: "number", help: "1–2 trades a little color depth for a higher refresh rate." },
+  { key: "limit_refresh_rate_hz", label: "Limit refresh rate (Hz, 0 = off)", type: "number", help: "Set a little below your typical rate (turn on 'Print refresh rate to log') to make brightness steady instead of pulsing." },
   { key: "scan_mode", label: "Scan mode", type: "select", options: [0, 1], help: "0 = progressive, 1 = interlaced" },
   { key: "row_address_type", label: "Row address type", type: "number" },
   { key: "multiplexing", label: "Multiplexing", type: "number" },
@@ -303,7 +318,8 @@ const DISPLAY_FIELDS = [
   { key: "panel_type", label: "Panel type", type: "text", help: "e.g. FM6126A (leave blank unless needed)" },
   { key: "disable_hardware_pulsing", label: "Disable hardware pulsing", type: "bool" },
   { key: "inverse_colors", label: "Inverse colors", type: "bool" },
-  { key: "show_refresh_rate", label: "Print refresh rate to log", type: "bool" },
+  { key: "show_refresh_rate", label: "Print refresh rate to log", type: "bool", help: "Watch it with: journalctl -u ledboard -f  (turn off afterwards, it floods the log)" },
+  { key: "reserve_cpu_core", label: "Keep LEDBoard off the LED refresh CPU core", type: "bool", help: "Reduces flicker on multi-core Pis. Works best with isolcpus=3 (see README)." },
   { key: "fps", label: "Render FPS", type: "number", help: "Frames drawn per second (affects scroll smoothness and CPU)" },
 ];
 

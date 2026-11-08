@@ -34,6 +34,7 @@ DEFAULTS = {
         "show_refresh_rate": False,
         "inverse_colors": False,
         "fps": 30,
+        "reserve_cpu_core": True,
     },
     "web": {"host": "0.0.0.0", "port": 8080, "password": ""},
     "schedule": {
