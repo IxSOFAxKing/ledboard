@@ -8,7 +8,7 @@ import requests
 import urllib3
 
 from .base import Board
-from ..gfx import GRAY, WHITE, fetch_image, fmt_ms
+from ..gfx import GRAY, WHITE, Ease, fetch_image, fmt_ms
 
 PLEX_ORANGE = (229, 160, 13)
 
@@ -21,7 +21,7 @@ class PlexBoard(Board):
     DEFAULTS = {
         "enabled": False, "duration": 12, "refresh": 10, "takeover": False, "show_paused": True,
         "url": "http://192.168.1.10:32400", "token": "", "verify_ssl": False,
-        "users": [], "show_user": True,
+        "users": [], "show_user": True, "progress_style": "wavy",
     }
     FIELDS = [
         {"key": "url", "label": "Server URL", "type": "text", "help": "e.g. http://192.168.1.10:32400"},
@@ -31,6 +31,9 @@ class PlexBoard(Board):
         {"key": "show_user", "label": "Show who is watching", "type": "bool"},
         {"key": "show_paused", "label": "Show paused streams", "type": "bool"},
         {"key": "takeover", "label": "Take over the display while something is playing", "type": "bool"},
+        {"key": "progress_style", "label": "Progress bar style", "type": "select",
+         "options": ["wavy", "straight"],
+         "option_labels": {"wavy": "Wavy (animated, Material 3 style)", "straight": "Straight"}},
         {"key": "verify_ssl", "label": "Verify HTTPS certificate", "type": "bool"},
         {"key": "duration", "label": "Seconds per stream", "type": "number"},
         {"key": "refresh", "label": "Poll interval (s)", "type": "number"},
@@ -39,6 +42,7 @@ class PlexBoard(Board):
     def __init__(self, cfg, app):
         super().__init__(cfg, app)
         self.sessions: list[dict] = []
+        self._wave = Ease()
         self.fetched_at = 0
         if not cfg.get("verify_ssl"):
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -137,13 +141,19 @@ class PlexBoard(Board):
             label = s["user"]
         else:
             label = fmt_ms(offset)
-        c.scroll_text(x0, W, H - 10, label, "4x6", GRAY, t)
+        wavy = self.cfg.get("progress_style", "wavy") == "wavy"
+        ty = H - 12 if wavy else H - 10          # the wave needs a few more rows
+        c.scroll_text(x0, W, ty, label, "4x6", GRAY, t)
         if s["duration"]:
             remaining = "-" + fmt_ms(s["duration"] - offset)
             rw = c.text_width(remaining, "4x6")
             if c.text_width(label, "4x6") + rw + 4 < W - x0:
-                c.text_right(W - 1, H - 10, remaining, "4x6", GRAY)
-            c.progress(x0, H - 3, W - 1, offset / s["duration"], PLEX_ORANGE)
+                c.text_right(W - 1, ty, remaining, "4x6", GRAY)
+            frac = offset / s["duration"]
+            if wavy:
+                c.wavy_progress(x0, W - 1, H - 4, frac, PLEX_ORANGE, amp=self._wave.value(slide, s["state"] == "playing"))
+            else:
+                c.progress(x0, H - 3, W - 1, frac, PLEX_ORANGE)
 
     def status(self):
         s = super().status()

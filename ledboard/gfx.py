@@ -5,8 +5,10 @@ import colorsys
 import hashlib
 import io
 import logging
+import math
 import os
 import threading
+import time
 
 import requests
 from PIL import Image, ImageDraw
@@ -144,6 +146,52 @@ class Canvas:
         if end > x0:
             self.rect(x0, y, end, y + height - 1, color)
 
+    def blend_pixel(self, x, y, color, alpha):
+        """Draw color at the given strength without darkening what's already there."""
+        if not (0 <= x < self.width and 0 <= y < self.height) or alpha <= 0:
+            return
+        old = self.image.getpixel((x, y))
+        new = tuple(int(c * min(1.0, alpha)) for c in color)
+        self.image.putpixel((x, y), tuple(max(o, n) for o, n in zip(old, new)))
+
+    def wavy_progress(self, x0, x1, yc, frac, color, amp=1.0, track=DIM, wavelength=9.0,
+                      speed=1.3, thickness=2, thumb=True):
+        """Material 3 'wavy' progress bar.
+
+        The played part (x0 .. position) is an anti-aliased sine wave that flows while
+        `amp` > 0 (pass amp=0 when paused; ease it for a smooth flatten). The rest is a flat
+        dim track that ends in a small stop dot. `yc` is the centre row of the bar.
+        """
+        frac = max(0.0, min(1.0, frac or 0.0))
+        xp = x0 + round((x1 - x0) * frac)
+        phase = time.monotonic() * speed * 2 * math.pi
+        a = 1.5 * max(0.0, min(1.0, amp))
+        # remaining track (flat), with a gap after the thumb and a stop dot at the end
+        tx = xp + (3 if thumb else 1)
+        if tx <= x1 - 2:
+            self.rect(tx, yc, x1 - 2, yc + thickness - 1, track)
+        self.rect(x1 - 1, yc, x1, yc + thickness - 1, scale(track, 1.6) if track != (0, 0, 0) else color)
+        # played part: wave (or flat line at amp 0); direct pixel access keeps this cheap on a Pi
+        px = self.image.load()
+        W, H = self.width, self.height
+        r, g, b = color
+        w = 2 * math.pi / wavelength
+        sin = math.sin
+        for x in range(max(0, x0), min(W - 1, xp) + 1):
+            y = yc + a * sin(w * (x - x0) - phase)
+            base = int(y // 1)
+            f = y - base
+            for row, alpha in ((base, 1 - f), (base + thickness, f)):
+                if 0 <= row < H and alpha > 0.02:
+                    o = px[x, row]
+                    px[x, row] = (max(o[0], int(r * alpha)), max(o[1], int(g * alpha)), max(o[2], int(b * alpha)))
+            for row in range(base + 1, base + thickness):       # fully covered middle rows
+                if 0 <= row < H:
+                    px[x, row] = color
+        if thumb:
+            top, bottom = yc - 2, yc + thickness + 1
+            self.rect(xp, top, xp, bottom, WHITE)
+
     def paste(self, img, x, y):
         if img is None:
             return
@@ -151,6 +199,33 @@ class Canvas:
             self.image.paste(img, (x, y), img)
         else:
             self.image.paste(img, (x, y))
+
+
+class Ease:
+    """Smoothly moves a 0..1 value toward on/off (e.g. a wave flattening when playback pauses)."""
+
+    def __init__(self, duration=0.45):
+        self.duration = duration
+        self.state = {}          # key -> (target_on, since, start_value)
+        self.last_seen = {}      # key -> last time value() was asked (i.e. last frame drawn)
+
+    def _current(self, st, now):
+        on, since, start = st
+        k = min(1.0, (now - since) / self.duration)
+        k = k * k * (3 - 2 * k)                      # smoothstep
+        return start + ((1.0 if on else 0.0) - start) * k
+
+    def value(self, key, on):
+        now = time.monotonic()
+        st = self.state.get(key)
+        seen = self.last_seen.get(key, 0.0)
+        self.last_seen[key] = now
+        if st is None or now - seen > 1.0:
+            # first sighting, or the board wasn't on screen when it changed: no animation
+            self.state[key] = (on, now - self.duration, 1.0 if on else 0.0)
+        elif st[0] != on:                            # changed while visible: animate from where we are
+            self.state[key] = (on, now, self._current(st, now))
+        return self._current(self.state[key], now)
 
 
 # -- image fetching -------------------------------------------------------------

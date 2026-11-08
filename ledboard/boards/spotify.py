@@ -19,7 +19,7 @@ import urllib.parse
 import requests
 
 from .base import Board
-from ..gfx import GRAY, WHITE, fetch_image, fmt_ms, hex_to_rgb
+from ..gfx import GRAY, WHITE, Ease, fetch_image, fmt_ms, hex_to_rgb
 
 log = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class SpotifyBoard(Board):
         "source": "homeassistant", "ha_entities": [],
         "client_id": "", "client_secret": "", "refresh_token": "",
         "redirect_uri": "http://127.0.0.1:8080/spotify/callback",
-        "title_color": "#ffffff", "artist_color": "#1ed760",
+        "title_color": "#ffffff", "artist_color": "#1ed760", "progress_style": "wavy",
     }
     FIELDS = [
         {"key": "source", "label": "Get now-playing info from", "type": "select",
@@ -59,6 +59,9 @@ class SpotifyBoard(Board):
         {"key": "takeover", "label": "Take over the display while music is playing", "type": "bool"},
         {"key": "show_paused", "label": "Keep showing when paused", "type": "bool"},
         {"key": "duration", "label": "Seconds on screen (in rotation)", "type": "number"},
+        {"key": "progress_style", "label": "Progress bar style", "type": "select",
+         "options": ["wavy", "straight"],
+         "option_labels": {"wavy": "Wavy (animated, Material 3 style)", "straight": "Straight"}},
         {"key": "title_color", "label": "Title color", "type": "color"},
         {"key": "artist_color", "label": "Artist color", "type": "color"},
         {"key": "refresh", "label": "Poll interval (s)", "type": "number"},
@@ -71,6 +74,7 @@ class SpotifyBoard(Board):
         self.now = None      # dict describing current track (first player)
         self.fetched_at = 0
         self.players = {}    # slide key -> (now dict, fetched_at)
+        self._wave = Ease()
 
     # -- auth -----------------------------------------------------------------
     def auth_url(self, state="ledboard"):
@@ -246,12 +250,18 @@ class SpotifyBoard(Board):
         progress = min(progress, n["duration"] or progress)
         c.scroll_text(x0, W, 1, n["title"], "6x10", hex_to_rgb(self.cfg.get("title_color"), WHITE), t)
         c.scroll_text(x0, W, 11, n["artist"], "5x8", hex_to_rgb(self.cfg.get("artist_color"), GREEN), t)
-        c.text(x0, H - 10, fmt_ms(progress), "4x6", GRAY)
+        frac = progress / n["duration"] if n["duration"] else 0
+        wavy = self.cfg.get("progress_style", "wavy") == "wavy"
+        ty = H - 12 if wavy else H - 10          # the wave needs a few more rows
+        c.text(x0, ty, fmt_ms(progress), "4x6", GRAY)
         if n["duration"]:
-            c.text_right(W - 1, H - 10, fmt_ms(n["duration"]), "4x6", GRAY)
+            c.text_right(W - 1, ty, fmt_ms(n["duration"]), "4x6", GRAY)
         if not n["playing"]:
-            c.text_centered(H - 10, "PAUSED", "4x6", (200, 120, 0), x0, W)
-        c.progress(x0, H - 3, W - 1, progress / n["duration"] if n["duration"] else 0, GREEN)
+            c.text_centered(ty, "PAUSED", "4x6", (200, 120, 0), x0, W)
+        if wavy:
+            c.wavy_progress(x0, W - 1, H - 4, frac, GREEN, amp=self._wave.value(slide, n["playing"]))
+        else:
+            c.progress(x0, H - 3, W - 1, frac, GREEN)
 
     def status(self):
         s = super().status()
