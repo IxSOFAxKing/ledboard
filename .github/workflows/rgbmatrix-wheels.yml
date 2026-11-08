@@ -50,7 +50,7 @@ jobs:
               git -C /src rev-parse HEAD > /out/COMMIT
               python3 -m venv /v
               /v/bin/pip install -U pip wheel
-              # the bindings #include Pillow's Imaging.h, which Pillow wheels do not ship
+              # the bindings include Imaging.h from Pillow, which Pillow wheels do not ship
               INC=$(/v/bin/python /deploy/pillow_headers.py /pillow)
               CFLAGS="-I$INC" /v/bin/pip wheel /src -w /build -v
               cd /build
