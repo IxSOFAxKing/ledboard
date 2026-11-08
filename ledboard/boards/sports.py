@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 from .base import Board
-from ..gfx import DIM, GRAY, RED, WHITE, YELLOW, fetch_image, hex_to_rgb, readable
+from ..gfx import DIM, GRAY, RED, WHITE, YELLOW, fetch_image, fit_image, hex_to_rgb, readable
 
 log = logging.getLogger(__name__)
 
@@ -342,7 +342,8 @@ class LeagueBoard(Board):
     def __init__(self, cfg, app):
         super().__init__(cfg, app)
         self.games: list[dict] = []
-        self.logos: dict[str, object] = {}
+        self.logos: dict[str, object] = {}       # url -> logo fitted to the display height
+        self.logo_src: dict[str, object] = {}    # url -> trimmed hi-res copy for other sizes
         self.flash: dict[str, float] = {}     # "gameid|side" -> until (monotonic)
         self._scores: dict[str, str] = {}
         self.session = requests.Session()
@@ -389,13 +390,19 @@ class LeagueBoard(Board):
         url = team.get("logo_url")
         if not url or url in self.logos:
             return
-        size = self.app.height
+        size = self.app.height * 2
         img = None
         if self.cfg.get("use_dark_logos", True) and "/500/" in url:
-            img = fetch_image(url.replace("/500/", "/500-dark/"), size, size)
+            img = fetch_image(url.replace("/500/", "/500-dark/"), size, size, trim=True)
         if img is None:
-            img = fetch_image(url, size, size)
-        self.logos[url] = img
+            img = fetch_image(url, size, size, trim=True)
+        self.set_logo(url, img)
+
+    def set_logo(self, url, img):
+        """Store a logo (already trimmed): hi-res source + a copy fitted to the display height."""
+        self.logo_src[url] = img
+        H = self.app.height
+        self.logos[url] = fit_image(img, H, H) if img is not None else None
 
     def visible_games(self):
         now = datetime.now(timezone.utc)
@@ -480,13 +487,13 @@ class LeagueBoard(Board):
 
     def _team_columns(self, c, g, col, detailed):
         """Logo with the team abbreviation centered underneath, for each side."""
-        from .football_layouts import small_logo
+        from .football_layouts import logo_fit
         H, W = c.height, c.width
-        size = H - 8
         show_rank = self.league in COLLEGE and self.cfg.get("show_rankings", True)
         for side, cx0 in (("away", 0), ("home", W - col)):
             team = g[side]
-            c.paste(small_logo(self, team, size), cx0 + (col - size) // 2, 0)
+            # logo fills the whole column width and everything above the name
+            c.paste(logo_fit(self, team, col, H - 7), cx0, 0)
             rank = str(team["rank"]) if show_rank and team["rank"] else ""
             aw = c.text_width(team["abbr"], "5x8")
             rw = c.text_width(rank, "4x6") + 1 if rank else 0

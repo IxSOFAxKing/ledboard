@@ -8,9 +8,7 @@ from __future__ import annotations
 import colorsys
 import time
 
-from PIL import Image
-
-from ..gfx import DIM, GRAY, RED, WHITE, YELLOW, scale
+from ..gfx import DIM, GRAY, RED, WHITE, YELLOW, fit_image, scale, trim_alpha
 
 FIELD_GREEN = (0, 55, 0)
 YARD_LINE = (0, 120, 0)
@@ -122,19 +120,26 @@ def score_color(board, g, side, default=WHITE):
     return default
 
 
-_small_logo_cache: dict = {}
+_logo_cache: dict = {}
+
+
+def logo_fit(board, team, w, h=None):
+    """Team logo scaled to fill a w x h box (transparent padding trimmed), from the hi-res copy."""
+    h = h or w
+    url = team.get("logo_url")
+    src = getattr(board, "logo_src", {}).get(url) or board.logos.get(url)
+    if src is None:
+        return None
+    key = (id(src), w, h)
+    if key not in _logo_cache:
+        if len(_logo_cache) > 300:
+            _logo_cache.clear()
+        _logo_cache[key] = fit_image(trim_alpha(src), w, h)
+    return _logo_cache[key]
 
 
 def small_logo(board, team, size):
-    img = board.logos.get(team.get("logo_url"))
-    if img is None:
-        return None
-    key = (id(img), size)
-    if key not in _small_logo_cache:
-        if len(_small_logo_cache) > 200:
-            _small_logo_cache.clear()
-        _small_logo_cache[key] = img.resize((size, size), Image.LANCZOS)
-    return _small_logo_cache[key]
+    return logo_fit(board, team, size, size)
 
 
 # ---------------------------------------------------------------- layouts

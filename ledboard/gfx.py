@@ -158,6 +158,13 @@ _img_cache: dict[str, Image.Image] = {}
 _img_lock = threading.Lock()
 
 
+def trim_alpha(img, threshold=24):
+    """Crop away transparent padding (logos often have 10-20% empty margin)."""
+    img = img.convert("RGBA")
+    bbox = img.getchannel("A").point(lambda v: 255 if v > threshold else 0).getbbox()
+    return img.crop(bbox) if bbox else img
+
+
 def fit_image(img, w, h, bg=None):
     """Resize to fit inside w x h, keeping aspect ratio, centered on transparent canvas."""
     img = img.convert("RGBA")
@@ -167,14 +174,14 @@ def fit_image(img, w, h, bg=None):
     return out
 
 
-def fetch_image(url, w, h, headers=None, verify=True, cache_key=None, disk=True):
+def fetch_image(url, w, h, headers=None, verify=True, cache_key=None, disk=True, trim=False):
     """Download an image and fit it to w x h. Cached in memory and on disk.
 
     Call this from a board's update() thread, never from render().
     """
     if not url:
         return None
-    key = hashlib.sha1(f"{cache_key or url}|{w}x{h}".encode()).hexdigest()
+    key = hashlib.sha1(f"{cache_key or url}|{w}x{h}{'|trim' if trim else ''}".encode()).hexdigest()
     with _img_lock:
         if key in _img_cache:
             return _img_cache[key]
@@ -189,7 +196,10 @@ def fetch_image(url, w, h, headers=None, verify=True, cache_key=None, disk=True)
         try:
             r = requests.get(url, headers=headers or {}, timeout=10, verify=verify)
             r.raise_for_status()
-            img = fit_image(Image.open(io.BytesIO(r.content)), w, h)
+            img = Image.open(io.BytesIO(r.content)).convert("RGBA")
+            if trim:
+                img = trim_alpha(img)
+            img = fit_image(img, w, h)
             if disk:
                 os.makedirs(CACHE_DIR, exist_ok=True)
                 img.save(path)
