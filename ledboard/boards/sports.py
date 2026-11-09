@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 from .base import Board
-from ..gfx import DIM, GRAY, RED, WHITE, YELLOW, fetch_image, fit_image, hex_to_rgb, readable
+from ..gfx import DIM, GRAY, RED, WHITE, YELLOW, fetch_image, fit_image, hex_to_rgb, readable, scale
 
 log = logging.getLogger(__name__)
 
@@ -334,6 +334,16 @@ def _num(s):
 
 
 # ---------------------------------------------------------------------------- board
+FINAL_STYLES = {
+    "plain": "Plain (no accents)",
+    "winner": "Winner color (winning score, underline and FINAL in the winner's color)",
+    "splitbar": "Team split bar (bar under the score split by points, records in team colors)",
+    "tint": "Tinted halves (each side washed in its team color)",
+    "banner": "Winner banner (team-colored 'GB WINS' banner + arrow)",
+    "trim": "Team trim lines (team-color lines above and below the score)",
+}
+
+
 class LeagueBoard(Board):
     """One league. Concrete classes are generated per league at the bottom of this file."""
     league = "nfl"
@@ -350,7 +360,7 @@ class LeagueBoard(Board):
         "next_game": "no_games", "show_standings": False,
         "show_abbreviations": True, "show_final_records": True, "logo_enhance": True, "logo_edges": "auto",
         "text_score": "#ffffff", "text_status": "#ffc800", "text_info": "#787878", "text_loser": "#787878",
-        "abbr_color_mode": "team", "abbr_color": "#ffffff",
+        "abbr_color_mode": "team", "abbr_color": "#ffffff", "final_style": "plain",
     }
 
     @classmethod
@@ -444,6 +454,9 @@ class LeagueBoard(Board):
                                "smooth": "Smooth (anti-aliased, softer)", "crisp": "Crisp (hard pixel edges)"},
              "help": "Smooth keeps soft edges like the clock's 'Smooth edges'; crisp snaps to the logo's exact colors."},
             {"key": "use_dark_logos", "label": "Prefer logos designed for dark backgrounds", "type": "bool", "section": "Logos"},
+            {"key": "final_style", "label": "Final style", "type": "select", "section": "Final scores",
+             "options": list(FINAL_STYLES), "option_labels": FINAL_STYLES,
+             "help": "Team color accents on finished games (standard view). Use Preview > Final to try them."},
             {"key": "text_score", "label": "Scores and start times", "type": "color", "section": "Text colors",
              "help": "Colors for the standard game view. The special live layouts keep their own color schemes."},
             {"key": "text_status", "label": "Live clock / game status", "type": "color", "section": "Text colors"},
@@ -752,6 +765,12 @@ class LeagueBoard(Board):
         mid = (x0 + x1) // 2
         detailed = self.cfg.get("detailed_live", True)
 
+        final = self.cfg.get("final_style", "plain") if g["state"] == "post" else "plain"
+        if final not in FINAL_STYLES:
+            final = "plain"
+        winner = self._final_winner(g) if final != "plain" else None
+        if final == "tint":
+            self._final_tint(c, g, mid, winner)
         self._team_columns(c, g, col, detailed)
         if g["state"] == "pre":
             if self.cfg.get("show_records", True):
@@ -761,14 +780,25 @@ class LeagueBoard(Board):
             c.scroll_text(x0, x1, 12, self._start_text(g), "5x8", self._tc("text_score"), t, align="center")
             items = self._info_items(g)[1:] or [(self._date_text(g), self._tc("text_info"))]
         else:
-            self._scores_draw(c, g, mid, y=2)
+            score_cols = None
+            if final == "winner" and winner:
+                lose = scale(self._tc("text_loser"), 0.8)
+                score_cols = tuple(team_color(g[s]) if s == winner else lose for s in ("away", "home"))
+            self._scores_draw(c, g, mid, y=2, colors=score_cols)
             if g["state"] == "in" and detailed:
                 self._live_graphics(c, g, x0, x1, mid)
             if g["state"] == "post" and self.cfg.get("show_final_records", True):
                 # updated records under each team's side of the score
-                c.text(x0 + 1, 17, away["record"], "4x6", self._tc("text_info"))
-                c.text_right(x1 - 1, 17, home["record"], "4x6", self._tc("text_info"))
+                rc = (self._tc("text_info"),) * 2
+                if final in ("splitbar", "trim"):
+                    rc = (scale(team_color(away), 0.85), scale(team_color(home), 0.85))
+                c.text(x0 + 1, 17, away["record"], "4x6", rc[0])
+                c.text_right(x1 - 1, 17, home["record"], "4x6", rc[1])
             items = self._info_items(g)
+            if final != "plain":
+                items = self._final_accents(c, g, final, winner, x0, x1, mid, items)
+        if not items:
+            return
         text, color, local_t = _cycle(c, items, t, x1 - x0)
         c.scroll_text(x0, x1, H - 7, text, "5x7", color, local_t, speed=INFO_SPEED, align="center", pause=0.6, gap=200)
 
@@ -849,7 +879,84 @@ class LeagueBoard(Board):
             return self._tc("abbr_color")
         return team_color(team)
 
-    def _scores_draw(self, c, g, mid, y=9):
+    # ---------------------------------------------------------------- final-score accents
+    def _final_winner(self, g):
+        """'away' / 'home' / None. None while the favorite's score is hidden (don't give it away)."""
+        if self.cfg.get("hide_favorite_score") and self.is_favorite(g):
+            return None
+        a, h = g["away"], g["home"]
+        if a["winner"] or _num(a["score"]) > _num(h["score"]):
+            return "away"
+        if h["winner"] or _num(h["score"]) > _num(a["score"]):
+            return "home"
+        return None
+
+    def _final_tint(self, c, g, mid, winner):
+        from .football_layouts import panel_color
+        H, W = c.height, c.width
+        for side, xa, xb in (("away", 0, mid - 1), ("home", mid, W - 1)):
+            k = 0.8 if side == winner else (0.4 if winner else 0.6)
+            c.rect(xa, 0, xb, H - 1, scale(panel_color(g[side]), k))
+
+    def _final_accents(self, c, g, style, winner, x0, x1, mid, items):
+        """Draw the chosen final style's extras; returns the (possibly changed) info line items."""
+        from .football_layouts import panel_color
+        H = c.height
+        away, home = g["away"], g["home"]
+        font = "7x13B"
+        dw = c.text_width("-", font)
+        hidden = self.cfg.get("hide_favorite_score") and self.is_favorite(g)
+        a_s, h_s = ("?", "?") if hidden else (str(away["score"]), str(home["score"]))
+        aw, hw = c.text_width(a_s, font), c.text_width(h_s, font)
+        ax1, hx0 = mid - dw // 2 - 1, mid + dw // 2 + 2          # away score right edge / home score left edge
+        win_col = team_color(g[winner]) if winner else None
+
+        def recolor(col):
+            return [(txt, col) for txt, _ in items]
+
+        if style == "winner":
+            if winner:
+                for side, xa, xb in (("away", ax1 - aw, ax1 - 1), ("home", hx0, hx0 + hw - 1)):
+                    c.rect(xa, 15, xb, 15, scale(team_color(g[side]), 1 if side == winner else 0.45))
+                items = recolor(win_col)
+        elif style == "splitbar":
+            sa, sh = (1, 1) if hidden else (max(0, _num(away["score"])), max(0, _num(home["score"])))
+            tot = (sa + sh) or 2
+            sa = sa if sa + sh else 1
+            bx0, bx1 = x0 + 2, x1 - 3
+            split = bx0 + round((bx1 - bx0 + 1) * sa / tot)
+            if split > bx0:
+                c.rect(bx0, 15, split - 1, 15, team_color(away))
+            if split <= bx1:
+                c.rect(split, 15, bx1, 15, team_color(home))
+        elif style == "tint":
+            items = recolor(WHITE)
+        elif style == "banner":
+            if winner:
+                tm = g[winner]
+                c.rect(x0 + 1, H - 8, x1 - 2, H - 1, panel_color(tm))
+                c.rect(x0 + 1, H - 8, x1 - 2, H - 8, win_col)
+                if winner == "away":                                  # arrow pointing at the winning score
+                    x = ax1 - aw - 5
+                    for i in range(3):
+                        c.line(x + i, 6 + i, x + i, 10 - i, win_col)
+                else:
+                    x = hx0 + hw + 1
+                    for i in range(3):
+                        c.line(x + i, 8 - i, x + i, 8 + i, win_col)
+                items = [(f"{tm['abbr']} WINS", WHITE)] + recolor(WHITE)
+        elif style == "trim":
+            for side, xa, xb in (("away", x0, mid - 1), ("home", mid, x1 - 1)):
+                tm = g[side]
+                alt = tm.get("alt")
+                second = scale(alt, 0.9) if alt and alt not in ((255, 255, 255), (0, 0, 0)) else team_color(tm)
+                c.rect(xa, 0, xb, 0, team_color(tm))
+                c.rect(xa, H - 1, xb, H - 1, second)
+            if winner:
+                items = recolor(win_col)
+        return items
+
+    def _scores_draw(self, c, g, mid, y=9, colors=None):
         away, home = g["away"], g["home"]
         a_s, h_s = str(away["score"]), str(home["score"])
         if self.cfg.get("hide_favorite_score") and self.is_favorite(g):
@@ -860,6 +967,8 @@ class LeagueBoard(Board):
                 h_col = self._tc("text_loser")
             elif home["winner"] or _num(h_s) > _num(a_s):
                 a_col = self._tc("text_loser")
+        if colors:
+            a_col, h_col = colors
         if self.cfg.get("score_flash", True) and int(time.monotonic() * 3) % 2 == 0:
             now = time.monotonic()
             if self.flash.get(f"{g['id']}|away", 0) > now:

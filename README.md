@@ -207,6 +207,15 @@ How it works:
   - **Automatic**: crisp hard pixel edges for big logos, smooth anti-aliased edges for small ones, where the soft edge pixels carry the detail.
   - **Smooth**: soft edges at every size, like the clock's "Smooth edges".
   - **Crisp**: hard edges in the logo's exact colors at every size.
+- **Final style** (per league, under **Final scores**): team color accents on finished games.
+  - **Plain**: no accents (the original look).
+  - **Winner color**: the winning score, an underline and FINAL in the winner's color, with the loser dimmed.
+  - **Team split bar**: a bar under the score split by points in both teams' colors, and records in team colors.
+  - **Tinted halves**: each side of the panel washed in its team color, brighter for the winner.
+  - **Winner banner**: a team-colored "GB WINS" banner on the bottom line and an arrow at the winning score.
+  - **Team trim lines**: team-color lines above and below the score, records in team colors and FINAL in the winner's color.
+
+  With "hide favorite's score" on, the accents never give away who won. Use **Preview → Final** to try each one.
 - **Text colors** (per league): pick the colors for scores and start times, the live clock, records / TV network / FINAL, and the losing team's score on finals. Team abbreviations can use team colors (default) or one color for all. These apply to the standard game view; the special live layouts keep their own colors.
 
 > **Note:** The live details read optional fields from ESPN's unofficial API. If ESPN doesn't send a field for a game, that detail is simply left out.
