@@ -507,7 +507,8 @@ class LeagueBoard(Board):
                               + (", plus the playoff bracket once the playoffs start." if cls.league == "nfl" else ".")})
         f += [
             {"key": "preview", "label": "Preview", "type": "actions", "section": "Preview", "action": "preview",
-             "options": {"live": "Live game", "pre": "Upcoming", "post": "Final", "all": "All three"},
+             "options": {"live": "Live game", "pre": "Upcoming", "post": "Final", "all": "All three",
+                         "countdown": "Next-game countdown"},
              "help": "Shows sample games with your current settings and layout for 3 minutes, even in the "
                      "off-season. Uses your favorite teams when set."},
             {"key": "duration", "label": "Seconds per game", "type": "number", "section": "Timing"},
@@ -813,7 +814,7 @@ class LeagueBoard(Board):
     def slides(self):
         visible = self.visible_games()
         games = [g["id"] for g in visible]
-        out = list(games)
+        out = [sid for sid, _fav, _g in self._preview_countdowns()] + list(games)
         mode = self.cfg.get("next_game", "no_games")
         now_utc = datetime.now(timezone.utc)
         for fav, g in self.next_games.items():
@@ -853,8 +854,15 @@ class LeagueBoard(Board):
     def _preview_games(self):
         games, until = self.preview_state
         if games and time.time() < until:
-            return games
+            return [g for g in games if not g.get("countdown_preview")]
         return []
+
+    def _preview_countdowns(self):
+        """Sample next games for the countdown preview: [(slide id, fav abbr, game)]."""
+        games, until = self.preview_state
+        if not games or time.time() >= until:
+            return []
+        return [(f"pnext:{i}", g["countdown_fav"], g) for i, g in enumerate(games) if g.get("countdown_preview")]
 
     def preview(self, kind="all"):
         """Show sample games (live / pre / post / all) for a few minutes, e.g. in the off-season."""
@@ -862,11 +870,34 @@ class LeagueBoard(Board):
         sport, path, _, _ = LEAGUES[self.league]
         teams = fetch_teams(sport, path)
         away, home = pick_teams(self.league, [f.upper() for f in self.cfg.get("favorites", [])], teams)
+        if kind == "countdown":
+            return self._preview_countdown(sport, path, teams, away, home)
         states = {"live": ["in"], "pre": ["pre"], "post": ["post"], "all": ["in", "pre", "post"]}[kind]
         games = []
         for st in states:
             g = parse_event(make_event(self.league, sport, st, away, home, teams), self.league)
             g["preview"] = True
+            for side in ("home", "away"):
+                self._load_logo(g[side])
+            games.append(g)
+        self.preview_state = (games, time.time() + self.PREVIEW_SECONDS)
+        return [g["id"] for g in games]
+
+    def _preview_countdown(self, sport, path, teams, away, home):
+        """Two sample countdowns: a few days out, and later today (game day)."""
+        from .sample_games import make_event
+        favs = [f.upper() for f in self.cfg.get("favorites", [])]
+        fav = home if home.upper() in favs or not (away.upper() in favs) else away
+        now = datetime.now(timezone.utc)
+        today_evening = datetime.now().astimezone().replace(hour=20, minute=15, second=0, microsecond=0)
+        game_day = today_evening.astimezone(timezone.utc)
+        if game_day - now < timedelta(minutes=30):          # late at night: an hour and a half from now
+            game_day = now + timedelta(hours=1, minutes=30)
+        games = []
+        for i, start in enumerate((now + timedelta(days=3, hours=4, minutes=27), game_day)):
+            g = parse_event(make_event(self.league, sport, "pre", away, home, teams), self.league)
+            g.update(id=f"preview-next-{i}", start=start, preview=True, countdown_preview=True,
+                     countdown_fav=fav.upper(), network=g.get("network") or "ESPN")
             for side in ("home", "away"):
                 self._load_logo(g[side])
             games.append(g)
@@ -890,6 +921,15 @@ class LeagueBoard(Board):
         if isinstance(slide, Recap):
             from . import recap
             recap.render(self, c, slide, t, team_color, self._clock_text)
+            return
+        if isinstance(slide, str) and slide.startswith("pnext:"):
+            hit = next(((fav, g) for sid, fav, g in self._preview_countdowns() if sid == slide), None)
+            if hit:
+                from .countdown_layouts import RENDERERS
+                fn = RENDERERS.get(self.cfg.get("next_game_style", "classic"))
+                if fn is None:
+                    from .offdays import render_next_game as fn
+                fn(self, c, hit[1], hit[0], t, team_color)
             return
         if isinstance(slide, str) and slide.startswith("next:"):
             g = self.next_games.get(slide[5:])

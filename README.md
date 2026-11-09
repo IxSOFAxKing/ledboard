@@ -135,6 +135,8 @@ Each league is its own board, so it has its own place in the rotation and its ow
   - **Matchup**: each half of the panel in its team's colors, with the countdown on a center plate.
   - **Road to kickoff**: a ball travels along a one-week road toward the opponent's logo, with the time to kickoff (first pitch, tip-off, puck drop).
   - **Game day hype**: on the day of the game, a flashing "GAME DAY" in your team's colors with the time to kickoff; before that, the flip clock.
+
+  To see your chosen design, use **Preview → Next-game countdown** on the league's board. It shows two sample countdowns for 3 minutes: one a few days out, and one later today (game day).
 - **Upcoming games**: team records, TV network, betting line and over/under, and AP Top 25 rankings (college leagues only).
 - **Live games**: detailed live info, scroll the last play, and flash the score when it changes.
 - **Timing**: seconds per game, and how often scores refresh, normally and during live games.
