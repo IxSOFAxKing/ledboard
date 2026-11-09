@@ -365,7 +365,12 @@ Time left averages the file-progress estimate and the slicer's estimate, the way
    - only show the board when something is down
    - **Critical alert when a monitor goes down** (on by default): the alert stays on screen until the monitor is back up (then it clears itself) or you dismiss it. If you set up the Home Assistant Plex automation earlier, you can turn that off, or you'll get two alerts.
 
-The board shows 6 monitors per page, down ones first, with the average 24-hour uptime. Monitors in maintenance show in blue.
+Monitors that are down are always listed first; maintenance shows in blue and pending in amber. **Design** options:
+- **Grid**: 6 per page, each with a status dot, name and response time, plus the average 24-hour uptime.
+- **Status wall**: 8 colored tiles per page with name and response time; a down monitor's tile flashes red.
+- **Heartbeat bars**: 3 monitors per page, each with its 24-hour uptime and a row of its recent checks as green / red bars, like Uptime Kuma's own page.
+- **One at a time**: a big check / cross badge, the name, status and response time, 24-hour uptime, and a graph of recent response times (red lines where a check failed). With "only show when something is down", it cycles through just the broken ones and shows the error message.
+- **Summary**: a single screen: "ALL SYSTEMS OPERATIONAL" with a shield, or "OUTAGE" with what's down.
 
 ### Steam
 1. Get a free **Steam Web API key** at <https://steamcommunity.com/dev/apikey>. Any domain name works, for example `ledboard`.

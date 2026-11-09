@@ -10,12 +10,14 @@ when the monitor is back up.
 from __future__ import annotations
 
 import logging
+import math
 import re
+import time
 
 import requests
 
 from .base import Board, organize
-from ..gfx import GRAY, WHITE
+from ..gfx import DIM, GRAY, WHITE, scale
 
 log = logging.getLogger(__name__)
 
@@ -25,6 +27,15 @@ AMBER = (255, 170, 0)
 BLUE = (80, 140, 255)
 STATUS = {0: "down", 1: "up", 2: "pending", 3: "maintenance"}
 PER_PAGE = 6
+LAYOUTS = {
+    "grid": "Grid (6 per page: dot, name, response time)",
+    "tiles": "Status wall (8 colored tiles per page)",
+    "heartbeat": "Heartbeat bars (recent checks per monitor, like Uptime Kuma)",
+    "focus": "One at a time (big status, uptime and a response-time graph)",
+    "summary": "Summary (ALL SYSTEMS UP, or what's down)",
+}
+PAGE_SIZE = {"grid": 6, "tiles": 8, "heartbeat": 3, "focus": 1}
+COLORS = {"up": GREEN, "down": RED, "pending": AMBER, "maintenance": BLUE}
 
 
 def parse_status_url(text):
@@ -42,12 +53,13 @@ class UptimeBoard(Board):
     description = "Your Uptime Kuma monitors: up/down dots and response times, with an optional alert when one goes down."
     refresh = 60
     DEFAULTS = {"enabled": False, "duration": 10, "refresh": 60, "status_url": "", "slug": "", "monitors": [],
-                "only_when_down": False, "alert_on_down": True, "alert_hold": True}
+                "only_when_down": False, "alert_on_down": True, "alert_hold": True, "layout": "grid"}
     FIELDS = [
         {"key": "status_url", "label": "Uptime Kuma status page address", "type": "text",
          "placeholder": "http://192.168.1.10:3001/status/home",
          "help": "In Uptime Kuma: Status Pages → New Status Page, add your monitors, then paste the page's address here."},
         {"key": "monitors", "label": "Only these monitors (comma-separated, blank = all)", "type": "list"},
+        {"key": "layout", "label": "Design", "type": "select", "options": list(LAYOUTS), "option_labels": LAYOUTS},
         {"key": "only_when_down", "label": "Only show when something is down", "type": "bool"},
         {"key": "alert_on_down", "label": "Critical alert when a monitor goes down (clears when it's back up)",
          "type": "bool"},
@@ -56,7 +68,8 @@ class UptimeBoard(Board):
         {"key": "duration", "label": "Seconds per page", "type": "number"},
         {"key": "refresh", "label": "Check every (seconds)", "type": "number"},
     ]
-    FIELDS = organize(FIELDS, [('Status page', ['status_url', 'monitors']), ('When to show', ['only_when_down']), ('Alerts', ['alert_on_down', 'alert_hold']), ('Timing', ['duration', 'refresh'])], {})
+    FIELDS = organize(FIELDS, [('Status page', ['status_url', 'monitors']), ('Design', ['layout']),
+                               ('When to show', ['only_when_down']), ('Alerts', ['alert_on_down', 'alert_hold']), ('Timing', ['duration', 'refresh'])], {})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)
@@ -88,10 +101,13 @@ class UptimeBoard(Board):
                 if wanted and name.lower() not in wanted:
                     continue
                 mid = str(m.get("id"))
-                last = (hb.get(mid) or [{}])[-1]
+                beats_list = hb.get(mid) or []
+                last = (beats_list or [{}])[-1]
                 st = STATUS.get(last.get("status"), "pending" if not last else "down")
-                mons.append({"id": mid, "name": name, "status": st, "ping": last.get("ping"), "msg": last.get("msg") or ""})
+                history = [(STATUS.get(b.get("status"), "pending"), b.get("ping")) for b in beats_list[-60:]]
                 u = ups.get(f"{mid}_24")
+                mons.append({"id": mid, "name": name, "status": st, "ping": last.get("ping"), "msg": last.get("msg") or "",
+                             "history": history, "uptime": u if isinstance(u, (int, float)) else None})
                 if isinstance(u, (int, float)):
                     uptimes.append(u)
         self.monitors = mons
@@ -124,15 +140,180 @@ class UptimeBoard(Board):
         rank = {"down": 0, "pending": 1, "maintenance": 2, "up": 3}
         return sorted(self.monitors, key=lambda m: rank.get(m["status"], 1))
 
+    def _layout(self):
+        lay = self.cfg.get("layout", "grid")
+        return lay if lay in LAYOUTS else "grid"
+
     def slides(self):
         if not self.monitors:
             return []
         if self.cfg.get("only_when_down") and not any(m["status"] == "down" for m in self.monitors):
             return []
-        pages = (len(self.monitors) + PER_PAGE - 1) // PER_PAGE
-        return [f"page:{i}" for i in range(pages)]
+        lay = self._layout()
+        if lay == "summary":
+            return ["page:0"]
+        n = len(self.monitors)
+        if lay == "focus" and self.cfg.get("only_when_down"):
+            n = sum(1 for m in self.monitors if m["status"] == "down")      # only the broken ones
+        size = PAGE_SIZE[lay]
+        return [f"page:{i}" for i in range((n + size - 1) // size)]
 
     def render(self, c, slide, t):
+        lay = self._layout()
+        page = int(str(slide).split(":")[1]) if slide else 0
+        if lay != "grid":
+            {"tiles": self._render_tiles, "heartbeat": self._render_heartbeat, "focus": self._render_focus,
+             "summary": self._render_summary}[lay](c, page, t)
+            return
+        self._render_grid(c, slide, t)
+
+    # -- designs ------------------------------------------------------------------
+    @staticmethod
+    def _short(name, n):
+        name = name.upper()
+        return name if len(name) <= n else name[:n]
+
+    def _page(self, page, size, only_down=False):
+        mons = self._ordered()
+        if only_down:
+            mons = [m for m in mons if m["status"] == "down"]
+        return mons[page * size:(page + 1) * size], max(1, math.ceil(len(mons) / size))
+
+    def _render_tiles(self, c, page, t):
+        W, H = c.width, c.height
+        mons, _pages = self._page(page, 8)
+        tw, th = W // 4, H // 2
+        blink = int(t * 2) % 2 == 0
+        for i, m in enumerate(mons):
+            x, y = (i % 4) * tw, (i // 4) * th
+            col = COLORS.get(m["status"], AMBER)
+            down = m["status"] == "down"
+            bg = scale(col, 0.85 if (down and blink) else (0.35 if down else 0.22))
+            c.draw.rounded_rectangle((x + 1, y + 1, x + tw - 2, y + th - 2), radius=2, fill=bg)
+            c.text_centered(y + 2, self._short(m["name"], 7), "4x6", WHITE, x + 1, x + tw - 1)
+            if m["status"] == "up":
+                sub = f"{round(m['ping'])}MS" if isinstance(m.get("ping"), (int, float)) else "UP"
+            else:
+                sub = {"down": "DOWN", "pending": "WAIT", "maintenance": "MAINT"}.get(m["status"], "?")
+            c.text_centered(y + 8, sub, "4x6", scale(WHITE, 0.75) if not down else WHITE, x + 1, x + tw - 1)
+
+    def _render_heartbeat(self, c, page, t):
+        W, H = c.width, c.height
+        mons, pages = self._page(page, 3)
+        bars_x0, bar_w = 44, 2
+        n = (W - bars_x0 - 1) // (bar_w + 1)
+        for i, m in enumerate(mons):
+            y = 1 + i * 11
+            col = COLORS.get(m["status"], AMBER)
+            c.draw.ellipse((0, y + 1, 3, y + 4), fill=col)
+            c.text(6, y, self._short(m["name"], 9), "4x6", WHITE if m["status"] != "down" else RED)
+            up = m.get("uptime")
+            c.text(6, y + 6, f"{up * 100:.1f}%" if up is not None else "", "4x6", scale(GRAY, 0.8))
+            hist = (m.get("history") or [])[-n:]
+            pad = n - len(hist)
+            for k in range(n):
+                bx = bars_x0 + k * (bar_w + 1)
+                if k < pad:
+                    c.rect(bx, y + 1, bx + bar_w - 1, y + 8, (30, 30, 34))
+                    continue
+                st = hist[k - pad][0]
+                bc = COLORS.get(st, AMBER)
+                newest = k == n - 1
+                if newest and st == "down" and int(t * 2) % 2:
+                    bc = scale(bc, 0.4)
+                c.rect(bx, y + 1, bx + bar_w - 1, y + 8, bc)
+        if pages > 1:
+            for k in range(pages):
+                c.pixel(W - 1 - (pages - 1 - k) * 2, H - 1, WHITE if k == page else DIM)
+
+    def _render_focus(self, c, page, t):
+        W, H = c.width, c.height
+        mons, _pages = self._page(page, 1, only_down=bool(self.cfg.get("only_when_down")))
+        if not mons:
+            return
+        m = mons[0]
+        col = COLORS.get(m["status"], AMBER)
+        # status badge: check mark (up), cross (down), pause bars (maintenance), dots (pending)
+        cx, cy, r = 13, 15, 12
+        pulse = 0.75 + 0.25 * math.sin(t * (6 if m["status"] == "down" else 2))
+        c.draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=scale(col, 0.3 * pulse), outline=scale(col, pulse))
+        if m["status"] == "up":
+            c.draw.line((cx - 6, cy, cx - 2, cy + 4, cx + 6, cy - 5), fill=WHITE, width=2)
+        elif m["status"] == "down":
+            c.draw.line((cx - 5, cy - 5, cx + 5, cy + 5), fill=WHITE, width=2)
+            c.draw.line((cx - 5, cy + 5, cx + 5, cy - 5), fill=WHITE, width=2)
+        elif m["status"] == "maintenance":
+            c.rect(cx - 4, cy - 5, cx - 2, cy + 5, WHITE)
+            c.rect(cx + 2, cy - 5, cx + 4, cy + 5, WHITE)
+        else:
+            for dx in (-5, 0, 5):
+                c.rect(cx + dx - 1, cy - 1, cx + dx + 1, cy + 1, WHITE)
+        x0 = 30
+        c.scroll_text(x0, W, 0, m["name"], "6x10", WHITE, t)
+        if m["status"] == "up":
+            line = f"UP · {round(m['ping'])} MS" if isinstance(m.get("ping"), (int, float)) else "UP"
+        else:
+            line = {"down": "DOWN", "pending": "CHECKING", "maintenance": "MAINTENANCE"}.get(m["status"], "")
+        c.text(x0, 11, line, "5x7", col)
+        if m.get("uptime") is not None:
+            c.text_right(W - 1, 12, f"{m['uptime'] * 100:.2f}%", "4x6", GRAY)
+        if m["status"] == "down" and m.get("msg"):
+            c.scroll_text(x0, W, H - 7, m["msg"], "4x6", scale(RED, 0.8), t)
+            return
+        # response-time graph of the recent checks (red ticks where a check failed)
+        hist = m.get("history") or []
+        pings = [p for _s, p in hist if isinstance(p, (int, float))]
+        gx0, gx1, gy0, gy1 = x0, W - 1, 20, H - 1
+        c.line(gx0, gy1, gx1, gy1, (35, 35, 40))
+        if len(hist) >= 2:
+            lo, hi = (min(pings), max(pings)) if pings else (0, 1)
+            span = (hi - lo) or 1
+            n = len(hist)
+            prev = None
+            for k, (st, p) in enumerate(hist):
+                x = gx0 + round(k / (n - 1) * (gx1 - gx0))
+                if st == "down" or not isinstance(p, (int, float)):
+                    c.line(x, gy0, x, gy1, scale(RED, 0.7))
+                    prev = None
+                    continue
+                y = gy1 - 1 - round((p - lo) / span * (gy1 - gy0 - 2))
+                if prev:
+                    c.line(prev[0], prev[1], x, y, scale(GREEN, 0.9))
+                prev = (x, y)
+
+    def _render_summary(self, c, page, t):
+        W, H = c.width, c.height
+        mons = self._ordered()
+        down = [m for m in mons if m["status"] == "down"]
+        maint = [m for m in mons if m["status"] == "maintenance"]
+        cx, cy = 14, 15
+        if not down:
+            # shield with a check, gently pulsing
+            k = 0.8 + 0.2 * math.sin(t * 2)
+            pts = [(cx - 10, cy - 11), (cx + 10, cy - 11), (cx + 10, cy + 1), (cx, cy + 12), (cx - 10, cy + 1)]
+            c.draw.polygon(pts, fill=scale(GREEN, 0.3 * k), outline=scale(GREEN, k))
+            c.draw.line((cx - 5, cy - 1, cx - 1, cy + 3, cx + 6, cy - 5), fill=WHITE, width=2)
+            c.text(30, 1, "ALL SYSTEMS", "6x10", WHITE)
+            c.text(30, 11, "OPERATIONAL", "6x10", GREEN)
+            up = sum(1 for m in mons if m["status"] == "up")
+            tail = f"{up}/{len(mons)} UP"
+            if maint:
+                tail += f" · {len(maint)} MAINT"
+            if self.uptime is not None:
+                tail += f" · {self.uptime * 100:.2f}%"
+            c.scroll_text(30, W, H - 7, tail, "4x6", GRAY, t)
+            return
+        blink = int(t * 2) % 2 == 0
+        pts = [(cx, cy - 12), (cx + 12, cy + 10), (cx - 12, cy + 10)]
+        c.draw.polygon(pts, fill=scale(RED, 0.8 if blink else 0.35), outline=RED)
+        c.rect(cx - 1, cy - 4, cx, cy + 3, WHITE)
+        c.rect(cx - 1, cy + 6, cx, cy + 7, WHITE)
+        c.text(30, 1, f"{len(down)} DOWN" if len(down) > 1 else "OUTAGE", "6x10", RED)
+        c.scroll_text(30, W, 11, " · ".join(m["name"] for m in down), "6x10", WHITE, t)
+        others = len(mons) - len(down)
+        c.text(30, H - 7, f"{others} OTHER{'S' if others != 1 else ''} OK", "4x6", GRAY)
+
+    def _render_grid(self, c, slide, t):
         W, H = c.width, c.height
         page = int(str(slide).split(":")[1]) if slide else 0
         mons = self._ordered()
