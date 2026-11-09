@@ -727,7 +727,7 @@ class LeagueBoard(Board):
                 return
         H, W = c.height, c.width
         away, home = g["away"], g["home"]
-        col = H                                    # width of each team column
+        col = self._column_width(c, g)            # width of each team column
         x0, x1 = col, W - col                      # center area
         mid = (x0 + x1) // 2
         detailed = self.cfg.get("detailed_live", True)
@@ -751,6 +751,36 @@ class LeagueBoard(Board):
             items = self._info_items(g)
         text, color, local_t = _cycle(c, items, t, x1 - x0)
         c.scroll_text(x0, x1, H - 7, text, "5x7", color, local_t, speed=INFO_SPEED, align="center", pause=0.6, gap=200)
+
+    MAX_COLUMN = 44
+
+    def _column_width(self, c, g):
+        """Team column width for the standard view.
+
+        Live games keep 32 px columns (their center holds clock, possession, bases...). Upcoming
+        and final games only need as much center as their text, so the columns -- and wide
+        logos, which are limited by width -- grow into the rest (up to MAX_COLUMN px).
+        """
+        H, W = c.height, c.width
+        if g["state"] == "in":
+            return H
+        away, home = g["away"], g["home"]
+        if g["state"] == "post":
+            a_s, h_s = str(away["score"]), str(home["score"])
+            # the score is drawn symmetrically around the dash, so it needs twice the wider side
+            score_w = 2 * max(c.text_width(a_s, "7x13B"), c.text_width(h_s, "7x13B")) + c.text_width("-", "7x13B") + 6
+            status_w = c.text_width(self._info_items(g)[0][0], "5x7") + 2
+            rec_w = 0
+            if self.cfg.get("show_final_records", True):
+                rec_w = c.text_width(away["record"], "4x6") + c.text_width(home["record"], "4x6") + 6
+            need = max(score_w, status_w, rec_w)
+        else:
+            rec_w = 0
+            if self.cfg.get("show_records", True):
+                rec_w = c.text_width(away["record"], "4x6") + c.text_width(home["record"], "4x6") + 14
+            need = max(c.text_width(self._start_text(g), "5x8") + 2, rec_w, 40)
+        col = (W - need) // 2
+        return max(H, min(self.MAX_COLUMN, col))
 
     def _team_columns(self, c, g, col, detailed):
         """Logo for each side, with the team abbreviation centered underneath (or a full-size
