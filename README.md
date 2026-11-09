@@ -8,6 +8,7 @@ It's built for two chained 64×32 panels (128×32), and the layouts scale to oth
 |---|---|
 | **Sports** | One board per league, using ESPN's free API (no key needed): NFL, NBA, MLB, NHL, college football and basketball, WNBA, MLS, EPL, La Liga, Bundesliga, Serie A, Ligue 1, Champions League. See [Sports](#sports) for the settings and the live-game details each sport shows. |
 | **Now Playing** | Album art, scrolling title and artist, and an animated wavy progress bar (Material 3 style; a straight bar is an option), from a **Home Assistant media player** (HA's Spotify integration, Sonos and so on) or directly from the Spotify API. It's skipped when nothing is playing and can take over the display while music plays. |
+| **Steam** | What you're playing on Steam: the game icon, name, session time and total hours. It can take over the display while you play, and supports several players. |
 | **Plex** | Active streams (movies, TV, music) with the poster, title, S/E or artist, who's watching, and a wavy (or straight) progress bar. You can filter by user. |
 | **Home Assistant** | Any entities (sensors, locks, doors, lights, thermostats, and so on) at 1, 2 or 3 per screen, with automatic formatting and colors. |
 | **3D Printer (Klipper)** | Print progress from Klipper via Moonraker: the model thumbnail, progress, time left or finish time, layer, nozzle and bed temperatures, and paused, finished and error states. |
@@ -274,6 +275,18 @@ Time left averages the file-progress estimate and the slicer's estimate, the way
 - **Finished:** for the configured number of minutes after the print *actually* ended. The end time comes from Moonraker's job history, so restarting LEDBoard or power-cycling the printer doesn't restart the timer.
 - **Switched off:** never. That covers Klipper being unable to reach the printer and the printer's computer being unreachable.
 - **Failure:** if Klipper loses the printer in the middle of a print, the error shows for the same window.
+
+### Steam
+1. Get a free **Steam Web API key** at <https://steamcommunity.com/dev/apikey>. Any domain name works, for example `ledboard`.
+2. On the **Steam** board, paste the key and your **profile URL** (`https://steamcommunity.com/id/yourname`), custom URL name or 17-digit Steam ID. Add more, comma-separated, for others in the house.
+3. In Steam, open **Profile → Edit Profile → Privacy Settings** and set **Game details** to **Public**. Without that, Steam doesn't report the game you're playing.
+
+**Options:**
+- game icon or cover art
+- take over the display while playing
+- also show your avatar and status when you're online but not in a game
+
+The session timer counts from when LEDBoard first sees you in a game.
 
 ### Plex
 1. Enter your server URL, for example `http://192.168.1.10:32400`.
