@@ -264,6 +264,18 @@ LEDBoard saves the refresh token, so you only do this once.
 3. Optionally:
    - switch units (°F/mph or °C/km/h)
    - turn the **Now**, **4-day forecast** and **Next 24 hours** screens on or off
+4. Turn on any of the **More screens** (all off by default):
+   - **Sun arc**: where the sun is in its path, sunrise/sunset and daylight left (sunrise countdown at night).
+   - **Rain soon**: rain (or snow) for the next 2 hours in 15-minute bars, e.g. "RAIN IN 25 MIN". Only shows when rain is coming.
+   - **Wind**: compass arrow, speed, gusts and a plain-English description.
+   - **Week at a glance**: 7 days of high/low bars on one scale, colored by temperature.
+   - **Living scene**: a city skyline under the real sky (day, sunset, night with lit windows) with the current weather animated: clouds, rain, snow, fog, lightning.
+   - **UV + air quality**: color scales with markers, today's UV peak and sunscreen hours. Air quality uses Open-Meteo's free air-quality API (US or European scale).
+   - **Moon phase**: the moon drawn in its real phase, % lit, and the next full/new moon.
+   - **Today in 4 parts**: morning / afternoon / evening / night, starting from now.
+   - **Compared to yesterday**: shows only when today's high differs from yesterday's by at least the set number of degrees.
+
+   With the Home Assistant source, Rain soon and Compared to yesterday aren't available, and air quality isn't either; UV shows if your weather entity reports it.
 
 ### Clock
 The time, AM/PM, date and an optional extra line each have their own font, size and color.

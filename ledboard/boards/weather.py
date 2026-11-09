@@ -9,11 +9,12 @@ Slides: current conditions, 4-day forecast, next-24-hours graph (each optional).
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
 
 from .base import Board
+from .weather_extra import SCREENS
 from .weather_icons import LABELS, WMO, draw_icon
 from ..gfx import DIM, GRAY, WHITE
 
@@ -21,6 +22,7 @@ log = logging.getLogger(__name__)
 
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
+AIR_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 HI = (255, 170, 60)
 LO = (90, 160, 255)
 RAIN_BAR = (30, 90, 220)
@@ -64,32 +66,66 @@ def parse_open_meteo(j):
         "wind": cur.get("wind_speed_10m"),
         "wind_dir": compass(cur.get("wind_direction_10m")),
         "wind_unit": (units.get("wind_speed_10m") or "").replace("mp/h", "mph").replace("km/h", "kmh"),
-        "daily": [], "hourly": [],
+        "wind_deg": cur.get("wind_direction_10m"), "gust": cur.get("wind_gusts_10m"),
+        "daily": [], "hourly": [], "hours": [], "rain15": [],
     }
+
+    def col(block, key, i):
+        v = block.get(key) or []
+        return v[i] if i < len(v) else None
+
+    today = datetime.now().date().isoformat()
     for i, day in enumerate(daily.get("time") or []):
-        out["daily"].append({
+        d = {
             "date": day,
-            "condition": WMO.get((daily.get("weather_code") or [None])[i], "cloudy"),
-            "hi": (daily.get("temperature_2m_max") or [None])[i],
-            "lo": (daily.get("temperature_2m_min") or [None])[i],
-            "precip": (daily.get("precipitation_probability_max") or [None])[i],
-        })
+            "condition": WMO.get(col(daily, "weather_code", i), "cloudy"),
+            "hi": col(daily, "temperature_2m_max", i),
+            "lo": col(daily, "temperature_2m_min", i),
+            "precip": col(daily, "precipitation_probability_max", i),
+            "uv": col(daily, "uv_index_max", i),
+            "sunrise": _local(col(daily, "sunrise", i)),
+            "sunset": _local(col(daily, "sunset", i)),
+        }
+        if day < today:                        # past_days=1 -> yesterday, kept for "compared to yesterday"
+            out["yesterday"] = d
+            continue
+        out["daily"].append(d)
+    if out["daily"]:
+        out["sunrise"], out["sunset"] = out["daily"][0]["sunrise"], out["daily"][0]["sunset"]
+        if len(out["daily"]) > 1:
+            out["sunrise_next"] = out["daily"][1]["sunrise"]
     now = datetime.now()
+    hour0 = now.replace(minute=0, second=0, microsecond=0)
     for i, ts in enumerate(hourly.get("time") or []):
-        try:
-            when = datetime.fromisoformat(ts)
-        except ValueError:
+        when = _local(ts)
+        if when is None or when < hour0 - timedelta(hours=1) or when > hour0 + timedelta(hours=40):
             continue
-        if when < now.replace(minute=0, second=0, microsecond=0):
+        h = {"time": when, "temp": col(hourly, "temperature_2m", i), "precip": col(hourly, "precipitation_probability", i),
+             "condition": WMO.get(col(hourly, "weather_code", i), None), "uv": col(hourly, "uv_index", i),
+             "is_day": bool(col(hourly, "is_day", i) if col(hourly, "is_day", i) is not None else 1)}
+        out["hours"].append(h)
+        if when >= hour0 and len(out["hourly"]) < 24:
+            out["hourly"].append(h)
+    m15 = j.get("minutely_15") or {}
+    for i, ts in enumerate(m15.get("time") or []):
+        when = _local(ts)
+        if when is None or when < now - timedelta(minutes=15):
             continue
-        out["hourly"].append({
-            "time": when,
-            "temp": (hourly.get("temperature_2m") or [None])[i],
-            "precip": (hourly.get("precipitation_probability") or [None])[i],
-        })
-        if len(out["hourly"]) >= 24:
+        out["rain15"].append({"time": when, "mm": col(m15, "precipitation", i) or 0.0})
+        if len(out["rain15"]) >= 8:
             break
     return out
+
+
+def _local(ts):
+    """ISO time string (local, or with an offset) -> naive local datetime."""
+    if not ts:
+        return None
+    try:
+        d = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return d.astimezone().replace(tzinfo=None) if d.tzinfo else d
 
 
 def parse_ha(state, daily, hourly, sun_up=True):
@@ -103,31 +139,41 @@ def parse_ha(state, daily, hourly, sun_up=True):
         "humidity": a.get("humidity"), "wind": a.get("wind_speed"),
         "wind_dir": compass(a.get("wind_bearing")) if isinstance(a.get("wind_bearing"), (int, float))
         else (a.get("wind_bearing") or ""),
-        "wind_unit": unit.replace("km/h", "kmh"), "daily": [], "hourly": [],
+        "wind_unit": unit.replace("km/h", "kmh"), "daily": [], "hourly": [], "hours": [], "rain15": [],
+        "wind_deg": a.get("wind_bearing") if isinstance(a.get("wind_bearing"), (int, float)) else None,
+        "gust": a.get("wind_gust_speed"), "uv_now": a.get("uv_index"),
     }
     for f in daily or []:
         out["daily"].append({"date": (f.get("datetime") or "")[:10], "condition": f.get("condition"),
                              "hi": f.get("temperature"), "lo": f.get("templow"),
-                             "precip": f.get("precipitation_probability")})
-    for f in (hourly or [])[:24]:
-        try:
-            when = datetime.fromisoformat((f.get("datetime") or "").replace("Z", "+00:00")).astimezone().replace(tzinfo=None)
-        except ValueError:
+                             "precip": f.get("precipitation_probability"), "uv": f.get("uv_index")})
+    for f in (hourly or [])[:40]:
+        when = _local(f.get("datetime"))
+        if when is None:
             continue
-        out["hourly"].append({"time": when, "temp": f.get("temperature"), "precip": f.get("precipitation_probability")})
+        h = {"time": when, "temp": f.get("temperature"), "precip": f.get("precipitation_probability"),
+             "condition": f.get("condition"), "uv": f.get("uv_index"),
+             "is_day": f.get("is_daytime", 6 <= when.hour < 19) if f.get("is_daytime") is not None else 6 <= when.hour < 19}
+        out["hours"].append(h)
+        if len(out["hourly"]) < 24:
+            out["hourly"].append(h)
     return out
 
 
 class WeatherBoard(Board):
     name = "weather"
     title = "Weather"
-    description = "Current conditions, forecast and a 24-hour graph, with animated weather icons."
+    description = ("Current conditions, forecast and a 24-hour graph with animated icons, plus optional screens: sun arc, "
+                   "rain soon, wind, week, living scene, UV + air quality, moon phase, day parts and vs. yesterday.")
     refresh = 600
     DEFAULTS = {
         "enabled": False, "duration": 10, "refresh": 600,
         "source": "openmeteo", "location_name": "", "latitude": "", "longitude": "",
         "ha_entity": "", "units": "fahrenheit",
         "show_current": True, "show_daily": True, "show_hourly": True,
+        "show_sun": False, "show_rain_soon": False, "show_wind": False, "show_week": False, "show_scene": False,
+        "show_air": False, "show_moon": False, "show_parts": False, "show_yesterday": False,
+        "aqi_scale": "us", "yesterday_threshold": 8,
     }
     FIELDS = [
         {"key": "source", "label": "Weather data from", "type": "select", "section": "Source",
@@ -146,6 +192,13 @@ class WeatherBoard(Board):
         {"key": "show_current", "label": "Show current conditions", "type": "bool", "section": "Display"},
         {"key": "show_daily", "label": "Show 4-day forecast", "type": "bool", "section": "Display"},
         {"key": "show_hourly", "label": "Show next-24-hours graph", "type": "bool", "section": "Display"},
+        *[{"key": key, "label": label, "type": "bool", "section": "More screens"}
+          for key, label, _h, _r in SCREENS.values()],
+        {"key": "aqi_scale", "label": "Air quality scale", "type": "select", "section": "More screens",
+         "options": ["us", "european"], "option_labels": {"us": "US AQI (0-500)", "european": "European AQI (0-100+)"},
+         "show_if": {"show_air": True}},
+        {"key": "yesterday_threshold", "label": "Show 'compared to yesterday' when highs differ by at least (degrees)",
+         "type": "number", "section": "More screens", "show_if": {"show_yesterday": True}},
         {"key": "duration", "label": "Seconds per screen", "type": "number", "section": "Display"},
         {"key": "refresh", "label": "Refresh interval (s)", "type": "number", "section": "Display"},
     ]
@@ -167,19 +220,36 @@ class WeatherBoard(Board):
             return None
         metric = self.cfg.get("units") == "celsius"
         params = {
-            "latitude": lat, "longitude": lon, "timezone": "auto", "forecast_days": 5,
+            "latitude": lat, "longitude": lon, "timezone": "auto", "forecast_days": 8, "past_days": 1,
             "temperature_unit": "celsius" if metric else "fahrenheit",
             "wind_speed_unit": "kmh" if metric else "mph",
             "current": "temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,"
-                       "wind_speed_10m,wind_direction_10m",
-            "hourly": "temperature_2m,precipitation_probability",
-            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+                       "wind_speed_10m,wind_direction_10m,wind_gusts_10m",
+            "hourly": "temperature_2m,precipitation_probability,weather_code,uv_index,is_day",
+            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,"
+                     "sunrise,sunset,uv_index_max",
+            "minutely_15": "precipitation", "forecast_minutely_15": 12,
         }
         r = requests.get(FORECAST_URL, params=params, timeout=15)
         r.raise_for_status()
         w = parse_open_meteo(r.json())
         w["unit"] = "celsius" if metric else "fahrenheit"
+        if self.cfg.get("show_air"):
+            w["aqi"] = self._air_quality(lat, lon)
         return w
+
+    def _air_quality(self, lat, lon):
+        """Current air quality index from Open-Meteo's free air-quality API (None if unavailable)."""
+        scale = "european_aqi" if self.cfg.get("aqi_scale") == "european" else "us_aqi"
+        try:
+            r = requests.get(AIR_URL, params={"latitude": lat, "longitude": lon, "current": scale, "timezone": "auto"},
+                             timeout=15)
+            r.raise_for_status()
+            v = (r.json().get("current") or {}).get(scale)
+            return None if v is None else {"value": v, "scale": scale}
+        except Exception as e:
+            log.info("air quality unavailable: %s", e)
+            return None
 
     def _update_ha(self):
         ent = (self.cfg.get("ha_entity") or "").strip()
@@ -209,14 +279,23 @@ class WeatherBoard(Board):
                 forecasts[kind] = []
         if not forecasts["daily"]:
             forecasts["daily"] = state.get("attributes", {}).get("forecast") or []   # HA < 2024.3
-        sun_up = True
+        sun_up, sun_attr = True, {}
         try:
             s = requests.get(f"{base}/api/states/sun.sun", headers=h, timeout=10, verify=verify)
             if s.ok:
                 sun_up = s.json().get("state") != "below_horizon"
+                sun_attr = s.json().get("attributes") or {}
         except requests.RequestException:
             pass
         w = parse_ha(state, forecasts["daily"], forecasts["hourly"], sun_up)
+        rise, sett = _local(sun_attr.get("next_rising")), _local(sun_attr.get("next_setting"))
+        if rise and sett:
+            if sun_up:            # today's sunrise already happened: next_rising is tomorrow's
+                w["sunrise"], w["sunset"], w["sunrise_next"] = rise - timedelta(days=1), sett, rise
+            elif datetime.now().hour >= 12:   # evening: both "next" times are tomorrow's
+                w["sunrise"], w["sunset"], w["sunrise_next"] = rise - timedelta(days=1), sett - timedelta(days=1), rise
+            else:                             # before dawn: both are today's
+                w["sunrise"], w["sunset"], w["sunrise_next"] = rise, sett, rise
         unit = state.get("attributes", {}).get("temperature_unit", "°F")
         w["unit"] = "celsius" if "C" in unit else "fahrenheit"
         return w
@@ -233,11 +312,21 @@ class WeatherBoard(Board):
             out.append("daily")
         if self.cfg.get("show_hourly", True) and len(w.get("hourly") or []) >= 6:
             out.append("hourly")
+        for slide, (key, _label, has, _render) in SCREENS.items():
+            if self.cfg.get(key):
+                try:
+                    if has(w, self.cfg):
+                        out.append(slide)
+                except Exception as e:          # a missing field shouldn't take the board down
+                    log.debug("weather %s skipped: %s", slide, e)
         return out
 
     def render(self, c, slide, t):
         w = self.weather
         if not w:
+            return
+        if slide in SCREENS:
+            SCREENS[slide][3](c, w, t, self.cfg)
             return
         {"current": self._current, "daily": self._daily, "hourly": self._hourly}[slide](c, w, t)
 
