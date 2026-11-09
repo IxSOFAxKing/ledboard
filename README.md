@@ -216,6 +216,15 @@ How it works:
   - **Team trim lines**: team-color lines above and below the score, records in team colors and FINAL in the winner's color.
 
   With "hide favorite's score" on, the accents never give away who won. Use **Preview → Final** to try each one.
+- **Upcoming style** (per league, under **Upcoming games**): team color accents on upcoming games.
+  - **Plain**: no accents (the original look).
+  - **Matchup badge**: the "@" sits in a badge colored half and half in both teams' colors, and records are in team colors.
+  - **Team split bar**: a half-and-half team-color bar under the start time, and records in team colors.
+  - **Tinted halves**: each side of the panel washed in its team color.
+  - **Info banner**: the bottom line (TV network, odds, date) sits on a two-team color banner.
+  - **Team trim lines**: team-color lines along the top and bottom, and records in team colors.
+
+  Use **Preview → Upcoming** to try each one.
 - **Text colors** (per league): pick the colors for scores and start times, the live clock, records / TV network / FINAL, and the losing team's score on finals. Team abbreviations can use team colors (default) or one color for all. These apply to the standard game view; the special live layouts keep their own colors.
 
 > **Note:** The live details read optional fields from ESPN's unofficial API. If ESPN doesn't send a field for a game, that detail is simply left out.

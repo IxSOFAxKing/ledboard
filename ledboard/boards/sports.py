@@ -343,6 +343,15 @@ FINAL_STYLES = {
     "trim": "Team trim lines (team-color lines above and below the score)",
 }
 
+UPCOMING_STYLES = {
+    "plain": "Plain (no accents)",
+    "badge": "Matchup badge ('@' in a two-team color badge, records in team colors)",
+    "splitbar": "Team split bar (half-and-half bar under the start time, records in team colors)",
+    "tint": "Tinted halves (each side washed in its team color)",
+    "banner": "Info banner (bottom line on a two-team color banner)",
+    "trim": "Team trim lines (team-color lines above and below)",
+}
+
 
 class LeagueBoard(Board):
     """One league. Concrete classes are generated per league at the bottom of this file."""
@@ -360,7 +369,7 @@ class LeagueBoard(Board):
         "next_game": "no_games", "show_standings": False,
         "show_abbreviations": True, "show_final_records": True, "logo_enhance": True, "logo_edges": "auto",
         "text_score": "#ffffff", "text_status": "#ffc800", "text_info": "#787878", "text_loser": "#787878",
-        "abbr_color_mode": "team", "abbr_color": "#ffffff", "final_style": "plain",
+        "abbr_color_mode": "team", "abbr_color": "#ffffff", "final_style": "plain", "upcoming_style": "plain",
     }
 
     @classmethod
@@ -387,6 +396,9 @@ class LeagueBoard(Board):
             {"key": "show_records", "label": "Show team records before the game", "type": "bool", "section": "Upcoming games"},
             {"key": "show_network", "label": "Show TV network", "type": "bool", "section": "Upcoming games"},
             {"key": "show_odds", "label": "Show betting line / over-under", "type": "bool", "section": "Upcoming games"},
+            {"key": "upcoming_style", "label": "Upcoming style", "type": "select", "section": "Upcoming games",
+             "options": list(UPCOMING_STYLES), "option_labels": UPCOMING_STYLES,
+             "help": "Team color accents on upcoming games (standard view). Use Preview > Upcoming to try them."},
         ]
         if cls.league in COLLEGE:
             f.append({"key": "show_rankings", "label": "Show AP Top 25 rankings", "type": "bool", "section": "Upcoming games"})
@@ -769,16 +781,27 @@ class LeagueBoard(Board):
         if final not in FINAL_STYLES:
             final = "plain"
         winner = self._final_winner(g) if final != "plain" else None
-        if final == "tint":
+        pre = self.cfg.get("upcoming_style", "plain") if g["state"] == "pre" else "plain"
+        if pre not in UPCOMING_STYLES:
+            pre = "plain"
+        if final == "tint" or pre == "tint":
             self._final_tint(c, g, mid, winner)
         self._team_columns(c, g, col, detailed)
         if g["state"] == "pre":
             if self.cfg.get("show_records", True):
-                c.text(x0 + 1, 2, away["record"], "4x6", self._tc("text_info"))
-                c.text_right(x1 - 1, 2, home["record"], "4x6", self._tc("text_info"))
-            c.text_centered(0, "v" if self.sport == "soccer" else "@", "6x10", self._tc("text_info"), x0, x1)
+                rc = (self._tc("text_info"),) * 2
+                if pre in ("badge", "splitbar", "trim"):
+                    rc = (scale(team_color(away), 0.85), scale(team_color(home), 0.85))
+                c.text(x0 + 1, 2, away["record"], "4x6", rc[0])
+                c.text_right(x1 - 1, 2, home["record"], "4x6", rc[1])
+            vs = "v" if self.sport == "soccer" else "@"
+            if pre == "badge":
+                self._vs_badge(c, g, mid)
+            c.text_centered(0, vs, "6x10", WHITE if pre == "badge" else self._tc("text_info"), x0, x1)
             c.scroll_text(x0, x1, 12, self._start_text(g), "5x8", self._tc("text_score"), t, align="center")
             items = self._info_items(g)[1:] or [(self._date_text(g), self._tc("text_info"))]
+            if pre != "plain":
+                items = self._upcoming_accents(c, g, pre, x0, x1, mid, items)
         else:
             score_cols = None
             if final == "winner" and winner:
@@ -954,6 +977,45 @@ class LeagueBoard(Board):
                 c.rect(xa, H - 1, xb, H - 1, second)
             if winner:
                 items = recolor(win_col)
+        return items
+
+    # ---------------------------------------------------------------- upcoming-game accents
+    def _vs_badge(self, c, g, mid):
+        """Rounded badge behind the '@', left half in the away color, right half in the home color."""
+        from .football_layouts import panel_color
+        x0, x1 = mid - 5, mid + 4
+        c.draw.rounded_rectangle((x0, 0, x1, 10), radius=3, fill=panel_color(g["away"]))
+        c.draw.rounded_rectangle((mid, 0, x1, 10), radius=3, fill=panel_color(g["home"]))
+        c.rect(mid, 0, mid + 1, 10, panel_color(g["home"]))      # square off the seam
+
+    def _upcoming_accents(self, c, g, style, x0, x1, mid, items):
+        from .football_layouts import panel_color
+        H = c.height
+        away, home = g["away"], g["home"]
+
+        def recolor(col):
+            return [(txt, col) for txt, _ in items]
+
+        if style == "splitbar":
+            bx0, bx1 = x0 + 2, x1 - 3
+            c.rect(bx0, 21, mid - 1, 21, team_color(away))
+            c.rect(mid, 21, bx1, 21, team_color(home))
+        elif style == "tint":
+            items = recolor(WHITE)
+        elif style == "banner":
+            c.rect(x0 + 1, H - 8, mid - 1, H - 1, panel_color(away))
+            c.rect(mid, H - 8, x1 - 2, H - 1, panel_color(home))
+            c.rect(x0 + 1, H - 8, mid - 1, H - 8, team_color(away))
+            c.rect(mid, H - 8, x1 - 2, H - 8, team_color(home))
+            items = recolor(WHITE)
+        elif style == "trim":
+            for side, xa, xb in (("away", x0, mid - 1), ("home", mid, x1 - 1)):
+                tm = g[side]
+                alt = tm.get("alt")
+                second = scale(alt, 0.9) if alt and alt not in ((255, 255, 255), (0, 0, 0)) else team_color(tm)
+                c.rect(xa, 0, xb, 0, team_color(tm))
+                c.rect(xa, H - 1, xb, H - 1, second)
+            c.rect(mid - 5, 0, mid + 4, 0, (0, 0, 0))                 # leave room around the '@'
         return items
 
     def _scores_draw(self, c, g, mid, y=9, colors=None):
