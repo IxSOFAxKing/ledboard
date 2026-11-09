@@ -349,6 +349,8 @@ class LeagueBoard(Board):
         "celebrations": True, "celebrate_field_goals": False, "celebrate_runs": False,
         "next_game": "no_games", "show_standings": False,
         "show_abbreviations": True, "show_final_records": True, "logo_enhance": True, "logo_edges": "auto",
+        "text_score": "#ffffff", "text_status": "#ffc800", "text_info": "#787878", "text_loser": "#787878",
+        "abbr_color_mode": "team", "abbr_color": "#ffffff",
     }
 
     @classmethod
@@ -442,6 +444,16 @@ class LeagueBoard(Board):
                                "smooth": "Smooth (anti-aliased, softer)", "crisp": "Crisp (hard pixel edges)"},
              "help": "Smooth keeps soft edges like the clock's 'Smooth edges'; crisp snaps to the logo's exact colors."},
             {"key": "use_dark_logos", "label": "Prefer logos designed for dark backgrounds", "type": "bool", "section": "Logos"},
+            {"key": "text_score", "label": "Scores and start times", "type": "color", "section": "Text colors",
+             "help": "Colors for the standard game view. The special live layouts keep their own color schemes."},
+            {"key": "text_status", "label": "Live clock / game status", "type": "color", "section": "Text colors"},
+            {"key": "text_info", "label": "Records, TV network and FINAL", "type": "color", "section": "Text colors"},
+            {"key": "text_loser", "label": "Losing team's score (finals)", "type": "color", "section": "Text colors",
+             "help": "Set it the same as the score color to not dim the loser."},
+            {"key": "abbr_color_mode", "label": "Team abbreviations", "type": "select", "section": "Text colors",
+             "options": ["team", "custom"], "option_labels": {"team": "Team colors", "custom": "One color for all"}},
+            {"key": "abbr_color", "label": "Abbreviation color", "type": "color", "section": "Text colors",
+             "show_if": {"abbr_color_mode": "custom"}},
         ]
         return f
 
@@ -743,19 +755,19 @@ class LeagueBoard(Board):
         self._team_columns(c, g, col, detailed)
         if g["state"] == "pre":
             if self.cfg.get("show_records", True):
-                c.text(x0 + 1, 2, away["record"], "4x6", GRAY)
-                c.text_right(x1 - 1, 2, home["record"], "4x6", GRAY)
-            c.text_centered(0, "v" if self.sport == "soccer" else "@", "6x10", GRAY, x0, x1)
-            c.scroll_text(x0, x1, 12, self._start_text(g), "5x8", WHITE, t, align="center")
-            items = self._info_items(g)[1:] or [(self._date_text(g), GRAY)]
+                c.text(x0 + 1, 2, away["record"], "4x6", self._tc("text_info"))
+                c.text_right(x1 - 1, 2, home["record"], "4x6", self._tc("text_info"))
+            c.text_centered(0, "v" if self.sport == "soccer" else "@", "6x10", self._tc("text_info"), x0, x1)
+            c.scroll_text(x0, x1, 12, self._start_text(g), "5x8", self._tc("text_score"), t, align="center")
+            items = self._info_items(g)[1:] or [(self._date_text(g), self._tc("text_info"))]
         else:
             self._scores_draw(c, g, mid, y=2)
             if g["state"] == "in" and detailed:
                 self._live_graphics(c, g, x0, x1, mid)
             if g["state"] == "post" and self.cfg.get("show_final_records", True):
                 # updated records under each team's side of the score
-                c.text(x0 + 1, 17, away["record"], "4x6", GRAY)
-                c.text_right(x1 - 1, 17, home["record"], "4x6", GRAY)
+                c.text(x0 + 1, 17, away["record"], "4x6", self._tc("text_info"))
+                c.text_right(x1 - 1, 17, home["record"], "4x6", self._tc("text_info"))
             items = self._info_items(g)
         text, color, local_t = _cycle(c, items, t, x1 - x0)
         c.scroll_text(x0, x1, H - 7, text, "5x7", color, local_t, speed=INFO_SPEED, align="center", pause=0.6, gap=200)
@@ -818,7 +830,7 @@ class LeagueBoard(Board):
                 if rank:
                     c.text(x, H - 7, rank, "4x6", GRAY)
                     x += rw
-                c.text(x, H - 8, team["abbr"], "5x8", team_color(team))
+                c.text(x, H - 8, team["abbr"], "5x8", self._abbr_color(team))
             if g["state"] != "in" or not detailed:
                 continue
             # markers in the team's column: possession (football), red cards (soccer)
@@ -828,17 +840,26 @@ class LeagueBoard(Board):
             for i in range(min(3, team["red_cards"])):
                 c.rect(inner, 1 + i * 5, inner + 1, 4 + i * 5, RED)
 
+    def _tc(self, key):
+        """A user-set text color (falls back to the default)."""
+        return hex_to_rgb(self.cfg.get(key) or self.COMMON[key], hex_to_rgb(self.COMMON[key]))
+
+    def _abbr_color(self, team):
+        if self.cfg.get("abbr_color_mode") == "custom":
+            return self._tc("abbr_color")
+        return team_color(team)
+
     def _scores_draw(self, c, g, mid, y=9):
         away, home = g["away"], g["home"]
         a_s, h_s = str(away["score"]), str(home["score"])
         if self.cfg.get("hide_favorite_score") and self.is_favorite(g):
             a_s = h_s = "?"
-        a_col = h_col = WHITE
+        a_col = h_col = self._tc("text_score")
         if g["state"] == "post" and a_s != "?":
             if away["winner"] or _num(a_s) > _num(h_s):
-                h_col = GRAY
+                h_col = self._tc("text_loser")
             elif home["winner"] or _num(h_s) > _num(a_s):
-                a_col = GRAY
+                a_col = self._tc("text_loser")
         if self.cfg.get("score_flash", True) and int(time.monotonic() * 3) % 2 == 0:
             now = time.monotonic()
             if self.flash.get(f"{g['id']}|away", 0) > now:
@@ -847,7 +868,7 @@ class LeagueBoard(Board):
                 h_col = YELLOW
         font = "7x13B"
         dash_w = c.text_width("-", font)
-        c.text(mid - dash_w // 2, y, "-", font, GRAY)
+        c.text(mid - dash_w // 2, y, "-", font, self._tc("text_info"))
         c.text_right(mid - dash_w // 2 - 1, y, a_s, font, a_col)
         c.text(mid + dash_w // 2 + 2, y, h_s, font, h_col)
 
@@ -877,9 +898,9 @@ class LeagueBoard(Board):
         c = self.cfg
         items = []
         if g["state"] == "pre":
-            items.append((self._start_text(g), WHITE))
+            items.append((self._start_text(g), self._tc("text_score")))
             if c.get("show_network", True) and g["network"]:
-                items.append((g["network"].upper(), GRAY))
+                items.append((g["network"].upper(), self._tc("text_info")))
             if c.get("show_odds"):
                 parts = [g["odds"]] if g["odds"] else []
                 ou = g["over_under"]
@@ -890,9 +911,9 @@ class LeagueBoard(Board):
             return items
         if g["state"] == "post":
             d = g["detail"].upper()
-            return [("FINAL" + d[5:] if d.startswith("FINAL") else d or "FINAL", GRAY)]
+            return [("FINAL" + d[5:] if d.startswith("FINAL") else d or "FINAL", self._tc("text_info"))]
 
-        items.append((self._clock_text(g), YELLOW))
+        items.append((self._clock_text(g), self._tc("text_status")))
         if c.get("detailed_live", True):
             sport = self.sport
             if sport == "football":
@@ -906,26 +927,26 @@ class LeagueBoard(Board):
                 if g["balls"] is not None and g["strikes"] is not None:
                     items.append((f"COUNT {g['balls']}-{g['strikes']}", ORANGE))
                 if g["pitcher"]:
-                    items.append((f"P: {g['pitcher']}", GRAY))
+                    items.append((f"P: {g['pitcher']}", self._tc("text_info")))
                 if g["batter"]:
-                    items.append((f"AB: {g['batter']}", GRAY))
+                    items.append((f"AB: {g['batter']}", self._tc("text_info")))
                 a, h = g["away"], g["home"]
                 if a["hits"] is not None and h["hits"] is not None:
-                    items.append((f"H {a['hits']}-{h['hits']}  E {a['errors'] or 0}-{h['errors'] or 0}", GRAY))
+                    items.append((f"H {a['hits']}-{h['hits']}  E {a['errors'] or 0}-{h['errors'] or 0}", self._tc("text_info")))
             elif sport == "basketball":
                 for side in ("away", "home"):
                     t = g[side]
                     pts = next((l for l in t["leaders"] if l[0].upper() in ("PTS", "POINTS")), None)
                     if pts:
-                        items.append((f"{t['abbr']} {pts[1]} {pts[2]}", GRAY))
+                        items.append((f"{t['abbr']} {pts[1]} {pts[2]}", self._tc("text_info")))
             elif sport == "hockey":
                 a, h = g["away"]["shots"], g["home"]["shots"]
                 if a is not None and h is not None:
-                    items.append((f"SOG {a}-{h}", GRAY))
+                    items.append((f"SOG {a}-{h}", self._tc("text_info")))
             elif sport == "soccer" and g["last_goal"]:
                 items.append((g["last_goal"], ORANGE))
         if c.get("show_last_play", True) and g["last_play"] and self.sport != "soccer":
-            items.append((g["last_play"], WHITE))
+            items.append((g["last_play"], self._tc("text_score")))
         return items
 
     def _clock_text(self, g):

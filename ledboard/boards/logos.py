@@ -7,8 +7,8 @@
   in-between shades when shrunk, dark team colors (e.g. Packers green #203731, navy) sit
   near black, and soft edges turn into dim fringe pixels. 'Enhanced' logos snap every
   pixel to the logo's own key colors (taken from the full-size image), lift dark colors
-  and add a little saturation (hue preserved), show black detail as dark grey so it
-  doesn't vanish on the black background, and use crisp edges.
+  and add a little saturation (hue preserved) while keeping black black, and use crisp
+  edges.
 """
 from __future__ import annotations
 
@@ -94,8 +94,8 @@ def led_color(c):
     """Make a logo color read well on LEDs: lift dark tones, a touch more saturation, same hue."""
     r, g, b = (x / 255 for x in c)
     h, s, v = colorsys.rgb_to_hsv(r, g, b)
-    if v < 0.18 and s < 0.6:                  # black / near-black detail -> visible dark grey
-        return (55, 55, 60)
+    if v < 0.18 and s < 0.6:                  # black / near-black stays black
+        return (0, 0, 0)
     v = v ** 0.6                              # gamma lift: 0.22 -> 0.40, 0.5 -> 0.66, 1.0 -> 1.0
     if s > 0.15:
         s = min(1.0, s * 1.2)
@@ -127,7 +127,14 @@ def _enhance(img, pal, led=True):
 CRISP_MIN = 18      # boxes at least this big get the crisp palette treatment; smaller ones stay smooth
 
 
-_LIFT = [max(55, round(255 * (x / 255) ** 0.6)) for x in range(256)]      # value: lift darks, floor near-black
+def _lift(x):
+    """Brighten dark colors but leave blacks black: no lift below ~10%, full lift above ~20%."""
+    lifted = 255 * (x / 255) ** 0.6
+    k = min(1.0, max(0.0, (x - 26) / 26))
+    return round(x + (lifted - x) * k)
+
+
+_LIFT = [_lift(x) for x in range(256)]
 _SAT = [min(255, round(x * 1.2)) for x in range(256)]
 _ALPHA = [0 if x < 30 else min(255, round(x * 1.35)) for x in range(256)]  # keep thin strokes visible
 

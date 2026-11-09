@@ -202,11 +202,12 @@ How it works:
 - **Enhance logo colors for LEDs** (on by default, under **Logos**): finds each logo's real colors from a larger copy, then:
   - snaps the shrunken logo to them for crisp edges, with no muddy blended shades
   - brightens dark team colors (such as Packers green or navy) so they show up
-  - shows black details as dark gray so they don't disappear
+  - keeps black truly black (only colors that are dark but not black get lifted)
 - **Logo edges** (under **Logos**):
   - **Automatic**: crisp hard pixel edges for big logos, smooth anti-aliased edges for small ones, where the soft edge pixels carry the detail.
   - **Smooth**: soft edges at every size, like the clock's "Smooth edges".
   - **Crisp**: hard edges in the logo's exact colors at every size.
+- **Text colors** (per league): pick the colors for scores and start times, the live clock, records / TV network / FINAL, and the losing team's score on finals. Team abbreviations can use team colors (default) or one color for all. These apply to the standard game view; the special live layouts keep their own colors.
 
 > **Note:** The live details read optional fields from ESPN's unofficial API. If ESPN doesn't send a field for a game, that detail is simply left out.
 
