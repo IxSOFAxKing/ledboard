@@ -14,13 +14,15 @@ from __future__ import annotations
 
 import colorsys
 import math
+import weakref
 
 from PIL import Image
 
 from ..gfx import trim_alpha
 
-_trimmed: dict = {}
-_palettes: dict = {}
+# Derived data (trimmed copy, palette) is stored on the source image object itself, and the
+# render cache checks it is still the same object -- never keyed by id(), which Python reuses
+# after an image is freed (that could hand back another team's logo).
 _cache: dict = {}
 
 
@@ -32,12 +34,10 @@ def _source(board, team):
 
 
 def _trim(src):
-    key = id(src)
-    if key not in _trimmed:
-        if len(_trimmed) > 400:
-            _trimmed.clear()
-        _trimmed[key] = trim_alpha(src)
-    return _trimmed[key]
+    t = getattr(src, "_ledboard_trimmed", None)
+    if t is None:
+        t = src._ledboard_trimmed = trim_alpha(src)
+    return t
 
 
 def _fit(img, w, h):
@@ -61,9 +61,9 @@ def palette(src, n=6):
     -> cream). Those blends are dropped: a candidate that sits on the line between two
     stronger colors is an edge blend, not a team color.
     """
-    key = id(src)
-    if key in _palettes:
-        return _palettes[key]
+    cached = getattr(src, "_ledboard_palette", None)
+    if cached is not None:
+        return cached
     rgba = src.convert("RGBA")
     px = [p[:3] for p in rgba.getdata() if p[3] >= 250]
     pal = []
@@ -86,7 +86,7 @@ def palette(src, n=6):
             others = [(c2, p) for i, (c2, p) in enumerate(kept) if i != k and c2 > cnt]
             return any(_seg_dist(col, a[1], b[1]) < 24 for i, a in enumerate(others) for b in others[i + 1:])
         pal = [col for k, (cnt, col) in enumerate(kept) if not is_blend(k)][:n]
-    _palettes[key] = pal
+    src._ledboard_palette = pal
     return pal
 
 
@@ -124,6 +124,24 @@ def _enhance(img, pal):
     return out
 
 
+CRISP_MIN = 18      # boxes at least this big get the crisp palette treatment; smaller ones stay smooth
+
+
+_LIFT = [max(55, round(255 * (x / 255) ** 0.6)) for x in range(256)]      # value: lift darks, floor near-black
+_SAT = [min(255, round(x * 1.2)) for x in range(256)]
+_ALPHA = [0 if x < 30 else min(255, round(x * 1.35)) for x in range(256)]  # keep thin strokes visible
+
+
+def _soft_enhance(img):
+    """For tiny logos: keep the smooth anti-aliased shapes (they carry the detail at 6-16 px)
+    and only make the colors LED-friendly."""
+    alpha = img.getchannel("A").point(_ALPHA)
+    h, sat, val = img.convert("RGB").convert("HSV").split()
+    out = Image.merge("HSV", (h, sat.point(_SAT), val.point(_LIFT))).convert("RGB")
+    out.putalpha(alpha)
+    return out
+
+
 def logo_image(board, team, w, h=None, partner=None):
     """`team`'s logo inside a w x h box (centered, transparent padding).
 
@@ -136,9 +154,10 @@ def logo_image(board, team, w, h=None, partner=None):
         return None
     psrc = _source(board, partner) if partner else None
     enhance = bool(getattr(board, "cfg", {}).get("logo_enhance", True))
-    key = (id(src), id(psrc), w, h, enhance)
-    if key in _cache:
-        return _cache[key]
+    key = (team.get("logo_url"), (partner or {}).get("logo_url"), w, h, enhance)
+    hit = _cache.get(key)
+    if hit is not None and hit[0]() is src and hit[1]() is psrc:
+        return hit[2]
     t = _trim(src)
     fw, fh = _fit(t, w, h)
     if psrc is not None:
@@ -153,10 +172,13 @@ def logo_image(board, team, w, h=None, partner=None):
     size = (max(1, round(fw)), max(1, round(fh)))
     img = t.resize(size, Image.LANCZOS)
     if enhance:
-        img = _enhance(img, palette(t))
+        if min(w, h) >= CRISP_MIN:
+            img = _enhance(img, palette(t))       # big enough for crisp, palette-true colors
+        else:
+            img = _soft_enhance(img)              # small: smooth shapes, brighter colors
     box = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     box.paste(img, ((w - size[0]) // 2, (h - size[1]) // 2), img)
     if len(_cache) > 500:
         _cache.clear()
-    _cache[key] = box
+    _cache[key] = (weakref.ref(src), (lambda: None) if psrc is None else weakref.ref(psrc), box)
     return box
