@@ -1,4 +1,4 @@
-from .base import Board
+from .base import Board, organize
 from ..gfx import hex_to_rgb
 
 
@@ -16,6 +16,7 @@ class MessageBoard(Board):
          "options": ["4x6", "5x7", "5x8", "6x10", "7x13B", "tom-thumb"]},
         {"key": "speed", "label": "Scroll speed (px/s)", "type": "number"},
     ]
+    FIELDS = organize(FIELDS, [('Message', ['text', 'color', 'font', 'speed']), ('Timing', ['duration'])], {})
 
     def slides(self):
         return [None] if self.cfg.get("text") else []

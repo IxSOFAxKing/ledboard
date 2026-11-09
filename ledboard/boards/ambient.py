@@ -12,7 +12,7 @@ import time
 
 from PIL import Image
 
-from .base import Board
+from .base import Board, organize
 
 STEP = 1 / 15.0
 ANIMATIONS = {"fire": "Fireplace", "matrix": "Matrix rain", "starfield": "Starfield warp",
@@ -257,6 +257,7 @@ class AmbientBoard(Board):
          "show_if": {"animation": "cycle"}},
         {"key": "duration", "label": "Seconds on screen (in rotation)", "type": "number"},
     ]
+    FIELDS = organize(FIELDS, [('Animation', ['animation', 'cycle_minutes']), ('Timing', ['duration'])], {})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)

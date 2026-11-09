@@ -15,7 +15,7 @@ import time
 
 import requests
 
-from .base import Board
+from .base import Board, organize
 from ..gfx import GRAY, WHITE, fetch_image
 
 log = logging.getLogger(__name__)
@@ -80,6 +80,7 @@ class SteamBoard(Board):
         {"key": "event_minutes", "label": "Show these screens for (minutes)", "type": "number",
          "section": "Friends & achievements"},
     ]
+    FIELDS = organize(FIELDS, [('Account', ['api_key', 'steam_ids']), ('Now playing', ['art', 'takeover', 'show_online']), ('Friends & achievements', ['show_achievements', 'show_friends', 'friend_filter', 'event_minutes']), ('Timing', ['duration', 'refresh'])], {'duration': 'Seconds per screen'})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)

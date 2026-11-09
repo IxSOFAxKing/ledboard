@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 import requests
 
-from .base import Board
+from .base import Board, organize
 from .weather_extra import SCREENS
 from .weather_icons import LABELS, WMO, draw_icon
 from ..gfx import DIM, GRAY, WHITE
@@ -214,6 +214,7 @@ class WeatherBoard(Board):
         {"key": "duration", "label": "Seconds per screen", "type": "number", "section": "Display"},
         {"key": "refresh", "label": "Refresh interval (s)", "type": "number", "section": "Display"},
     ]
+    FIELDS = organize(FIELDS, [('Source', ['source', 'location_name', 'latitude', 'longitude', 'ha_entity', 'units']), ('Screens', ['screen_order', 'aqi_scale', 'yesterday_threshold']), ('Timing', ['duration', 'refresh'])], {})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)

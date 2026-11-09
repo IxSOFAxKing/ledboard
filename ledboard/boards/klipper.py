@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 import requests
 from PIL import Image
 
-from .base import Board
+from .base import Board, organize
 from ..gfx import DIM, GRAY, RED, WHITE, YELLOW, fetch_image
 
 HOTEND = (255, 120, 30)
@@ -73,6 +73,7 @@ class KlipperBoard(Board):
         {"key": "duration", "label": "Seconds on screen", "type": "number", "section": "Display"},
         {"key": "refresh", "label": "Poll interval (s)", "type": "number", "section": "Display"},
     ]
+    FIELDS = organize(FIELDS, [('Connection', ['url', 'api_key', 'printer_name']), ('When to show', ['takeover', 'show_when_idle', 'show_finished_minutes']), ('Picture', ['show_thumbnail', 'picture_source', 'camera_url']), ('Display', ['eta_style']), ('Timing', ['duration', 'refresh'])], {})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)

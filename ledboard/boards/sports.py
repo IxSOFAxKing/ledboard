@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-from .base import Board
+from .base import Board, organize
 from ..gfx import DIM, GRAY, RED, WHITE, YELLOW, fetch_image, fit_image, hex_to_rgb, readable, scale
 
 log = logging.getLogger(__name__)
@@ -355,6 +355,33 @@ UPCOMING_STYLES = {
 
 from .countdown_layouts import STYLES as COUNTDOWN_STYLES  # noqa: E402
 
+# How a league board's settings are grouped in the web UI (top to bottom).
+LEAGUE_LAYOUT = [
+    ("Teams", ["favorites", "favorites_only", "takeover", "hide_favorite_score"]),
+    ("Preview", ["preview"]),
+    ("Which games", ["live_only", "show_final", "final_hours", "show_pregame", "upcoming_hours", "max_games"]),
+    ("Between games", ["next_game", "next_game_style", "show_standings", "show_playoffs"]),
+    ("Upcoming games", ["upcoming_style", "show_records", "show_network", "network_logos", "show_odds"]),
+    ("Live games", ["live_layout", "live_style", "detailed_live", "show_win_probability", "show_last_play",
+                    "score_flash", "goal_animation"]),
+    ("Final scores", ["final_style", "show_final_records"]),
+    ("Celebrations", ["celebrations", "celebrate_field_goals", "celebrate_runs", "recap", "simulate"]),
+    ("Logos", ["show_abbreviations", "logo_enhance", "logo_edges", "use_dark_logos"]),
+    ("Text colors", ["text_score", "text_status", "text_info", "text_loser", "abbr_color_mode", "abbr_color"]),
+    ("Timing", ["duration", "refresh", "live_refresh"]),
+]
+LEAGUE_LABELS = {
+    "upcoming_style": "Team color accents",
+    "live_style": "Team color accents (Classic layout)",
+    "final_style": "Team color accents",
+    "show_final_records": "Show each team's updated record",
+    "show_records": "Show team records",
+    "show_network": "Show the TV network",
+    "max_games": "Most games per rotation",
+    "duration": "Seconds per screen",
+    "preview": "Show sample games",
+}
+
 LIVE_STYLES = {
     "plain": "Plain (no accents)",
     "leader": "Leader color (leading team's score in its color, with underlines)",
@@ -541,7 +568,7 @@ class LeagueBoard(Board):
             {"key": "abbr_color", "label": "Abbreviation color", "type": "color", "section": "Text colors",
              "show_if": {"abbr_color_mode": "custom"}},
         ]
-        return f
+        return organize(f, LEAGUE_LAYOUT, LEAGUE_LABELS)
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)

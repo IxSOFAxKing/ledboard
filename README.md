@@ -113,14 +113,33 @@ The speed (20 px/s by default) and the gap between slides are set once for all b
 The **Display** tab has brightness, frame rate and panel hardware settings. Brightness is also the slider at the top of the page.
 
 ### Sports
-Each league is its own board, so it has its own place in the rotation and its own settings. Turn on the leagues you want, then open one with ⚙. Settings are grouped like this:
+Each league is its own board, so it has its own place in the rotation and its own settings. Turn on the leagues you want, then open one with ⚙.
+
+Every board's settings are in collapsible sections: tap a section's name to open or close it (the number shows how many settings it holds). The first section starts open, and the web UI remembers which ones you leave open. A league board's sections, top to bottom:
+
+| Section | What's in it |
+|---|---|
+| **Teams** | favorites, favorites only, take over, spoiler mode |
+| **Preview** | sample live / upcoming / final games and the next-game countdown |
+| **Which games** | live only, how long finals stay, how far ahead upcoming games show, most games per rotation |
+| **Between games** | next-game countdown and its design, standings, playoff picture |
+| **Upcoming games** | team color accents, records, TV network (and its logo), betting line |
+| **Live games** | layout, team color accents (Classic layout), detailed info, last play, score flash, goal animation |
+| **Final scores** | team color accents, updated records |
+| **Celebrations** | celebrations, extra scoring types, scoring play recap, Simulate |
+| **Logos** | abbreviations, LED color enhancement, edges, dark-background logos |
+| **Text colors** | scores, clock, info, loser's score, abbreviations |
+| **Timing** | seconds per screen, refresh intervals |
+| **Scroll mode** | ticker-style scrolling for this board |
+
+In more detail:
 
 - **Teams**
   - Favorite teams, as ESPN abbreviations such as `BUF, KC`. Favorites are shown first.
   - Only show favorites.
   - **Take over** the display while a favorite is playing.
   - **Spoiler mode**: hides the scores of your favorites' games.
-- **Which games**: live only, final scores and how long they stay, upcoming games as game cards and how far ahead, the next-game countdown, and the maximum number of games. For a favorite team it goes:
+- **Which games** and **Between games**: live only, final scores and how long they stay, upcoming games as game cards and how far ahead, the next-game countdown, and the maximum number of games. For a favorite team it goes:
   1. **Live**: the game card.
   2. **Final**: the final score, for the set number of hours **after the game ends** (24 by default).
   3. **Next-game countdown**: once the final is gone, your team's next game (logos, countdown, kickoff time, opponent, TV) until...
@@ -128,7 +147,7 @@ Each league is its own board, so it has its own place in the rotation and its ow
 
   The countdown appears per team: with the default setting it shows whenever *your team* has no game on the board, even if other teams' games are showing.
 
-  **Countdown design** (under **Which games**):
+  **Countdown design** (under **Between games**):
   - **Classic**: logos at the sides, the countdown, and a rotating line (time, opponent, TV).
   - **Flip clock**: split-flap digit tiles for days / hours / minutes (hours / minutes / seconds in the last day).
   - **Ticket**: a game ticket with the matchup, date, time and TV, and a tear-off stub with the countdown.
@@ -214,11 +233,11 @@ How it works:
 - To see one now, use the **Simulate** buttons on the league's board (under Celebrations). Simulate uses a live game with your favorite if there is one, or a sample game otherwise.
 - **Scoring play recap** (on by default): right after the celebration, a team-colored "TOUCHDOWN PACKERS" banner with the clock, the play scrolling by ("J. Love 24 yd pass to C. Watson"), the new score and, for football, the drive. The play comes from ESPN's game summary; if that isn't available yet, the scoreboard's last play is used.
 
-**Playoff picture.** Turn on **Show the playoff picture** (under **Off days**, for NFL, NBA, WNBA, NHL, MLB and MLS) to add your favorite team's conference seeds, with clinch status (clinched top seed / division / playoffs, play-in, eliminated) and up to three teams "in the hunt". Your team is highlighted. For the NFL, once the playoffs start, a bracket shows wild-card results, the divisional games with their times, and the conference championship.
+**Playoff picture.** Turn on **Show the playoff picture** (under **Between games**, for NFL, NBA, WNBA, NHL, MLB and MLS) to add your favorite team's conference seeds, with clinch status (clinched top seed / division / playoffs, play-in, eliminated) and up to three teams "in the hunt". Your team is highlighted. For the NFL, once the playoffs start, a bracket shows wild-card results, the divisional games with their times, and the conference championship.
 
-**Classic view.** Every sport's standard view puts each team's abbreviation (and AP rank for college) under its logo. Two settings change this, under **Logos** on each league board:
-- **Show team abbreviations**: turn it off to make the logos fill the whole 32×32 space. College ranks then sit in a small corner badge.
-- **Show team records on final scores**: shows each team's updated record under the score once a game ends.
+**Classic view.** Every sport's standard view puts each team's abbreviation (and AP rank for college) under its logo. Two settings change this:
+- **Show team abbreviations** (under **Logos**): turn it off to make the logos fill the whole 32×32 space. College ranks then sit in a small corner badge.
+- **Show each team's updated record** (under **Final scores**): shows each team's updated record under the score once a game ends.
 
 **Logos on the panel.**
 - **Same size:** in every matchup, both logos are scaled to the same visual size, so a round logo doesn't dwarf a wide one.
@@ -230,7 +249,7 @@ How it works:
   - **Automatic**: crisp hard pixel edges for big logos, smooth anti-aliased edges for small ones, where the soft edge pixels carry the detail.
   - **Smooth**: soft edges at every size, like the clock's "Smooth edges".
   - **Crisp**: hard edges in the logo's exact colors at every size.
-- **Final style** (per league, under **Final scores**): team color accents on finished games.
+- **Team color accents** for finals (per league, under **Final scores**):
   - **Plain**: no accents (the original look).
   - **Winner color**: the winning score, an underline and FINAL in the winner's color, with the loser dimmed.
   - **Team split bar**: a bar under the score split by points in both teams' colors, and records in team colors.
@@ -239,7 +258,7 @@ How it works:
   - **Team trim lines**: team-color lines above and below the score, records in team colors and FINAL in the winner's color.
 
   With "hide favorite's score" on, the accents never give away who won. Use **Preview → Final** to try each one.
-- **Upcoming style** (per league, under **Upcoming games**): team color accents on upcoming games.
+- **Team color accents** for upcoming games (per league, under **Upcoming games**):
   - **Plain**: no accents (the original look).
   - **Matchup badge**: the "@" sits in a badge colored half and half in both teams' colors, and records are in team colors.
   - **Team split bar**: a half-and-half team-color bar under the start time, and records in team colors.
@@ -248,7 +267,7 @@ How it works:
   - **Team trim lines**: team-color lines along the top and bottom, and records in team colors.
 
   Use **Preview → Upcoming** to try each one.
-- **Live style** (per league, under **Live games**, Classic layout): team color accents on live games. The graphical live layouts (Scorebug, Drive, Diamond...) are unchanged.
+- **Team color accents** for live games (per league, under **Live games**). These apply to the Classic layout; the graphical live layouts (Scorebug, Drive, Diamond...) are unchanged:
   - **Plain**: no accents (the original look).
   - **Leader color**: the leading team's score in its color, with team-color underlines.
   - **Team split bar**: a bar under the score split by points.

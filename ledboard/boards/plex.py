@@ -10,7 +10,7 @@ import logging
 import requests
 import urllib3
 
-from .base import Board
+from .base import Board, organize
 from ..gfx import DIM, GRAY, WHITE, Ease, fetch_image, fill_height, fmt_ms
 
 log = logging.getLogger(__name__)
@@ -51,6 +51,7 @@ class PlexBoard(Board):
         {"key": "recent_music", "label": "Include new music albums", "type": "bool", "section": "Recently added",
          "show_if": {"show_recent": True}},
     ]
+    FIELDS = organize(FIELDS, [('Connection', ['url', 'token', 'verify_ssl']), ('Now playing', ['users', 'show_user', 'show_paused', 'takeover', 'progress_style']), ('Recently added', ['show_recent', 'recent_hours', 'recent_max', 'recent_music']), ('Timing', ['duration', 'refresh'])], {'duration': 'Seconds per screen'})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)

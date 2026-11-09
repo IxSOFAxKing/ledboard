@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from .base import Board
+from .base import Board, organize
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +61,7 @@ class WeatherAlertsBoard(Board):
          "help": "Leave blank to use the Weather board's location."},
         {"key": "refresh", "label": "Check every (seconds)", "type": "number"},
     ]
+    FIELDS = organize(FIELDS, [('Alerts', ['min_severity', 'warnings_only', 'repeat_minutes']), ('Location', ['latitude', 'longitude']), ('Timing', ['refresh'])], {})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)

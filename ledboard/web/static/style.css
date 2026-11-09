@@ -85,6 +85,16 @@ input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
 
 h4.section { margin: 10px 0 -2px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
 h4.section:first-child { margin-top: 0; }
+details.fsec { border: 1px solid var(--line, rgba(127,127,127,.25)); border-radius: 10px; background: rgba(127,127,127,.04); }
+.form:has(> details.fsec) { gap: 8px; }
+details.fsec > summary { list-style: none; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
+details.fsec > summary::-webkit-details-marker { display: none; }
+details.fsec > summary::before { content: "▸"; display: inline-block; width: 10px; transition: transform .15s; color: var(--muted, #888); }
+details.fsec[open] > summary::before { transform: rotate(90deg); }
+.fsec-count { margin-left: auto; font-weight: 400; letter-spacing: 0; color: var(--muted, #888); font-size: 11px; }
+details.fsec[open] .fsec-count { visibility: hidden; }
+.fsec-body { display: flex; flex-direction: column; gap: 12px; padding: 4px 12px 12px; }
 .row.between { justify-content: space-between; flex-wrap: nowrap; gap: 16px; }
 .row.between p { margin: 0 0 12px; }
 .row.nowrap { flex-wrap: nowrap; } .row.nowrap input { flex: 1; min-width: 0; }

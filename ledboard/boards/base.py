@@ -28,6 +28,29 @@ COMMON_FIELDS = [
 ]
 
 
+def organize(fields, layout, labels=None):
+    """Re-order `fields` into sections: layout = [(section, [keys...]), ...].
+
+    Fields not named in the layout keep their own section and go after the named ones.
+    `labels` optionally renames fields {key: label}. Returns a new list (originals untouched).
+    """
+    labels = labels or {}
+    by_key = {f["key"]: f for f in fields}
+    out, used = [], set()
+    for section, keys in layout:
+        for k in keys:
+            f = by_key.get(k)
+            if f is None or k in used:
+                continue
+            f = dict(f, section=section)
+            if k in labels:
+                f["label"] = labels[k]
+            out.append(f)
+            used.add(k)
+    out += [dict(f, label=labels.get(f["key"], f["label"])) for f in fields if f["key"] not in used]
+    return out
+
+
 def short_error(e):
     """Readable one-line error; network errors get a short summary instead of urllib3's dump."""
     import requests

@@ -1,7 +1,7 @@
 import time
 from datetime import datetime
 
-from .base import Board
+from .base import Board, organize
 from .. import fonts
 from ..gfx import GRAY, hex_to_rgb
 
@@ -101,6 +101,14 @@ class ClockBoard(Board):
         {"key": "line_gap", "label": "Space between lines (pixels)", "type": "number", "section": "Layout"},
         {"key": "duration", "label": "Seconds on screen", "type": "number", "section": "Layout"},
     ]
+    FIELDS = organize(FIELDS, [
+        ("Time", ["time_font", "time_size", "color", "format_24h", "show_seconds", "leading_zero", "blink_colon"]),
+        ("AM / PM", ["show_ampm", "ampm_font", "ampm_size", "ampm_color", "ampm_lowercase"]),
+        ("Date", ["show_date", "date_format", "date_custom", "date_uppercase", "date_font", "date_size", "date_color"]),
+        ("Extra line", ["extra_text", "extra_font", "extra_size", "extra_color"]),
+        ("Layout", ["smooth", "align", "line_gap"]),
+        ("Timing", ["duration"]),
+    ])
 
     def _font(self, name, size, ref, default_size):
         """Font object for a setting: fixed-size BDF names pass through; 'ttf:<key>' gets a size."""

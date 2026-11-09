@@ -268,17 +268,42 @@ function field(label, input, help, cls = "") {
   return h("div", { class: "field " + cls }, h("label", {}, label), input, help ? h("div", { class: "help" }, help) : null);
 }
 
+// Which collapsible sections are open, per form: {"<formId>|<section>": true/false}. The first
+// section of a form starts open; everything else starts collapsed. Remembered in this browser.
+let openSections = {};
+try { openSections = JSON.parse(localStorageGet("openSections") || "{}"); } catch { openSections = {}; }
+
 // Settings form with section headings; fields with show_if only appear when relevant.
-function renderForm(obj, fields, rerender) {
+// With a formId (board settings), each section is a collapsible group.
+function renderForm(obj, fields, rerender, formId) {
   const deps = new Set(fields.flatMap((f) => Object.keys(f.show_if || {})));
-  const out = [];
-  let section = null;
-  for (const f of fields) {
-    if (f.show_if && !Object.entries(f.show_if).every(([k, v]) => (obj[k] ?? false) === v)) continue;
-    if (f.section && f.section !== section) { section = f.section; out.push(h("h4", { class: "section" }, section)); }
-    out.push(renderField(obj, f, deps.has(f.key) || f.type === "screens" ? rerender : null));
+  const visible = fields.filter((f) => !f.show_if || Object.entries(f.show_if).every(([k, v]) => (obj[k] ?? false) === v));
+  const fieldEl = (f) => renderField(obj, f, deps.has(f.key) || f.type === "screens" ? rerender : null);
+  if (!formId || !visible.some((f) => f.section)) {
+    const out = [];
+    let section = null;
+    for (const f of visible) {
+      if (f.section && f.section !== section) { section = f.section; out.push(h("h4", { class: "section" }, section)); }
+      out.push(fieldEl(f));
+    }
+    return out;
   }
-  return out;
+  const groups = [];
+  for (const f of visible) {
+    const name = f.section || "Other";
+    let g = groups.find((x) => x.name === name);
+    if (!g) groups.push(g = { name, fields: [] });
+    g.fields.push(f);
+  }
+  return groups.map((g, i) => {
+    const key = formId + "|" + g.name;
+    const open = openSections[key] ?? i === 0;
+    const det = h("details", { class: "fsec", open: open || null,
+      ontoggle: (e) => { openSections[key] = e.currentTarget.open; localStorageSet("openSections", JSON.stringify(openSections)); } },
+      h("summary", {}, g.name, h("span", { class: "fsec-count" }, String(g.fields.length))),
+      h("div", { class: "fsec-body" }, g.fields.map(fieldEl)));
+    return det;
+  });
 }
 
 function renderField(obj, f, onDepChange) {
@@ -483,7 +508,7 @@ function renderBoards() {
     const body = h("div", { class: "board-body" },
       h("div", { class: "err-line hidden", "data-err": name }),
       h("p", { class: "muted small", style: "margin-top:0" }, sch.description),
-      h("div", { class: "form" }, renderForm(bc, sch.fields, renderBoards)),
+      h("div", { class: "form" }, renderForm(bc, sch.fields, renderBoards, name)),
       name === "plex" ? h("div", { class: "row", style: "margin-top:12px" }, h("button", { onclick: async () => {
         try { toast((await api("/api/plex/test", { url: bc.url, token: bc.token, verify_ssl: bc.verify_ssl })).message); } catch (e) { toast("Plex: " + e.message, true); }
       } }, "Test connection")) : null);

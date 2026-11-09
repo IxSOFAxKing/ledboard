@@ -14,7 +14,7 @@ import re
 
 import requests
 
-from .base import Board
+from .base import Board, organize
 from ..gfx import GRAY, WHITE
 
 log = logging.getLogger(__name__)
@@ -56,6 +56,7 @@ class UptimeBoard(Board):
         {"key": "duration", "label": "Seconds per page", "type": "number"},
         {"key": "refresh", "label": "Check every (seconds)", "type": "number"},
     ]
+    FIELDS = organize(FIELDS, [('Status page', ['status_url', 'monitors']), ('When to show', ['only_when_down']), ('Alerts', ['alert_on_down', 'alert_hold']), ('Timing', ['duration', 'refresh'])], {})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)

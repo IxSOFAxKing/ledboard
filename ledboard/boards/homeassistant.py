@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import requests
 
-from .base import Board
+from .base import Board, organize
 from ..gfx import GRAY, RED, WHITE, YELLOW, hex_to_rgb
 
 FRIENDLY = {
@@ -74,6 +74,7 @@ class HomeAssistantBoard(Board):
         {"key": "verify_ssl", "label": "Verify HTTPS certificate", "type": "bool"},
         {"key": "refresh", "label": "Refresh interval (s)", "type": "number"},
     ]
+    FIELDS = organize(FIELDS, [('Connection', ['url', 'token', 'verify_ssl']), ('Entities', ['entities', 'per_page', 'label_color']), ('Timing', ['duration', 'refresh'])], {})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)
