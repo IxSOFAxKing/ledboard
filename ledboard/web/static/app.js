@@ -259,6 +259,7 @@ async function renderAlertForm() {
       option_labels: { low: "Low — waits for the current board", normal: "Normal — interrupts", high: "High — interrupts, flashing border", critical: "Critical — repeats until dismissed" } }),
     renderField(a, { key: "color", label: "Color", type: "color" }),
     renderField(a, { key: "seconds", label: "Seconds on screen", type: "number" }),
+    renderField(a, { key: "hold", label: "Keep on screen until dismissed", type: "bool" }),
     h("div", { class: "row" }, send));
 }
 

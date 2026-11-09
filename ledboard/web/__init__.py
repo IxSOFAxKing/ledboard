@@ -201,7 +201,7 @@ def create_app(engine):
                               priority=j.get("priority", "normal"), seconds=j.get("seconds", 10),
                               repeat_minutes=j.get("repeat_minutes", 0), until_dismissed=j.get("until_dismissed"),
                               expires_in=j.get("expires_in"), source=j.get("source", "api"),
-                              replace_key=j.get("key") or None)
+                              replace_key=j.get("key") or None, hold=j.get("hold", False))
         return jsonify({"ok": True, "id": a.id})
 
     @app.get("/api/alerts")

@@ -174,7 +174,8 @@ class MQTTBridge:
                                  icon=j.get("icon", "bell"), color=j.get("color", "#ffaa00"),
                                  priority=j.get("priority", "normal"), seconds=j.get("seconds", 10),
                                  repeat_minutes=j.get("repeat_minutes", 0), until_dismissed=j.get("until_dismissed"),
-                                 expires_in=j.get("expires_in"), source="mqtt", replace_key=j.get("key") or None)
+                                 expires_in=j.get("expires_in"), source="mqtt", replace_key=j.get("key") or None,
+                                 hold=j.get("hold", False))
         except Exception as ex:
             log.warning("MQTT command on %s failed: %s", topic, ex)
         self._published.pop(topic.replace("/set", "/state"), None)   # force a fresh state publish

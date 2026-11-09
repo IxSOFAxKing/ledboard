@@ -375,11 +375,13 @@ curl -X POST http://<pi-ip>:8080/api/alert -H 'Content-Type: application/json' \
   -d '{"title": "Garage open", "message": "Open for 30 minutes", "icon": "garage", "priority": "critical", "color": "#ff8c00"}'
 ```
 
+**Keep on screen:** add `"hold": true` to keep an alert on the display until it's dismissed (from the web UI, Home Assistant, or by key), instead of returning to the normal rotation. If several held alerts are active they take turns; a more urgent alert still interrupts.
+
 **Alert keys (auto-clearing alerts):** give an alert a `"key"`. Sending again with the same key replaces it instead of stacking a duplicate, and `/api/alert/dismiss` with `{"key": "..."}` clears it. Use this for "something is down" alerts that should go away on their own when it recovers. Critical alerts with a key repeat until dismissed and never expire on their own.
 
 ```bash
 curl -X POST http://<pi-ip>:8080/api/alert -H 'Content-Type: application/json' \
-  -d '{"key": "plex_down", "title": "PLEX DOWN", "message": "Plex server is not responding", "icon": "warning", "priority": "critical", "color": "#ff2020"}'
+  -d '{"key": "plex_down", "title": "PLEX DOWN", "message": "Plex server is not responding", "icon": "warning", "priority": "critical", "color": "#ff2020", "hold": true}'
 curl -X POST http://<pi-ip>:8080/api/alert/dismiss -H 'Content-Type: application/json' -d '{"key": "plex_down"}'
 ```
 
@@ -437,7 +439,7 @@ It refuses to run if files in `/opt/ledboard` were edited by hand, so it never o
 | POST | `/api/control` | `{"action": "next"}`, `"pause"`, `"resume"`, `"refresh"`, `{"action": "power", "on": false}`, `{"action": "brightness", "value": 40}`, `{"action": "jump", "board": "nfl"}` |
 | GET/POST | `/api/config` | GET returns the config with secrets masked. POST takes a partial config and merges it in. |
 | POST | `/api/restart` | Restarts the process |
-| POST | `/api/alert` | `{"title", "message", "icon", "color", "priority", "seconds", "repeat_minutes", "until_dismissed", "key", "expires_in"}` |
+| POST | `/api/alert` | `{"title", "message", "icon", "color", "priority", "seconds", "repeat_minutes", "until_dismissed", "key", "hold", "expires_in"}` |
 | GET | `/api/alerts` | Returns the active alerts and the available icons |
 | POST | `/api/alert/dismiss` | `{"id": 3}`, `{"key": "plex_down"}` or `{"id": "all"}` |
 | GET/POST | `/api/update`, `/api/update/check`, `/api/update/apply` | Software update status, check, apply |

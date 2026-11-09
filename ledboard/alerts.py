@@ -5,6 +5,8 @@ Alerts queue by priority:
   normal    - interrupts now
   high      - interrupts now, flashing border
   critical  - interrupts now and repeats until dismissed
+With `hold`, an alert stays on screen (instead of the normal rotation) until it's dismissed;
+several held alerts take turns.
 Each alert has an animated icon, a colored animated border, a title and an optional message.
 """
 from __future__ import annotations
@@ -32,6 +34,7 @@ class Alert:
     seconds: float = 10.0
     repeat_every: float = 0.0          # seconds between repeats (0 = show once)
     until_dismissed: bool = False
+    hold: bool = False                 # stay on screen until dismissed
     expires: float = 0.0               # epoch; 0 = never
     source: str = "api"
     id: int = field(default_factory=lambda: next(_ids))
@@ -43,7 +46,7 @@ class Alert:
     def public(self):
         return {"id": self.id, "key": getattr(self, "key", None), "title": self.title, "message": self.message, "icon": self.icon,
                 "priority": [k for k, v in PRIORITIES.items() if v == self.priority][0],
-                "repeating": bool(self.repeat_every), "until_dismissed": self.until_dismissed,
+                "repeating": bool(self.repeat_every), "until_dismissed": self.until_dismissed, "hold": self.hold,
                 "shown": self.shown_count, "source": self.source, "created": self.created}
 
 
@@ -56,8 +59,11 @@ class AlertManager:
 
     # -- api ---------------------------------------------------------------------
     def add(self, title, message="", icon="bell", color="#ffaa00", priority="normal", seconds=10,
-            repeat_minutes=0, until_dismissed=None, expires_in=None, source="api", replace_key=None):
+            repeat_minutes=0, until_dismissed=None, expires_in=None, source="api", replace_key=None, hold=False):
         pr = PRIORITIES.get(str(priority).lower(), 1) if not isinstance(priority, int) else priority
+        hold = _truthy(hold)
+        if hold:
+            until_dismissed = True
         if until_dismissed is None:
             until_dismissed = pr >= PRIORITIES["critical"]
         repeat = float(repeat_minutes or 0) * 60
@@ -65,7 +71,7 @@ class AlertManager:
             repeat = 60.0
         a = Alert(title=str(title or "")[:120], message=str(message or "")[:500], icon=icon or "bell",
                   color=hex_to_rgb(color, (255, 170, 0)), priority=pr, seconds=max(3.0, float(seconds or 10)),
-                  repeat_every=repeat, until_dismissed=bool(until_dismissed),
+                  repeat_every=repeat, until_dismissed=bool(until_dismissed), hold=hold,
                   expires=(time.time() + float(expires_in) if expires_in
                            else (0 if until_dismissed else (time.time() + 86400 if repeat else 0))),
                   source=source)
@@ -106,7 +112,7 @@ class AlertManager:
                        and not (not a.repeat_every and a.shown_count > 0 and a is not self.current)]
 
     def _due(self, a, now):
-        if a.shown_count == 0:
+        if a.shown_count == 0 or a.hold:
             return True
         return bool(a.repeat_every) and now - a.last_shown >= a.repeat_every
 
@@ -122,6 +128,20 @@ class AlertManager:
     def tick(self, at_boundary=False):
         """Returns (alert, seconds since it started) to draw now, or (None, 0)."""
         mono = time.monotonic()
+        if self.current and self.current.hold and not self.current.dismissed \
+                and mono - self.started >= self.current.seconds:
+            # a held alert stays up; it only hands over to another held/due alert of the same or higher priority
+            with self.lock:
+                self._prune()
+                others = [a for a in self.alerts if a is not self.current and self._due(a, time.time())
+                          and a.priority >= self.current.priority]
+            if not others:
+                return self.current, mono - self.started
+            nxt = sorted(others, key=lambda a: (-a.priority, a.last_shown, a.created))[0]   # take turns
+            nxt.shown_count += 1
+            nxt.last_shown = time.time()
+            self.current, self.started = nxt, mono
+            return nxt, 0.0
         if self.current:
             if self.current.dismissed or mono - self.started >= self.current.seconds:
                 self.current = None
@@ -143,6 +163,12 @@ class AlertManager:
         nxt.last_shown = time.time()
         self.current, self.started = nxt, mono
         return nxt, 0.0
+
+
+def _truthy(v):
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "on")
+    return bool(v)
 
 
 # ---------------------------------------------------------------- drawing
