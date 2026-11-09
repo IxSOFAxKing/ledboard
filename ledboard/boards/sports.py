@@ -362,6 +362,29 @@ LIVE_STYLES = {
 }
 
 
+# Teams whose ESPN "dark background" logo is an all-white version; always use their color logo.
+COLOR_LOGO_TEAMS = {"nfl": ("lar", "nyj")}
+
+
+def _prefers_color_logo(url):
+    m = re.search(r"/teamlogos/([a-z]+)/500/([a-z0-9]+)\.png", url or "")
+    return bool(m) and m.group(2) in COLOR_LOGO_TEAMS.get(m.group(1), ())
+
+
+def colorfulness(img):
+    """Share of a logo's visible pixels that are clearly colored (not white, gray or black)."""
+    small = img.convert("RGBA").resize((48, 48))
+    seen = colored = 0
+    for r, g, b, a in small.getdata():
+        if a < 128:
+            continue
+        seen += 1
+        hi, lo = max(r, g, b), min(r, g, b)
+        if hi > 40 and (hi - lo) / hi > 0.3:
+            colored += 1
+    return colored / seen if seen else 0.0
+
+
 class LeagueBoard(Board):
     """One league. Concrete classes are generated per league at the bottom of this file."""
     league = "nfl"
@@ -483,7 +506,8 @@ class LeagueBoard(Board):
              "option_labels": {"auto": "Automatic (crisp when big, smooth when small)",
                                "smooth": "Smooth (anti-aliased, softer)", "crisp": "Crisp (hard pixel edges)"},
              "help": "Smooth keeps soft edges like the clock's 'Smooth edges'; crisp snaps to the logo's exact colors."},
-            {"key": "use_dark_logos", "label": "Prefer logos designed for dark backgrounds", "type": "bool", "section": "Logos"},
+            {"key": "use_dark_logos", "label": "Prefer logos designed for dark backgrounds", "type": "bool", "section": "Logos",
+             "help": "When a team's dark-background logo is plain white (e.g. Rams, Jets), the colored logo is used instead."},
             {"key": "final_style", "label": "Final style", "type": "select", "section": "Final scores",
              "options": list(FINAL_STYLES), "option_labels": FINAL_STYLES,
              "help": "Team color accents on finished games (standard view). Use Preview > Final to try them."},
@@ -660,8 +684,14 @@ class LeagueBoard(Board):
             return
         size = self.app.height * 6          # ~192 px: room to find the logo's true colors
         img = None
-        if self.cfg.get("use_dark_logos", True) and "/500/" in url:
+        if self.cfg.get("use_dark_logos", True) and "/500/" in url and not _prefers_color_logo(url):
             img = fetch_image(url.replace("/500/", "/500-dark/"), size, size, trim=True)
+            if img is not None and colorfulness(img) < 0.12:
+                # some "dark background" logos are plain white (e.g. Rams, Jets): use the team-color
+                # logo instead when it actually has color
+                color_img = fetch_image(url, size, size, trim=True)
+                if color_img is not None and colorfulness(color_img) > colorfulness(img) + 0.15:
+                    img = color_img
         if img is None:
             img = fetch_image(url, size, size, trim=True)
         self.set_logo(url, img)
