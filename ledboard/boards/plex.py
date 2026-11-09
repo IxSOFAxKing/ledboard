@@ -11,7 +11,7 @@ import requests
 import urllib3
 
 from .base import Board
-from ..gfx import DIM, GRAY, WHITE, Ease, fetch_image, fmt_ms
+from ..gfx import DIM, GRAY, WHITE, Ease, fetch_image, fill_height, fmt_ms
 
 log = logging.getLogger(__name__)
 PLEX_ORANGE = (229, 160, 13)
@@ -109,14 +109,16 @@ class PlexBoard(Board):
         items = self.parse_recent(r.json(), time.time() - hours * 3600, bool(self.cfg.get("recent_music")))[:limit]
         H = self.app.height
         for it in items:
-            it["art"] = self._poster(it["thumb"], H * 2 // 3, H) if it["thumb"] else None
+            it["art"] = self._poster(it["thumb"], H) if it["thumb"] else None
         self.recent = items
 
-    def _poster(self, thumb, w, h):
-        q = urllib.parse.urlencode({"width": w * 3, "height": h * 3, "minSize": 1, "upscale": 1,
+    def _poster(self, thumb, h):
+        """Poster scaled to the full height (2:3 posters come out ~21 px wide; wider art is cropped square)."""
+        q = urllib.parse.urlencode({"width": h * 4, "height": h * 4, "minSize": 1, "upscale": 1,
                                     "url": thumb, "X-Plex-Token": self.cfg["token"]})
-        return fetch_image(f"{self._base()}/photo/:/transcode?{q}", w, h, verify=bool(self.cfg.get("verify_ssl")),
-                           cache_key=f"plexposter{w}x{h}" + thumb)
+        img = fetch_image(f"{self._base()}/photo/:/transcode?{q}", h * 4, h * 4,
+                          verify=bool(self.cfg.get("verify_ssl")), cache_key="plex4" + thumb)
+        return fill_height(img, h, h) if img is not None else None
 
     @staticmethod
     def parse_recent(j, since, music=False):
@@ -162,10 +164,11 @@ class PlexBoard(Board):
 
     def _art(self, thumb):
         H = self.app.height
-        q = urllib.parse.urlencode({"width": H * 2, "height": H * 2, "minSize": 1, "upscale": 1,
+        q = urllib.parse.urlencode({"width": H * 4, "height": H * 4, "minSize": 1, "upscale": 1,
                                     "url": thumb, "X-Plex-Token": self.cfg["token"]})
         url = f"{self._base()}/photo/:/transcode?{q}"
-        return fetch_image(url, H, H, verify=bool(self.cfg.get("verify_ssl")), cache_key="plex" + thumb)
+        img = fetch_image(url, H * 4, H * 4, verify=bool(self.cfg.get("verify_ssl")), cache_key="plex4" + thumb)
+        return fill_height(img, H, H) if img is not None else None     # always the full panel height
 
     @staticmethod
     def parse(j):
@@ -218,7 +221,7 @@ class PlexBoard(Board):
         H, W = c.height, c.width
         x0 = 2
         if item.get("art") is not None:
-            c.paste(item["art"], 0, (H - item["art"].height) // 2)
+            c.paste(item["art"], 0, 0)
             x0 = item["art"].width + 3
         c.text(x0, 0, item["tag"], "4x6", PLEX_ORANGE)
         c.scroll_text(x0, W, 7, item["title"], "6x10", WHITE, t)
@@ -245,7 +248,7 @@ class PlexBoard(Board):
         H, W = c.height, c.width
         if s["art"] is not None:
             c.paste(s["art"], 0, 0)
-            x0 = H + 2
+            x0 = s["art"].width + 2
         else:
             c.text(2, (H - 13) // 2, "PLEX", "5x8", PLEX_ORANGE)
             x0 = 26

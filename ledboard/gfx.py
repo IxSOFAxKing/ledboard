@@ -251,6 +251,20 @@ def fit_image(img, w, h, bg=None):
     return out
 
 
+def fill_height(img, h, max_w=None):
+    """Scale `img` to exactly `h` pixels tall (keeping its shape); if that makes it wider than
+    `max_w`, crop the sides evenly. Padding from fit_image() is removed first."""
+    img = trim_alpha(img.convert("RGBA")) if img.mode in ("RGBA", "LA", "P") else img.convert("RGBA")
+    if img.height == 0 or img.width == 0:
+        return img
+    w = max(1, round(img.width * h / img.height))
+    img = img.resize((w, h), Image.LANCZOS)
+    if max_w and w > max_w:
+        x = (w - max_w) // 2
+        img = img.crop((x, 0, x + max_w, h))
+    return img
+
+
 def fetch_image(url, w, h, headers=None, verify=True, cache_key=None, disk=True, trim=False):
     """Download an image and fit it to w x h. Cached in memory and on disk.
 

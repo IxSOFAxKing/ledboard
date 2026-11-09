@@ -71,4 +71,13 @@ def migrate(data: dict) -> bool:
             if b.get("scroll_gap") == 16:
                 b["scroll_gap"] = ""
                 changed = True
+    # v3 -> v4: "final_hours" now counts from the end of the game (was: from kickoff + 3 h); the
+    # untouched old default of 18 becomes the new default of 24
+    if not data.get("_final_hours_v4"):
+        for name in LEAGUES:
+            b = boards.get(name)
+            if isinstance(b, dict) and b.get("final_hours") == 18:
+                b["final_hours"] = 24
+        data["_final_hours_v4"] = True
+        changed = True
     return changed

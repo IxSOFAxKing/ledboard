@@ -394,7 +394,7 @@ class LeagueBoard(Board):
     COMMON = {
         "enabled": False, "duration": 7, "refresh": 60, "live_refresh": 15,
         "favorites": [], "favorites_only": False, "live_only": False, "takeover": False,
-        "show_pregame": True, "show_final": True, "final_hours": 18, "upcoming_hours": 48, "max_games": 20,
+        "show_pregame": True, "show_final": True, "final_hours": 24, "upcoming_hours": 48, "max_games": 20,
         "show_records": True, "show_rankings": True, "show_odds": False, "show_network": True,
         "hide_favorite_score": False, "detailed_live": True, "show_last_play": True, "score_flash": True,
         "use_dark_logos": True, "live_layout": "classic", "show_win_probability": True, "goal_animation": True,
@@ -418,14 +418,23 @@ class LeagueBoard(Board):
             {"key": "hide_favorite_score", "label": "Spoiler mode: hide scores of favorite teams' games",
              "type": "bool", "section": "Teams"},
             {"key": "live_only", "label": "Only show live games", "type": "bool", "section": "Which games"},
-            {"key": "show_pregame", "label": "Show upcoming games", "type": "bool", "section": "Which games",
-             "show_if": {"live_only": False}},
-            {"key": "upcoming_hours", "label": "...starting within (hours)", "type": "number", "section": "Which games",
-             "show_if": {"live_only": False, "show_pregame": True}},
             {"key": "show_final", "label": "Show final scores", "type": "bool", "section": "Which games",
              "show_if": {"live_only": False}},
-            {"key": "final_hours", "label": "...that started within (hours)", "type": "number", "section": "Which games",
-             "show_if": {"live_only": False, "show_final": True}},
+            {"key": "final_hours", "label": "...for this many hours after the game ends", "type": "number",
+             "section": "Which games", "show_if": {"live_only": False, "show_final": True},
+             "help": "Then the game drops off and (with the next-game countdown on) your team's next game is shown."},
+            {"key": "show_pregame", "label": "Show upcoming games as game cards", "type": "bool", "section": "Which games",
+             "show_if": {"live_only": False}},
+            {"key": "upcoming_hours", "label": "...once kickoff is within (hours)", "type": "number", "section": "Which games",
+             "show_if": {"live_only": False, "show_pregame": True},
+             "help": "Further out than this, your team's next game shows as the countdown instead."},
+            {"key": "next_game", "label": "Next-game countdown for favorite teams", "type": "select", "section": "Which games",
+             "options": ["no_games", "always", "off"],
+             "option_labels": {"no_games": "When your team has no game on the board (recommended)",
+                               "always": "Always (in addition to games)", "off": "Off"},
+             "help": "Logos, a countdown (live h:mm:ss in the last day), kickoff time, opponent and TV network. "
+                     "Order of things for your team: game card while live, final score for the hours set above, "
+                     "then this countdown until the game is close enough to show as a game card again."},
             {"key": "max_games", "label": "Max games per rotation", "type": "number", "section": "Which games"},
             {"key": "show_records", "label": "Show team records before the game", "type": "bool", "section": "Upcoming games"},
             {"key": "show_network", "label": "Show TV network", "type": "bool", "section": "Upcoming games"},
@@ -485,11 +494,6 @@ class LeagueBoard(Board):
             f.append({"key": "simulate", "label": "Simulate", "type": "simulate", "section": "Celebrations",
                       "options": SIM_KINDS[sport]})
         f += [
-            {"key": "next_game", "label": "Next-game countdown for favorite teams", "type": "select", "section": "Off days",
-             "options": ["no_games", "always", "off"],
-             "option_labels": {"no_games": "When there are no games to show", "always": "Always (in addition to games)",
-                               "off": "Off"},
-             "help": "Logos, a countdown (live h:mm:ss in the last day), kickoff time, opponent and TV network."},
             {"key": "show_standings", "label": "Show standings (favorite team's division / group)", "type": "bool",
              "section": "Off days", "help": "Paged table, 4 teams per page, your team highlighted."},
         ]
@@ -545,6 +549,8 @@ class LeagueBoard(Board):
         self.next_games: dict = {}            # favorite abbr -> next scheduled game
         self.standings_data: list = []        # [(group name, rows)]
         self.playoff_data = None              # playoff picture: {group, rows, teams}
+        self._final_seen: dict = {}           # game id -> when we saw it become final
+        self._last_state: dict = {}
         self.bracket_data = None              # NFL bracket: [(round, games)]
         self._offday_at = 0.0
         self.preview_state = ([], 0.0)        # (sample games, show until epoch)
@@ -589,7 +595,18 @@ class LeagueBoard(Board):
                     self.flash[key] = now + 8
                     self._maybe_celebrate(g, side, int(_num(score) - _num(old)))
                 self._scores[key] = score
+            if g["state"] == "post" and g["id"] not in self._final_seen and self._last_state.get(g["id"]) in ("in", "pre"):
+                self._final_seen[g["id"]] = datetime.now(timezone.utc)      # we saw it end
+            self._last_state[g["id"]] = g["state"]
         self.games = games
+        # a favorite's 'next game' just started or finished: look up the one after it now, not in 3 hours
+        now_utc = datetime.now(timezone.utc)
+        finals = {g["id"] for g in games if g["state"] == "post"}
+        stale = any(ng["id"] in finals or (ng["start"] and now_utc - ng["start"] > timedelta(hours=6))
+                    for ng in self.next_games.values())
+        if stale and time.time() - getattr(self, "_next_forced", 0) > 600:     # at most every 10 minutes
+            self._next_forced = time.time()
+            self._offday_at = 0
         self._update_offdays()
 
     OFFDAY_REFRESH = 3 * 3600
@@ -768,7 +785,8 @@ class LeagueBoard(Board):
             if g["state"] == "post":
                 if not c.get("show_final", True):
                     continue
-                if start and now - start > timedelta(hours=float(c.get("final_hours", 18) or 18) + 3):
+                ended = self._ended_at(g)
+                if ended and now - ended > timedelta(hours=float(c.get("final_hours", 24) or 24)):
                     continue
             out.append(g)
         order = {"in": 0, "pre": 1, "post": 2}
@@ -776,14 +794,32 @@ class LeagueBoard(Board):
         out = out[: int(c.get("max_games", 20) or 20)]
         return self._preview_games() + out
 
+    # typical game length, to estimate when a game that was already over when we started really ended
+    GAME_HOURS = {"football": 3.25, "baseball": 3.0, "basketball": 2.25, "hockey": 2.5, "soccer": 2.0}
+
+    def _ended_at(self, g):
+        """When a final game ended: the moment we saw it go final, else start + a typical game length."""
+        seen = self._final_seen.get(g["id"])
+        if seen:
+            return seen
+        if g["start"]:
+            return g["start"] + timedelta(hours=self.GAME_HOURS.get(self.sport, 3.0))
+        return None
+
     def slides(self):
-        games = [g["id"] for g in self.visible_games()]
+        visible = self.visible_games()
+        games = [g["id"] for g in visible]
         out = list(games)
         mode = self.cfg.get("next_game", "no_games")
-        if mode == "always" or (mode == "no_games" and not games):
-            for fav, g in self.next_games.items():
-                if g["id"] not in games and (g["start"] is None or g["start"] > datetime.now(timezone.utc)):
-                    out.append(f"next:{fav}")
+        now_utc = datetime.now(timezone.utc)
+        for fav, g in self.next_games.items():
+            if g["id"] in games or not (g["start"] is None or g["start"] > now_utc):
+                continue
+            # per team: the countdown shows when this team has nothing on the board
+            fav_on_board = any(v[s]["abbr"].upper() == fav for v in visible for s in ("home", "away")
+                               if not v.get("preview"))
+            if mode == "always" or (mode == "no_games" and not fav_on_board):
+                out.append(f"next:{fav}")
         if self.cfg.get("show_standings"):
             from .offdays import ROWS_PER_PAGE
             for gi, (_, rows) in enumerate(self.standings_data):

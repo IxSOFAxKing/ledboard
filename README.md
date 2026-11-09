@@ -120,7 +120,13 @@ Each league is its own board, so it has its own place in the rotation and its ow
   - Only show favorites.
   - **Take over** the display while a favorite is playing.
   - **Spoiler mode**: hides the scores of your favorites' games.
-- **Which games**: live only, upcoming games (and how far ahead), final scores (and how long they stay), and the maximum number of games.
+- **Which games**: live only, final scores and how long they stay, upcoming games as game cards and how far ahead, the next-game countdown, and the maximum number of games. For a favorite team it goes:
+  1. **Live**: the game card.
+  2. **Final**: the final score, for the set number of hours **after the game ends** (24 by default).
+  3. **Next-game countdown**: once the final is gone, your team's next game (logos, countdown, kickoff time, opponent, TV) until...
+  4. **Upcoming**: ...kickoff is within the "game cards" window (48 hours by default), when it shows as a regular upcoming game card.
+
+  The countdown appears per team: with the default setting it shows whenever *your team* has no game on the board, even if other teams' games are showing.
 - **Upcoming games**: team records, TV network, betting line and over/under, and AP Top 25 rankings (college leagues only).
 - **Live games**: detailed live info, scroll the last play, and flash the score when it changes.
 - **Timing**: seconds per game, and how often scores refresh, normally and during live games.
