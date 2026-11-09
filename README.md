@@ -14,8 +14,18 @@ It's built for two chained 64×32 panels (128×32), and the layouts scale to oth
 | **Weather** | Animated icons (spinning sun, drifting clouds, falling rain and snow, lightning flashes, fog, wind), current conditions, a 4-day forecast and a 24-hour temperature and rain graph. Data comes from Open-Meteo (free, no key) or your Home Assistant weather entity. |
 | **Clock** | The time and date. Every piece of text (time, AM/PM, date, an optional extra line) has its own font size, color and format. It's also the fallback when nothing else has content. |
 | **Custom message** | Your own text in the rotation. You can also flash a one-off message from the UI or API. |
+| **Ambient** | Relaxing animations: fireplace, Matrix rain, starfield warp, plasma, lava lamp, Game of Life. Use them in the rotation, as the "nothing to show" screen, or during quiet hours. |
+| **Severe Weather Alerts (US)** | National Weather Service warnings for your location interrupt the display. Extreme ones, such as tornado warnings, repeat and wake the display until dismissed. |
 
-A compact live preview stays pinned under the header as you scroll down. Tap it to jump back to the controls. The web UI also covers: board order, enable and disable, per-board settings, "show now", next and pause, power, a brightness slider, quiet hours (dim or off on a schedule), global scroll defaults, hardware settings, optional password protection, and a status page with errors.
+Also included:
+- **[Alerts](#alerts)**: animated, prioritized interruptions such as the doorbell, washer finished or garage open.
+- **[Home Assistant control over MQTT](#home-assistant-control-mqtt)**.
+- **[One-click updates and backups](#updates-and-backups)**.
+- **[Next-game countdowns and standings](#sports)**.
+- **[Sun-following brightness](#global-settings-settings-tab)**.
+- **[A combined ticker](#global-settings-settings-tab)**: all boards in one continuous scroll.
+
+A compact live preview stays pinned under the header as you scroll down. Tap it to jump back to the controls. The web UI also covers: board order, enable and disable, per-board settings, "show now", next and pause, power, a brightness slider, quiet hours (dim, off or ambient on a schedule), global scroll defaults, hardware settings, optional password protection, and a status page with errors.
 
 ## Install on the Pi
 
@@ -82,7 +92,14 @@ The speed (20 px/s by default) and the gap between slides are set once for all b
 
 ### Global settings (Settings tab)
 - **Defaults for all boards**: scroll mode speed and gap.
-- **Quiet hours**: dim the display or turn it off between two times.
+- **Combined ticker**:
+  - All enabled boards' slides scroll by as one continuous line, with fresh data on every pass.
+  - You can set the speed and gap, and a pause on each slide once it's fully on screen.
+  - Alerts, scoring celebrations and team takeovers still interrupt it.
+- **Automatic brightness**:
+  - **Follow the sun**: uses the brightness slider during the day and eases down to a night level after sunset, through twilight.
+  - The sun's position is calculated for your location, or the Weather board's location if you don't set one.
+- **Quiet hours**: dim the display, turn it off, or show ambient animations (dimmed) between two times. Critical alerts still wake the display.
 - **General**:
   - the board shown when nothing else has content (the clock by default)
   - the web UI port
@@ -261,7 +278,7 @@ Time left averages the file-progress estimate and the slicer's estimate, the way
    - **Decimals**: the number of decimal places.
 
 #### Controlling the board from Home Assistant
-LEDBoard has a small REST API, so Home Assistant automations can drive it:
+The easiest way is [MQTT](#home-assistant-control-mqtt), which needs no YAML. LEDBoard also has a small REST API that Home Assistant automations can call:
 
 ```yaml
 # configuration.yaml
@@ -280,6 +297,73 @@ rest_command:
 
 Then you can use it in automations, for example: `service: rest_command.ledboard_message` with `data: {text: "Doorbell!", color: "#ff0000"}`.
 
+## Alerts
+Alerts interrupt the display with an animated icon, a title, an optional message and a border in the alert's color.
+
+| Priority | Behavior |
+|---|---|
+| `low` | Waits until the current board finishes |
+| `normal` | Interrupts now |
+| `high` | Interrupts now, with a flashing border |
+| `critical` | Interrupts now, repeats every minute, and wakes the display (even during quiet hours or when it's off) until dismissed |
+
+How they behave:
+- Alerts queue up instead of overwriting each other.
+- If a more urgent alert interrupts one, the interrupted alert plays again in full afterwards.
+- Repeating alerts show in a banner under the preview, with **Dismiss** buttons.
+- **Settings → Send an alert** lets you try them out.
+
+**Icons:** `bell`, `doorbell`, `washer`, `dryer`, `garage`, `door`, `warning`, `info`, `check`, `printer`, `mail`, `package`, `car`, `lock`, `unlock`, `storm`, `tornado`, `fire`, `water`, `phone`, `trash`, `calendar`, `timer`, `thermometer`.
+
+Send one from anywhere:
+
+```bash
+curl -X POST http://<pi-ip>:8080/api/alert -H 'Content-Type: application/json' \
+  -d '{"title": "Garage open", "message": "Open for 30 minutes", "icon": "garage", "priority": "critical", "color": "#ff8c00"}'
+```
+
+## Home Assistant control (MQTT)
+1. In Home Assistant you need an MQTT broker, for example the **Mosquitto broker** add-on, and the MQTT integration.
+2. In LEDBoard, go to **Settings → Home Assistant (MQTT)**. Turn it on and enter the broker host (your Home Assistant's IP), port 1883, and an MQTT username and password.
+3. LEDBoard appears automatically under **Settings → Devices & services → MQTT** as **LEDBoard**, with these entities:
+
+| Entity | What it does |
+|---|---|
+| `light.ledboard_display` | On/off and brightness |
+| `select.ledboard_board` | Shows the current board; choose one to jump to it |
+| `switch.ledboard_pause` | Pause the rotation |
+| `button.ledboard_next`, `button.ledboard_dismiss` | Next board, dismiss alerts |
+| `text.ledboard_message` | Flash a message |
+| `notify.ledboard_alert` | Send an alert |
+| `sensor.ledboard_alerts` | Number of active alerts |
+
+Example automation actions:
+
+```yaml
+- action: notify.send_message
+  target: { entity_id: notify.ledboard_alert }
+  data:
+    message: '{"title": "Doorbell", "message": "Front door", "icon": "doorbell", "priority": "high"}'
+- action: light.turn_on
+  target: { entity_id: light.ledboard_display }
+  data: { brightness_pct: 20 }
+- action: select.select_option
+  target: { entity_id: select.ledboard_board }
+  data: { option: "NFL" }
+```
+
+A plain-text message, such as `"Washer done"`, becomes a normal-priority alert with a bell icon. The entities show as unavailable while LEDBoard is off.
+
+## Updates and backups
+**Settings → Software** shows your version, checks GitHub for updates (also automatically every 6 hours, with an **Update available** badge in the header), and lists what changed. **Update now** does the following:
+1. Runs `git pull`.
+2. Installs any new Python packages.
+3. Restarts LEDBoard.
+
+It refuses to run if files in `/opt/ledboard` were edited by hand, so it never overwrites your changes.
+
+**Settings → Backup & restore** downloads all your settings as a JSON file and restores them from one. The file includes your passwords and tokens, so keep it private.
+
 ## API
 
 | Method | Path | Body |
@@ -290,6 +374,11 @@ Then you can use it in automations, for example: `service: rest_command.ledboard
 | POST | `/api/control` | `{"action": "next"}`, `"pause"`, `"resume"`, `"refresh"`, `{"action": "power", "on": false}`, `{"action": "brightness", "value": 40}`, `{"action": "jump", "board": "nfl"}` |
 | GET/POST | `/api/config` | GET returns the config with secrets masked. POST takes a partial config and merges it in. |
 | POST | `/api/restart` | Restarts the process |
+| POST | `/api/alert` | `{"title", "message", "icon", "color", "priority", "seconds", "repeat_minutes", "until_dismissed"}` |
+| GET | `/api/alerts` | Returns the active alerts and the available icons |
+| POST | `/api/alert/dismiss` | `{"id": 3}` or `{"id": "all"}` |
+| GET/POST | `/api/update`, `/api/update/check`, `/api/update/apply` | Software update status, check, apply |
+| GET/POST | `/api/config/export`, `/api/config/import` | Backup download and restore |
 
 If you set a web password, use HTTP basic auth with any username.
 

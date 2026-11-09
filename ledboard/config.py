@@ -47,6 +47,7 @@ DEFAULTS = {
         "brightness": 15,
     },
     "scroll": {"speed": 20, "gap": 16},
+    "combined": {"enabled": False, "speed": "", "gap": "", "pause": 0},   # all boards in one ticker
     "auto_brightness": {"follow_sun": False, "night": 15, "latitude": "", "longitude": ""},   # used by boards whose own scroll settings are blank
     "fallback_board": "clock",  # shown when no board has anything to display
     "rotation": [],             # defaults to the board registry order

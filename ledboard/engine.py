@@ -34,6 +34,24 @@ class ScrollSlide:
         return hash(("scroll", self.board))
 
 
+COMBINED = "__combined__"
+
+
+class ComboSlide:
+    """The combined ticker: (board, slide) items from every board, scrolling as one line."""
+    __slots__ = ("items",)
+    intro = False
+
+    def __init__(self, items):
+        self.items = list(items)
+
+    def __eq__(self, other):
+        return isinstance(other, ComboSlide)
+
+    def __hash__(self):
+        return hash(COMBINED)
+
+
 class Engine:
     def __init__(self, config, simulate=False):
         self.config = config
@@ -126,14 +144,18 @@ class Engine:
         if takeover:
             return takeover, True
         normal = []
+        combined = self.cfg.get("combined", {}).get("enabled")
         for name in order:
             b = self.boards.get(name)
             if b and b.enabled:
                 s = b.slides()
                 if s:
-                    if b.cfg.get("scroll_mode"):
+                    if b.cfg.get("scroll_mode") and not combined:
                         s = [ScrollSlide(name, s)]
                     normal.append((name, s))
+        if combined and normal:
+            items = [(name, sl) for name, sls in normal for sl in sls]
+            return [(COMBINED, [ComboSlide(items)])], False
         return normal, False
 
     def _advance(self, force_next_board=False):
@@ -156,14 +178,14 @@ class Engine:
                         return
         # move to the next board after the current one, in rotation order
         start = 0
-        if self.cur and self.cur[0] in self.cfg["rotation"]:
+        if self.cur and self.cur[0] in self.cfg["rotation"] and self.cur[0] in names:
             order = self.cfg["rotation"]
             pos = order.index(self.cur[0])
             after = [n for n in order[pos + 1:] + order[:pos + 1] if n in names]
             nxt = after[0] if after else names[0]
             start = names.index(nxt)
         name, slides = cands[start]
-        self.cur = (name, self._with_intro(self.boards[name], slides), 0, now)
+        self.cur = (name, self._with_intro(self.boards[name], slides) if name in self.boards else slides, 0, now)
         self._at_boundary = True
 
     @staticmethod
@@ -187,7 +209,43 @@ class Engine:
                 return float(default)
         return max(5.0, pick("scroll_speed", "speed", 20)), max(0, int(pick("scroll_gap", "gap", 16)))
 
+    def _combo_params(self):
+        c = self.cfg.get("combined", {})
+        g = self.cfg.get("scroll", {})
+
+        def pick(v, default):
+            try:
+                return float(v) if v not in (None, "") else float(default)
+            except (TypeError, ValueError):
+                return float(default)
+        speed = max(5.0, pick(c.get("speed"), g.get("speed", 20)))
+        gap = max(0, int(pick(c.get("gap"), g.get("gap", 16))))
+        pause = max(0.0, pick(c.get("pause"), 0))
+        return speed, gap, pause
+
+    def _combo_offset(self, n, t):
+        """Distance scrolled at time t, holding `pause` seconds whenever an item is fully on screen."""
+        speed, gap, pause = self._combo_params()
+        step = self.width + gap
+        s, rem = 0.0, t
+        for i in range(n):
+            target = self.width + i * step          # item i drawn at x = width - s + i*step -> x == 0
+            seg = (target - s) / speed
+            if rem < seg:
+                return s + rem * speed
+            rem -= seg
+            s = target
+            if rem < pause:
+                return s
+            rem -= pause
+        return s + rem * speed
+
     def _duration(self, board, slide):
+        if isinstance(slide, ComboSlide):
+            speed, gap, pause = self._combo_params()
+            n = len(slide.items)
+            strip = n * self.width + (n - 1) * gap
+            return (strip + self.width) / speed + n * pause
         if isinstance(slide, ScrollSlide):
             speed, gap = self._scroll_params(board)
             n = len(slide.slides)
@@ -208,6 +266,23 @@ class Engine:
             self._scratch.clear()
             # t=0: text inside each slide stays still while the whole slide moves
             board.render(self._scratch, slide, 0.0)
+            c.image.paste(self._scratch.image, (x, 0))
+
+    def _render_combo(self, combo, c, t):
+        _, gap, _ = self._combo_params()
+        offset = int(self._combo_offset(len(combo.items), t))
+        step = self.width + gap
+        if not hasattr(self, "_scratch"):
+            self._scratch = Canvas(self.width, self.height)
+        for i, (name, slide) in enumerate(combo.items):
+            x = self.width - offset + i * step
+            if x >= self.width or x + self.width <= 0:
+                continue
+            b = self.boards.get(name)
+            if not b:
+                continue
+            self._scratch.clear()
+            b.render(self._scratch, slide, 0.0)
             c.image.paste(self._scratch.image, (x, 0))
 
     def _check_rotation(self):
@@ -323,13 +398,15 @@ class Engine:
             if self.cur is None:
                 return c.image
             name, slides, idx, started = self.cur
-            board = self.boards[name]
+            board = self.boards.get(name)
             if not self.paused and now - started >= self._duration(board, slides[idx]):
                 self._advance()
                 name, slides, idx, started = self.cur
-                board = self.boards[name]
+                board = self.boards.get(name)
         try:
-            if isinstance(slides[idx], ScrollSlide):
+            if isinstance(slides[idx], ComboSlide):
+                self._render_combo(slides[idx], c, now - started)
+            elif isinstance(slides[idx], ScrollSlide):
                 self._render_scroll(board, slides[idx], c, now - started)
             else:
                 board.render(c, slides[idx], now - started)
@@ -413,7 +490,9 @@ class Engine:
             "quiet_hours": self._in_quiet_hours(),
             "sun": getattr(self, "sun_info", None),
             "paused": self.paused, "takeover": self.takeover_active,
-            "current": {"board": cur[0], "slide": cur[2] + 1, "slides": len(cur[1])} if cur else None,
+            "current": {"board": cur[0], "slide": cur[2] + 1,
+                        "slides": len(cur[1][0].items) if cur and isinstance(cur[1][0], ComboSlide) else len(cur[1])}
+            if cur else None,
             "overlay": self.overlay["text"] if self.overlay else None,
             "alert": self.alerts.current.title if self.alerts.current else None,
             "alerts": self.alerts.active(),

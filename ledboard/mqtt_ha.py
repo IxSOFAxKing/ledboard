@@ -240,7 +240,7 @@ class MQTTBridge:
         states = {
             f"{base}/light/state": json.dumps({"state": "ON" if e.power else "OFF",
                                                "brightness": int(e.cfg["display"]["brightness"])}),
-            f"{base}/board/state": e.boards[cur].title if cur in e.boards else "",
+            f"{base}/board/state": e.boards[cur].title if cur in e.boards else ("Combined ticker" if cur else ""),
             f"{base}/pause/state": "ON" if e.paused else "OFF",
             f"{base}/alerts/state": str(len(e.alerts.active())),
         }

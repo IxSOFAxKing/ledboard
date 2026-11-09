@@ -110,7 +110,8 @@ async function pollState() {
   $("#pill-mode").className = "pill " + (st.simulated ? "sim" : "hw");
   $("#pill-fps").textContent = `${st.fps} fps`;
   const cur = st.current;
-  $("#now-board").textContent = st.overlay ? "Message" : cur ? (SCHEMA?.[cur.board]?.title || cur.board) : "—";
+  $("#now-board").textContent = st.alert ? "Alert: " + st.alert : st.overlay ? "Message" :
+    cur ? (cur.board === "__combined__" ? "Combined ticker" : SCHEMA?.[cur.board]?.title || cur.board) : "—";
   $("#now-slide").textContent = !st.overlay && cur && cur.slides > 1 ? `${cur.slide} / ${cur.slides}` : "";
   $("#mini-board").textContent = $("#now-board").textContent;
   $("#mini-slide").textContent = $("#now-slide").textContent;
@@ -521,6 +522,15 @@ function renderOtherTabs() {
       option_labels: { dim: "Dim the display", off: "Turn the display off", ambient: "Show ambient animations (dimmed)" } },
     { key: "brightness", label: "Dimmed brightness", type: "number" },
   ].map((f) => renderField(draft.schedule, f)));
+  draft.combined = draft.combined || {};
+  $("#combined-form").replaceChildren(...renderForm(draft.combined, [
+    { key: "enabled", label: "Scroll all boards as one continuous ticker", type: "bool",
+      help: "Every enabled board's slides scroll by one after another. Alerts, celebrations and takeovers still interrupt." },
+    { key: "speed", label: "Speed (pixels per second)", type: "number", placeholder: "global default", show_if: { enabled: true } },
+    { key: "gap", label: "Gap between slides (pixels)", type: "number", placeholder: "global default", show_if: { enabled: true } },
+    { key: "pause", label: "Pause on each slide (seconds)", type: "number", show_if: { enabled: true },
+      help: "Hold each slide for a moment once it's fully on screen (0 = keep moving)." },
+  ], renderOtherTabs));
   draft.auto_brightness = draft.auto_brightness || {};
   $("#sun-form").replaceChildren(...renderForm(draft.auto_brightness, [
     { key: "follow_sun", label: "Follow the sun", type: "bool", help: "Uses the brightness slider during the day and eases down to the night level after sunset." },
