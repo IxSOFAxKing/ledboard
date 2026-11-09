@@ -127,6 +127,14 @@ Each league is its own board, so it has its own place in the rotation and its ow
   4. **Upcoming**: ...kickoff is within the "game cards" window (48 hours by default), when it shows as a regular upcoming game card.
 
   The countdown appears per team: with the default setting it shows whenever *your team* has no game on the board, even if other teams' games are showing.
+
+  **Countdown design** (under **Which games**):
+  - **Classic**: logos at the sides, the countdown, and a rotating line (time, opponent, TV).
+  - **Flip clock**: split-flap digit tiles for days / hours / minutes (hours / minutes / seconds in the last day).
+  - **Ticket**: a game ticket with the matchup, date, time and TV, and a tear-off stub with the countdown.
+  - **Matchup**: each half of the panel in its team's colors, with the countdown on a center plate.
+  - **Road to kickoff**: a ball travels along a one-week road toward the opponent's logo, with the time to kickoff (first pitch, tip-off, puck drop).
+  - **Game day hype**: on the day of the game, a flashing "GAME DAY" in your team's colors with the time to kickoff; before that, the flip clock.
 - **Upcoming games**: team records, TV network, betting line and over/under, and AP Top 25 rankings (college leagues only).
 - **Live games**: detailed live info, scroll the last play, and flash the score when it changes.
 - **Timing**: seconds per game, and how often scores refresh, normally and during live games.

@@ -353,6 +353,8 @@ UPCOMING_STYLES = {
     "trim": "Team trim lines (team-color lines above and below)",
 }
 
+from .countdown_layouts import STYLES as COUNTDOWN_STYLES  # noqa: E402
+
 LIVE_STYLES = {
     "plain": "Plain (no accents)",
     "leader": "Leader color (leading team's score in its color, with underlines)",
@@ -399,7 +401,7 @@ class LeagueBoard(Board):
         "hide_favorite_score": False, "detailed_live": True, "show_last_play": True, "score_flash": True,
         "use_dark_logos": True, "live_layout": "classic", "show_win_probability": True, "goal_animation": True,
         "celebrations": True, "celebrate_field_goals": False, "celebrate_runs": False,
-        "next_game": "no_games", "show_standings": False, "show_playoffs": False, "recap": True,
+        "next_game": "no_games", "next_game_style": "classic", "show_standings": False, "show_playoffs": False, "recap": True,
         "show_abbreviations": True, "show_final_records": True, "logo_enhance": True, "logo_edges": "auto",
         "text_score": "#ffffff", "text_status": "#ffc800", "text_info": "#787878", "text_loser": "#787878",
         "abbr_color_mode": "team", "abbr_color": "#ffffff", "final_style": "plain", "upcoming_style": "plain", "live_style": "plain",
@@ -435,6 +437,8 @@ class LeagueBoard(Board):
              "help": "Logos, a countdown (live h:mm:ss in the last day), kickoff time, opponent and TV network. "
                      "Order of things for your team: game card while live, final score for the hours set above, "
                      "then this countdown until the game is close enough to show as a game card again."},
+            {"key": "next_game_style", "label": "Countdown design", "type": "select", "section": "Which games",
+             "options": list(COUNTDOWN_STYLES), "option_labels": COUNTDOWN_STYLES},
             {"key": "max_games", "label": "Max games per rotation", "type": "number", "section": "Which games"},
             {"key": "show_records", "label": "Show team records before the game", "type": "bool", "section": "Upcoming games"},
             {"key": "show_network", "label": "Show TV network", "type": "bool", "section": "Upcoming games"},
@@ -890,8 +894,11 @@ class LeagueBoard(Board):
         if isinstance(slide, str) and slide.startswith("next:"):
             g = self.next_games.get(slide[5:])
             if g:
-                from .offdays import render_next_game
-                render_next_game(self, c, g, slide[5:], t, team_color)
+                from .countdown_layouts import RENDERERS
+                fn = RENDERERS.get(self.cfg.get("next_game_style", "classic"))
+                if fn is None:
+                    from .offdays import render_next_game as fn
+                fn(self, c, g, slide[5:], t, team_color)
             return
         if slide == "bracket" and self.bracket_data:
             from .playoffs import render_bracket
