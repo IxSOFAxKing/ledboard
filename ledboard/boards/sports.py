@@ -348,7 +348,7 @@ class LeagueBoard(Board):
         "use_dark_logos": True, "live_layout": "classic", "show_win_probability": True, "goal_animation": True,
         "celebrations": True, "celebrate_field_goals": False, "celebrate_runs": False,
         "next_game": "no_games", "show_standings": False,
-        "show_abbreviations": True, "show_final_records": True,
+        "show_abbreviations": True, "show_final_records": True, "logo_enhance": True,
     }
 
     @classmethod
@@ -433,6 +433,9 @@ class LeagueBoard(Board):
             {"key": "show_abbreviations", "label": "Show team abbreviations under the logos", "type": "bool",
              "section": "Logos", "help": "Off: logos grow to fill the space (standard view)."},
             {"key": "show_final_records", "label": "Show team records on final scores", "type": "bool", "section": "Logos"},
+            {"key": "logo_enhance", "label": "Enhance logo colors for LEDs", "type": "bool", "section": "Logos",
+             "help": "Crisp edges, the logo's true colors without muddy blends, and dark colors (e.g. Packers green, "
+                     "navy) brightened so they show up on the panel."},
             {"key": "use_dark_logos", "label": "Prefer logos designed for dark backgrounds", "type": "bool", "section": "Logos"},
         ]
         return f
@@ -595,7 +598,7 @@ class LeagueBoard(Board):
         url = team.get("logo_url")
         if not url or url in self.logos:
             return
-        size = self.app.height * 2
+        size = self.app.height * 6          # ~192 px: room to find the logo's true colors
         img = None
         if self.cfg.get("use_dark_logos", True) and "/500/" in url:
             img = fetch_image(url.replace("/500/", "/500-dark/"), size, size, trim=True)
@@ -795,7 +798,7 @@ class LeagueBoard(Board):
             rank = str(team["rank"]) if show_rank and team["rank"] else ""
             if not names:
                 # logo takes the whole column; a college rank sits in the outer bottom corner
-                c.paste(logo_fit(self, team, col - 1, H), lx, 0)
+                c.paste(logo_fit(self, team, col - 1, H, g["home" if side == "away" else "away"]), lx, 0)
                 if rank:
                     rw = c.text_width(rank, "4x6")
                     rx = cx0 if side == "away" else cx0 + col - rw - 1
@@ -803,7 +806,7 @@ class LeagueBoard(Board):
                     c.text(rx + (1 if side == "away" else 0), H - 6, rank, "4x6", WHITE)
             else:
                 # logo fills the column and everything above the name
-                c.paste(logo_fit(self, team, col - 1, H - 7), lx, 0)
+                c.paste(logo_fit(self, team, col - 1, H - 7, g["home" if side == "away" else "away"]), lx, 0)
                 aw = c.text_width(team["abbr"], "5x8")
                 rw = c.text_width(rank, "4x6") + 1 if rank else 0
                 x = cx0 + (col - aw - rw) // 2

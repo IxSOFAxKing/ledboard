@@ -90,7 +90,7 @@ def render_goal(board, c, g, side, team_color):
     lamp = GOAL_RED if phase else scale(GOAL_RED, 0.3)
     c.rect(0, 0, 1, H - 1, lamp)
     c.rect(W - 2, 0, W - 1, H - 1, lamp)
-    c.paste(board.logos.get(team.get("logo_url")), 3, 0)
+    c.paste(small_logo(board, team, H), 3, 0)
     x0 = H + 4
     c.text_centered(1, "GOAL!", "7x13B", YELLOW if phase else WHITE, x0, W - 2)
     line = f"{g['away']['abbr']} {score_text(board, g, 'away')}  {g['home']['abbr']} {score_text(board, g, 'home')}"
@@ -107,7 +107,7 @@ def render_scorebug(board, c, g, t, team_color, cycle):
         bg = panel_color(team)
         c.rect(0, y, pw - 1, y + 11, bg)
         c.rect(0, y, 2, y + 11, team_color(team))
-        c.paste(small_logo(board, team, 10), 4, y + 1)
+        c.paste(small_logo(board, team, 10, g["home" if side == "away" else "away"]), 4, y + 1)
         c.text(16, y + 1, team["abbr"], "6x10", WHITE)
         shots = team.get("shots")
         if shots is not None:
@@ -149,7 +149,7 @@ def render_periods(board, c, g, t, team_color, cycle):
     for row, side in ((0, "away"), (1, "home")):
         team = g[side]
         y = 8 + row * 7
-        c.paste(small_logo(board, team, 6), 1, y)
+        c.paste(small_logo(board, team, 6, g["home" if side == "away" else "away"]), 1, y)
         c.text(9, y, team["abbr"], "4x6", team_color(team))
         ls = team.get("linescore") or []
         for i in range(len(labels)):
@@ -194,7 +194,7 @@ def render_rink(board, c, g, t, team_color, cycle):
     # each team in its own end: logo, abbreviation, big score
     for side, lx, sx, align in (("away", 9, 27, "left"), ("home", W - 9 - L, W - 27, "right")):
         team = g[side]
-        c.paste(small_logo(board, team, L), lx, 4)
+        c.paste(small_logo(board, team, L, g["home" if side == "away" else "away"]), lx, 4)
         c.text_centered(22, team["abbr"], "4x6", team_color(team), lx - 2, lx + L + 2)
         s = score_text(board, g, side)
         col = score_color(board, g, side)

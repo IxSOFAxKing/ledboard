@@ -8,7 +8,7 @@ from __future__ import annotations
 import colorsys
 import time
 
-from ..gfx import DIM, GRAY, RED, WHITE, YELLOW, fit_image, scale, trim_alpha
+from ..gfx import DIM, GRAY, RED, WHITE, YELLOW, scale
 
 FIELD_GREEN = (0, 55, 0)
 YARD_LINE = (0, 120, 0)
@@ -125,26 +125,14 @@ def score_color(board, g, side, default=WHITE):
     return default
 
 
-_logo_cache: dict = {}
+def logo_fit(board, team, w, h=None, partner=None):
+    """Team logo in a w x h box; with `partner` both logos of a matchup get the same visual size."""
+    from .logos import logo_image
+    return logo_image(board, team, w, h, partner)
 
 
-def logo_fit(board, team, w, h=None):
-    """Team logo scaled to fill a w x h box (transparent padding trimmed), from the hi-res copy."""
-    h = h or w
-    url = team.get("logo_url")
-    src = getattr(board, "logo_src", {}).get(url) or board.logos.get(url)
-    if src is None:
-        return None
-    key = (id(src), w, h)
-    if key not in _logo_cache:
-        if len(_logo_cache) > 300:
-            _logo_cache.clear()
-        _logo_cache[key] = fit_image(trim_alpha(src), w, h)
-    return _logo_cache[key]
-
-
-def small_logo(board, team, size):
-    return logo_fit(board, team, size, size)
+def small_logo(board, team, size, partner=None):
+    return logo_fit(board, team, size, size, partner)
 
 
 # ---------------------------------------------------------------- layouts
@@ -153,8 +141,8 @@ def render_field(board, c, g, t, team_color, cycle):
     W, H = c.width, c.height
     away, home = g["away"], g["home"]
     # logos fully on screen (they're trimmed, so any offset would clip real artwork)
-    c.paste(logo_fit(board, away, H - 1, H), 0, 0)
-    c.paste(logo_fit(board, home, H - 1, H), W - H + 1, 0)
+    c.paste(logo_fit(board, away, H - 1, H, home), 0, 0)
+    c.paste(logo_fit(board, home, H - 1, H, away), W - H + 1, 0)
     x0, x1 = H, W - H
     mid = (x0 + x1) // 2
 
@@ -223,8 +211,8 @@ def render_drive(board, c, g, t, team_color, cycle):
     W, H = c.width, c.height
     away, home = g["away"], g["home"]
     L = 20
-    c.paste(small_logo(board, away, L), 0, 0)
-    c.paste(small_logo(board, home, L), W - L, 0)
+    c.paste(small_logo(board, away, L, home), 0, 0)
+    c.paste(small_logo(board, home, L, away), W - L, 0)
     font = "7x13B"
     a_s, h_s = score_text(board, g, "away"), score_text(board, g, "home")
     c.text(L + 2, 2, a_s, font, score_color(board, g, "away"))

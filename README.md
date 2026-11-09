@@ -196,6 +196,13 @@ How it works:
 - **Show team abbreviations**: turn it off to make the logos fill the whole 32×32 space. College ranks then sit in a small corner badge.
 - **Show team records on final scores**: shows each team's updated record under the score once a game ends.
 
+**Logos on the panel.**
+- **Same size:** in every matchup, both logos are scaled to the same visual size, so a round logo doesn't dwarf a wide one.
+- **Enhance logo colors for LEDs** (on by default, under **Logos**): finds each logo's real colors from a larger copy, then:
+  - snaps the shrunken logo to them for crisp edges, with no muddy blended shades
+  - brightens dark team colors (such as Packers green or navy) so they show up
+  - shows black details as dark gray so they don't disappear
+
 > **Note:** The live details read optional fields from ESPN's unofficial API. If ESPN doesn't send a field for a game, that detail is simply left out.
 
 Upgrading from an earlier LEDBoard with a single "Sports" board moves your settings over automatically. Each league keeps its favorites and on/off state, and the old config is saved as `config.json.bak`.

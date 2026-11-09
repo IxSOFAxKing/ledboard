@@ -95,7 +95,7 @@ def render_scorebug(board, c, g, t, team_color, cycle):
         c.rect(bx0, 0, bx1, L - 1, panel_color(team))
         edge = bx0 if side == "away" else bx1 - 1              # bright stripe in the true team color
         c.rect(edge, 0, edge + 1, L - 1, team_color(team))
-        logo = small_logo(board, team, L)
+        logo = small_logo(board, team, L, g["home" if side == "away" else "away"])
         if logo is not None:
             c.paste(logo, lx, 0)
         s = score_text(board, g, side)
@@ -130,7 +130,7 @@ def _compact_header(board, c, g, team_color, y=0):
     L = 9
     for side in ("away", "home"):
         team = g[side]
-        logo = small_logo(board, team, L)
+        logo = small_logo(board, team, L, g["home" if side == "away" else "away"])
         s = score_text(board, g, side)
         if side == "away":
             x = 0

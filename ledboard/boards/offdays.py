@@ -160,8 +160,8 @@ def render_next_game(board, c, g, fav, t, team_color):
     opp_side = "away" if side == "home" else "home"
     me, opp = g[side], g[opp_side]
     L = 30
-    c.paste(logo_fit(board, me, L, L), 0, 1)
-    c.paste(logo_fit(board, opp, L, L), W - L, 1)
+    c.paste(logo_fit(board, me, L, L, opp), 0, 1)
+    c.paste(logo_fit(board, opp, L, L, me), W - L, 1)
     x0, x1 = L + 2, W - L - 2
     c.text_centered(0, "NEXT GAME", "4x6", GRAY, x0, x1)
     if g["start"]:

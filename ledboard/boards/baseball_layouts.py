@@ -114,7 +114,7 @@ def render_scorebug(board, c, g, t, team_color, cycle):
     for row, side in ((0, "away"), (1, "home")):
         team = g[side]
         y = row * row_h
-        logo = small_logo(board, team, row_h - 1)
+        logo = small_logo(board, team, row_h - 1, g["home" if side == "away" else "away"])
         has_logo = logo is not None
         bx = row_h if has_logo else 0
         bg = panel_color(team)
@@ -217,8 +217,8 @@ def render_matchup(board, c, g, t, team_color, cycle):
     W = c.width
     L = 16
     away, home = g["away"], g["home"]
-    c.paste(small_logo(board, away, L), 0, 0)
-    c.paste(small_logo(board, home, L), W - L, 0)
+    c.paste(small_logo(board, away, L, home), 0, 0)
+    c.paste(small_logo(board, home, L, away), W - L, 0)
     a_s, h_s = score_text(board, g, "away"), score_text(board, g, "home")
     c.text(L + 2, 1, a_s, "7x13B", score_color(board, g, "away"))
     c.text_right(W - L - 2, 1, h_s, "7x13B", score_color(board, g, "home"))
