@@ -202,6 +202,10 @@ How it works:
   - snaps the shrunken logo to them for crisp edges, with no muddy blended shades
   - brightens dark team colors (such as Packers green or navy) so they show up
   - shows black details as dark gray so they don't disappear
+- **Logo edges** (under **Logos**):
+  - **Automatic**: crisp hard pixel edges for big logos, smooth anti-aliased edges for small ones, where the soft edge pixels carry the detail.
+  - **Smooth**: soft edges at every size, like the clock's "Smooth edges".
+  - **Crisp**: hard edges in the logo's exact colors at every size.
 
 > **Note:** The live details read optional fields from ESPN's unofficial API. If ESPN doesn't send a field for a game, that detail is simply left out.
 

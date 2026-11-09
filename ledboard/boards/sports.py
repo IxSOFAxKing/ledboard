@@ -348,7 +348,7 @@ class LeagueBoard(Board):
         "use_dark_logos": True, "live_layout": "classic", "show_win_probability": True, "goal_animation": True,
         "celebrations": True, "celebrate_field_goals": False, "celebrate_runs": False,
         "next_game": "no_games", "show_standings": False,
-        "show_abbreviations": True, "show_final_records": True, "logo_enhance": True,
+        "show_abbreviations": True, "show_final_records": True, "logo_enhance": True, "logo_edges": "auto",
     }
 
     @classmethod
@@ -436,6 +436,11 @@ class LeagueBoard(Board):
             {"key": "logo_enhance", "label": "Enhance logo colors for LEDs", "type": "bool", "section": "Logos",
              "help": "Crisp edges, the logo's true colors without muddy blends, and dark colors (e.g. Packers green, "
                      "navy) brightened so they show up on the panel."},
+            {"key": "logo_edges", "label": "Logo edges", "type": "select", "section": "Logos",
+             "options": ["auto", "smooth", "crisp"],
+             "option_labels": {"auto": "Automatic (crisp when big, smooth when small)",
+                               "smooth": "Smooth (anti-aliased, softer)", "crisp": "Crisp (hard pixel edges)"},
+             "help": "Smooth keeps soft edges like the clock's 'Smooth edges'; crisp snaps to the logo's exact colors."},
             {"key": "use_dark_logos", "label": "Prefer logos designed for dark backgrounds", "type": "bool", "section": "Logos"},
         ]
         return f

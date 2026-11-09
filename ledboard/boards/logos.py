@@ -103,11 +103,11 @@ def led_color(c):
     return (round(r * 255), round(g * 255), round(b * 255))
 
 
-def _enhance(img, pal):
-    """Snap to the palette (crisp edges, no muddy in-between shades) and apply LED colors."""
+def _enhance(img, pal, led=True):
+    """Snap to the palette (crisp edges, no muddy in-between shades); `led` also applies LED colors."""
     if not pal:
         return img
-    out_cols = [led_color(p) for p in pal]
+    out_cols = [led_color(p) for p in pal] if led else list(pal)
     data = []
     for r, g, b, a in img.getdata():
         if a < 110:
@@ -146,15 +146,19 @@ def logo_image(board, team, w, h=None, partner=None):
     """`team`'s logo inside a w x h box (centered, transparent padding).
 
     With `partner` (the other team in the matchup), both logos get the same visual area.
-    Colors are LED-enhanced unless the board's 'logo_enhance' setting is off.
+    Board settings:
+      logo_enhance  LED-friendly colors (default on)
+      logo_edges    "auto" (crisp when big, smooth when small), "smooth" or "crisp"
     """
     h = h or w
     src = _source(board, team)
     if src is None:
         return None
     psrc = _source(board, partner) if partner else None
-    enhance = bool(getattr(board, "cfg", {}).get("logo_enhance", True))
-    key = (team.get("logo_url"), (partner or {}).get("logo_url"), w, h, enhance)
+    cfg = getattr(board, "cfg", {})
+    enhance = bool(cfg.get("logo_enhance", True))
+    edges = cfg.get("logo_edges", "auto")
+    key = (team.get("logo_url"), (partner or {}).get("logo_url"), w, h, enhance, edges)
     hit = _cache.get(key)
     if hit is not None and hit[0]() is src and hit[1]() is psrc:
         return hit[2]
@@ -171,11 +175,12 @@ def logo_image(board, team, w, h=None, partner=None):
             fw, fh = fw * k, fh * k
     size = (max(1, round(fw)), max(1, round(fh)))
     img = t.resize(size, Image.LANCZOS)
-    if enhance:
-        if min(w, h) >= CRISP_MIN:
-            img = _enhance(img, palette(t))       # big enough for crisp, palette-true colors
-        else:
-            img = _soft_enhance(img)              # small: smooth shapes, brighter colors
+    crisp = edges == "crisp" or (edges == "auto" and min(w, h) >= CRISP_MIN)
+    if crisp:
+        img = _enhance(img, palette(t), led=enhance)   # hard edges in the logo's exact colors
+    elif enhance:
+        img = _soft_enhance(img)                       # smooth (anti-aliased) edges, brighter colors
+    # smooth + not enhanced: the plain anti-aliased resize
     box = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     box.paste(img, ((w - size[0]) // 2, (h - size[1]) // 2), img)
     if len(_cache) > 500:
