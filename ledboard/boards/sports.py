@@ -51,6 +51,7 @@ LEAGUES = {
 }
 COLLEGE = {"ncaaf", "ncaam", "ncaaw"}
 DEFAULT_ON = {"nfl", "nba", "mlb", "nhl"}
+PLAYOFF_LEAGUES = {"nfl", "nba", "wnba", "nhl", "mlb", "mls"}
 ORANGE = (255, 140, 0)
 INFO_SECONDS = 3.0      # how long each line of the rotating info line shows
 INFO_SPEED = 28.0       # px/s for info lines too long to fit
@@ -398,7 +399,7 @@ class LeagueBoard(Board):
         "hide_favorite_score": False, "detailed_live": True, "show_last_play": True, "score_flash": True,
         "use_dark_logos": True, "live_layout": "classic", "show_win_probability": True, "goal_animation": True,
         "celebrations": True, "celebrate_field_goals": False, "celebrate_runs": False,
-        "next_game": "no_games", "show_standings": False,
+        "next_game": "no_games", "show_standings": False, "show_playoffs": False, "recap": True,
         "show_abbreviations": True, "show_final_records": True, "logo_enhance": True, "logo_edges": "auto",
         "text_score": "#ffffff", "text_status": "#ffc800", "text_info": "#787878", "text_loser": "#787878",
         "abbr_color_mode": "team", "abbr_color": "#ffffff", "final_style": "plain", "upcoming_style": "plain", "live_style": "plain",
@@ -478,6 +479,9 @@ class LeagueBoard(Board):
             if sport == "baseball":
                 f.append({"key": "celebrate_runs", "label": "Celebrate every run, not just home runs", "type": "bool",
                           "section": "Celebrations", "show_if": {"celebrations": True}})
+            f.append({"key": "recap", "label": "Show a recap of the scoring play after the celebration", "type": "bool",
+                      "section": "Celebrations", "show_if": {"celebrations": True},
+                      "help": "The play (e.g. 'J. Love 24 yd pass to C. Watson'), the new score and, for football, the drive."})
             f.append({"key": "simulate", "label": "Simulate", "type": "simulate", "section": "Celebrations",
                       "options": SIM_KINDS[sport]})
         f += [
@@ -488,6 +492,12 @@ class LeagueBoard(Board):
              "help": "Logos, a countdown (live h:mm:ss in the last day), kickoff time, opponent and TV network."},
             {"key": "show_standings", "label": "Show standings (favorite team's division / group)", "type": "bool",
              "section": "Off days", "help": "Paged table, 4 teams per page, your team highlighted."},
+        ]
+        if cls.league in PLAYOFF_LEAGUES:
+            f.append({"key": "show_playoffs", "label": "Show the playoff picture", "type": "bool", "section": "Off days",
+                      "help": "Your conference's playoff seeds with clinch status and who's in the hunt"
+                              + (", plus the playoff bracket once the playoffs start." if cls.league == "nfl" else ".")})
+        f += [
             {"key": "preview", "label": "Preview", "type": "actions", "section": "Preview", "action": "preview",
              "options": {"live": "Live game", "pre": "Upcoming", "post": "Final", "all": "All three"},
              "help": "Shows sample games with your current settings and layout for 3 minutes, even in the "
@@ -534,6 +544,8 @@ class LeagueBoard(Board):
         self.pending = []                     # queued Celebration slides
         self.next_games: dict = {}            # favorite abbr -> next scheduled game
         self.standings_data: list = []        # [(group name, rows)]
+        self.playoff_data = None              # playoff picture: {group, rows, teams}
+        self.bracket_data = None              # NFL bracket: [(round, games)]
         self._offday_at = 0.0
         self.preview_state = ([], 0.0)        # (sample games, show until epoch)
         self._cel_lock = threading.Lock()
@@ -587,8 +599,9 @@ class LeagueBoard(Board):
         c = self.cfg
         want_next = c.get("next_game", "no_games") != "off" and self.favorites()
         want_table = c.get("show_standings")
-        key = (bool(want_next), bool(want_table), tuple(sorted(self.favorites())))
-        if not (want_next or want_table):
+        want_po = c.get("show_playoffs") and self.league in PLAYOFF_LEAGUES
+        key = (bool(want_next), bool(want_table), bool(want_po), tuple(sorted(self.favorites())))
+        if not (want_next or want_table or want_po):
             return
         if key == getattr(self, "_offday_key", None) and time.time() - self._offday_at < self.OFFDAY_REFRESH:
             return
@@ -622,6 +635,23 @@ class LeagueBoard(Board):
                         self._load_logo({"logo_url": row["logo_url"]})
             except Exception as e:
                 log.info("[%s] standings unavailable: %s", self.name, e)
+        if want_po:
+            from . import playoffs
+            try:
+                self.playoff_data = playoffs.picture(sport, path, self.league, self.favorites())
+                for row in (self.playoff_data or {}).get("rows", []):
+                    self._load_logo({"logo_url": row["logo_url"]})
+            except Exception as e:
+                log.info("[%s] playoff picture unavailable: %s", self.name, e)
+            try:
+                teams = (self.playoff_data or {}).get("teams")
+                self.bracket_data = playoffs.bracket(sport, path, self.league, teams, parse_event)
+                for _label, games in self.bracket_data or []:
+                    for g in games:
+                        for side in ("home", "away"):
+                            self._load_logo(g[side])
+            except Exception as e:
+                log.info("[%s] playoff bracket unavailable: %s", self.name, e)
 
     # -- celebrations ----------------------------------------------------------
     def _maybe_celebrate(self, g, side, diff):
@@ -638,9 +668,17 @@ class LeagueBoard(Board):
             return
         if kind == "touchdown":
             self._last_td[key] = time.time()
+        snap = _snapshot(g)
+        queued = [Celebration(kind, side, snap, self.sport)]
+        if c.get("recap", True):
+            from .recap import Recap, fetch_play
+            sport, path, _, _ = LEAGUES[self.league]
+            text, drive = fetch_play(sport, path, g["id"], g[side].get("id"),
+                                     fallback=g.get("last_play") or g.get("last_goal") or "")
+            queued.append(Recap(kind, side, snap, text, drive))
         with self._cel_lock:
-            self.pending.append(Celebration(kind, side, _snapshot(g), self.sport))
-            self.pending = self.pending[-3:]
+            self.pending.extend(queued)
+            self.pending = self.pending[-6:]
         log.info("[%s] queued %s celebration for %s", self.name, kind, g[side]["abbr"])
 
     def intro_slides(self):
@@ -655,7 +693,7 @@ class LeagueBoard(Board):
         from .celebrations import Celebration
         favs = self.favorites()
         pick, side = None, "home"
-        for g in self.games:
+        for g in self._preview_games() + self.games:
             for sd in ("home", "away"):
                 if g[sd]["abbr"].upper() in favs:
                     pick, side = g, sd
@@ -669,13 +707,23 @@ class LeagueBoard(Board):
         g = _snapshot(pick)
         pts = {"touchdown": 7, "field_goal": 3, "goal": 1, "home_run": 1, "grand_slam": 4, "run": 1}[kind]
         g[side]["score"] = str(int(_num(g[side]["score"])) + pts)
+        queued = [Celebration(kind, side, g, self.sport)]
+        if self.cfg.get("recap", True):
+            from .recap import SAMPLE_PLAYS, Recap
+            text, drive = SAMPLE_PLAYS.get(kind, ("", ""))
+            if self.sport != "football":
+                drive = ""
+            queued.append(Recap(kind, side, g, text, drive))
         with self._cel_lock:
-            self.pending.append(Celebration(kind, side, g, self.sport))
+            self.pending.extend(queued)
 
     def slide_duration(self, slide):
         from .celebrations import DURATION, Celebration
+        from .recap import Recap, duration
         if isinstance(slide, Celebration):
             return DURATION
+        if isinstance(slide, Recap):
+            return duration(slide, self.app.width)
         return self.duration
 
     def _load_logo(self, team):
@@ -741,6 +789,13 @@ class LeagueBoard(Board):
             for gi, (_, rows) in enumerate(self.standings_data):
                 for p in range(max(1, -(-len(rows) // ROWS_PER_PAGE))):
                     out.append(f"standings:{gi}:{p}")
+        if self.cfg.get("show_playoffs") and self.league in PLAYOFF_LEAGUES:
+            if self.bracket_data:
+                out.append("bracket")
+            if self.playoff_data and self.playoff_data["rows"]:
+                from .playoffs import ROWS
+                for p in range(-(-len(self.playoff_data["rows"]) // ROWS)):
+                    out.append(f"playoffs:{p}")
         return out
 
     def takeover_slides(self):
@@ -791,11 +846,25 @@ class LeagueBoard(Board):
             from . import celebrations
             celebrations.render(self, c, slide, t, team_color)
             return
+        from .recap import Recap
+        if isinstance(slide, Recap):
+            from . import recap
+            recap.render(self, c, slide, t, team_color, self._clock_text)
+            return
         if isinstance(slide, str) and slide.startswith("next:"):
             g = self.next_games.get(slide[5:])
             if g:
                 from .offdays import render_next_game
                 render_next_game(self, c, g, slide[5:], t, team_color)
+            return
+        if slide == "bracket" and self.bracket_data:
+            from .playoffs import render_bracket
+            render_bracket(self, c, self.bracket_data, (self.playoff_data or {}).get("group", ""))
+            return
+        if isinstance(slide, str) and slide.startswith("playoffs:"):
+            if self.playoff_data:
+                from .playoffs import render_picture
+                render_picture(self, c, self.playoff_data, int(slide.split(":")[1]))
             return
         if isinstance(slide, str) and slide.startswith("standings:"):
             _, gi, page = slide.split(":")

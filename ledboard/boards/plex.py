@@ -1,27 +1,32 @@
-"""Plex Media Server "now playing" (movies, TV, music) via /status/sessions."""
+"""Plex Media Server "now playing" (movies, TV, music) via /status/sessions, plus a carousel of
+recently added movies / episodes (/library/recentlyAdded)."""
 from __future__ import annotations
 
 import time
 import urllib.parse
 
+import logging
+
 import requests
 import urllib3
 
 from .base import Board
-from ..gfx import GRAY, WHITE, Ease, fetch_image, fmt_ms
+from ..gfx import DIM, GRAY, WHITE, Ease, fetch_image, fmt_ms
 
+log = logging.getLogger(__name__)
 PLEX_ORANGE = (229, 160, 13)
 
 
 class PlexBoard(Board):
     name = "plex"
     title = "Plex"
-    description = "Shows active Plex streams. Skipped when nothing is playing."
+    description = "Shows active Plex streams, and what was recently added to your server."
     refresh = 10
     DEFAULTS = {
         "enabled": False, "duration": 12, "refresh": 10, "takeover": False, "show_paused": True,
         "url": "http://192.168.1.10:32400", "token": "", "verify_ssl": False,
         "users": [], "show_user": True, "progress_style": "wavy",
+        "show_recent": True, "recent_hours": 24, "recent_max": 6, "recent_music": False,
     }
     FIELDS = [
         {"key": "url", "label": "Server URL", "type": "text", "help": "e.g. http://192.168.1.10:32400"},
@@ -37,6 +42,14 @@ class PlexBoard(Board):
         {"key": "verify_ssl", "label": "Verify HTTPS certificate", "type": "bool"},
         {"key": "duration", "label": "Seconds per stream", "type": "number"},
         {"key": "refresh", "label": "Poll interval (s)", "type": "number"},
+        {"key": "show_recent", "label": "Show recently added movies and episodes", "type": "bool",
+         "section": "Recently added"},
+        {"key": "recent_hours", "label": "Added in the last (hours)", "type": "number", "section": "Recently added",
+         "show_if": {"show_recent": True}},
+        {"key": "recent_max", "label": "Show at most", "type": "number", "section": "Recently added",
+         "show_if": {"show_recent": True}},
+        {"key": "recent_music", "label": "Include new music albums", "type": "bool", "section": "Recently added",
+         "show_if": {"show_recent": True}},
     ]
 
     def __init__(self, cfg, app):
@@ -44,6 +57,8 @@ class PlexBoard(Board):
         self.sessions: list[dict] = []
         self._wave = Ease()
         self.fetched_at = 0
+        self.recent: list[dict] = []
+        self._recent_at = 0.0
         if not cfg.get("verify_ssl"):
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -66,6 +81,84 @@ class PlexBoard(Board):
             s["art"] = self._art(s["thumb"]) if s["thumb"] else None
         self.sessions = sessions
         self.fetched_at = time.time()
+        if self.cfg.get("show_recent", True):
+            sig = (self.cfg.get("recent_hours"), self.cfg.get("recent_max"), self.cfg.get("recent_music"))
+            if time.time() - self._recent_at > 600 or sig != getattr(self, "_recent_sig", None):   # every 10 min
+                self._recent_sig = sig
+                try:
+                    self._update_recent()
+                except Exception as e:
+                    log.warning("Plex recently added unavailable: %s", e)
+                self._recent_at = time.time()
+        else:
+            self.recent = []
+
+    def _update_recent(self):
+        r = requests.get(self._base() + "/library/recentlyAdded", timeout=15, verify=bool(self.cfg.get("verify_ssl")),
+                         params={"X-Plex-Container-Start": 0, "X-Plex-Container-Size": 40},
+                         headers={"X-Plex-Token": self.cfg["token"], "Accept": "application/json"})
+        r.raise_for_status()
+        try:
+            hours = float(self.cfg.get("recent_hours") or 24)
+        except (TypeError, ValueError):
+            hours = 24
+        try:
+            limit = max(1, int(self.cfg.get("recent_max") or 6))
+        except (TypeError, ValueError):
+            limit = 6
+        items = self.parse_recent(r.json(), time.time() - hours * 3600, bool(self.cfg.get("recent_music")))[:limit]
+        H = self.app.height
+        for it in items:
+            it["art"] = self._poster(it["thumb"], H * 2 // 3, H) if it["thumb"] else None
+        self.recent = items
+
+    def _poster(self, thumb, w, h):
+        q = urllib.parse.urlencode({"width": w * 3, "height": h * 3, "minSize": 1, "upscale": 1,
+                                    "url": thumb, "X-Plex-Token": self.cfg["token"]})
+        return fetch_image(f"{self._base()}/photo/:/transcode?{q}", w, h, verify=bool(self.cfg.get("verify_ssl")),
+                           cache_key=f"plexposter{w}x{h}" + thumb)
+
+    @staticmethod
+    def parse_recent(j, since, music=False):
+        """Recently added items newer than `since` (epoch), newest first."""
+        out = []
+        for m in (j.get("MediaContainer") or {}).get("Metadata", []) or []:
+            added = int(m.get("addedAt") or 0)
+            if added < since:
+                continue
+            kind = m.get("type")
+            if kind == "movie":
+                bits = [str(m["year"])] if m.get("year") else []
+                if m.get("duration"):
+                    mins = int(m["duration"]) // 60000
+                    bits.append(f"{mins // 60}H {mins % 60:02d}M" if mins >= 60 else f"{mins}M")
+                if m.get("contentRating"):
+                    bits.append(m["contentRating"])
+                item = {"tag": "NEW MOVIE", "title": m.get("title", ""), "sub": " · ".join(bits), "thumb": m.get("thumb")}
+            elif kind == "episode":
+                s, e = m.get("parentIndex"), m.get("index")
+                se = f"S{s} E{e}" if s is not None and e is not None else ""
+                item = {"tag": "NEW EPISODE", "title": m.get("grandparentTitle") or m.get("title", ""),
+                        "sub": " · ".join(x for x in (se, m.get("title", "")) if x),
+                        "thumb": m.get("grandparentThumb") or m.get("parentThumb") or m.get("thumb")}
+            elif kind == "season":
+                n = m.get("leafCount")
+                item = {"tag": "NEW EPISODES", "title": m.get("parentTitle") or m.get("title", ""),
+                        "sub": f"SEASON {m.get('index')}" + (f" · {n} EPISODES" if n else "") if m.get("index") is not None
+                        else m.get("title", ""),
+                        "thumb": m.get("parentThumb") or m.get("thumb")}
+            elif kind == "show":
+                item = {"tag": "NEW SHOW", "title": m.get("title", ""), "sub": str(m.get("year", "") or ""),
+                        "thumb": m.get("thumb")}
+            elif kind == "album" and music:
+                item = {"tag": "NEW ALBUM", "title": m.get("title", ""), "sub": m.get("parentTitle", ""),
+                        "thumb": m.get("thumb")}
+            else:
+                continue
+            item.update(key="new:" + str(m.get("ratingKey") or len(out)), added=added)
+            out.append(item)
+        out.sort(key=lambda i: -i["added"])
+        return out
 
     def _art(self, thumb):
         H = self.app.height
@@ -111,14 +204,41 @@ class PlexBoard(Board):
         return [s for s in self.sessions if s["state"] == "playing" or self.cfg.get("show_paused")]
 
     def slides(self):
-        return [s["key"] for s in self._visible()]
+        out = [s["key"] for s in self._visible()]
+        if self.cfg.get("show_recent", True):
+            out += [r["key"] for r in self.recent]
+        return out
 
     def takeover_slides(self):
         if not self.cfg.get("takeover"):
             return []
         return [s["key"] for s in self._visible() if s["state"] == "playing"]
 
+    def _render_recent(self, c, item, t):
+        H, W = c.height, c.width
+        x0 = 2
+        if item.get("art") is not None:
+            c.paste(item["art"], 0, (H - item["art"].height) // 2)
+            x0 = item["art"].width + 3
+        c.text(x0, 0, item["tag"], "4x6", PLEX_ORANGE)
+        c.scroll_text(x0, W, 7, item["title"], "6x10", WHITE, t)
+        c.scroll_text(x0, W, 18, item["sub"].upper(), "4x6", GRAY, t)
+        ago = max(0, time.time() - item["added"])
+        when = "JUST ADDED" if ago < 3600 else (f"ADDED {int(ago // 3600)}H AGO" if ago < 86400 else
+                                                 f"ADDED {int(ago // 86400)}D AGO")
+        c.text(x0, H - 6, when, "4x6", DIM)
+        n = len(self.recent)
+        if n > 1:                                             # page dots
+            i = next((k for k, r in enumerate(self.recent) if r is item), 0)
+            for k in range(n):
+                c.pixel(W - 1 - (n - 1 - k) * 2, H - 1, WHITE if k == i else DIM)
+
     def render(self, c, slide, t):
+        if isinstance(slide, str) and slide.startswith("new:"):
+            item = next((r for r in self.recent if r["key"] == slide), None)
+            if item:
+                self._render_recent(c, item, t)
+            return
         s = next((x for x in self.sessions if x["key"] == slide), None)
         if not s:
             return
@@ -158,4 +278,5 @@ class PlexBoard(Board):
     def status(self):
         s = super().status()
         s["sessions"] = [{k: v for k, v in x.items() if k not in ("art", "thumb")} for x in self.sessions]
+        s["recent"] = [{k: v for k, v in x.items() if k not in ("art", "thumb")} for x in self.recent]
         return s

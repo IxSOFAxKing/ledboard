@@ -3,6 +3,9 @@
 Needs a free Web API key (https://steamcommunity.com/dev/apikey) and your Steam ID, profile
 URL or custom URL name. Your Steam privacy setting 'Game details' must be Public for Steam
 to report the game you're in.
+
+Also: "friend now playing" (when a friend starts a game; needs your friends list to be public)
+and "achievement unlocked" (with how rare it is) screens, shown for a few minutes.
 """
 from __future__ import annotations
 
@@ -53,7 +56,8 @@ class SteamBoard(Board):
                    "Skipped when you're not in a game (unless 'show when online' is on).")
     refresh = 60
     DEFAULTS = {"enabled": False, "duration": 12, "refresh": 60, "api_key": "", "steam_ids": [],
-                "takeover": False, "show_online": False, "art": "icon"}
+                "takeover": False, "show_online": False, "art": "icon",
+                "show_friends": True, "friend_filter": [], "show_achievements": True, "event_minutes": 10}
     FIELDS = [
         {"key": "api_key", "label": "Steam Web API key", "type": "password",
          "help": "Free at steamcommunity.com/dev/apikey (any domain name works, e.g. 'ledboard')."},
@@ -66,6 +70,15 @@ class SteamBoard(Board):
         {"key": "show_online", "label": "Also show when online but not in a game", "type": "bool"},
         {"key": "duration", "label": "Seconds on screen", "type": "number"},
         {"key": "refresh", "label": "Check every (seconds)", "type": "number"},
+        {"key": "show_achievements", "label": "Achievement unlocked (with how rare it is)", "type": "bool",
+         "section": "Friends & achievements"},
+        {"key": "show_friends", "label": "Friend now playing (when a friend starts a game)", "type": "bool",
+         "section": "Friends & achievements",
+         "help": "Uses the first Steam ID above. Your friends list and their game details must be visible to Steam's API."},
+        {"key": "friend_filter", "label": "Only these friends (names, comma-separated; blank = all)", "type": "list",
+         "section": "Friends & achievements", "show_if": {"show_friends": True}},
+        {"key": "event_minutes", "label": "Show these screens for (minutes)", "type": "number",
+         "section": "Friends & achievements"},
     ]
 
     def __init__(self, cfg, app):
@@ -74,6 +87,10 @@ class SteamBoard(Board):
         self._resolved = {}       # input text -> steamid64
         self._sessions = {}       # steamid -> (appid, first seen in-game, epoch)
         self._art = {}            # (appid, style) -> image
+        self.events = []          # friend / achievement screens: dicts with key, kind, until
+        self._friend_games = None  # friend steamid -> appid (None until the first poll)
+        self._ach_seen = {}       # (steamid, appid) -> newest unlock time already known
+        self._rarity = {}         # appid -> (fetched epoch, {apiname: percent})
         self.session = requests.Session()
 
     # -- data -----------------------------------------------------------------
@@ -129,6 +146,94 @@ class SteamBoard(Board):
                     info["art"] = fetch_image(info["avatar"], self.app.height, self.app.height)
             players[sid] = info
         self.players = players
+        self._expire_events()
+        if self.cfg.get("show_achievements", True):
+            for sid, p in players.items():
+                if p["appid"]:
+                    try:
+                        self._check_achievements(sid, p)
+                    except Exception as e:
+                        log.debug("achievements unavailable for %s: %s", p["appid"], e)
+        if self.cfg.get("show_friends", True) and ids:
+            try:
+                self._check_friends(ids[0], set(ids))
+            except Exception as e:
+                log.info("Steam friends unavailable: %s", e)
+
+    # -- friends & achievements -------------------------------------------------
+    def _event_seconds(self):
+        try:
+            return max(1.0, float(self.cfg.get("event_minutes") or 10)) * 60
+        except (TypeError, ValueError):
+            return 600.0
+
+    def _expire_events(self):
+        now = time.time()
+        self.events = [e for e in self.events if e["until"] > now]
+
+    def _add_event(self, ev):
+        ev["until"] = time.time() + self._event_seconds()
+        self.events = [e for e in self.events if e["key"] != ev["key"]] + [ev]
+
+    def _check_friends(self, me, mine):
+        fl = self._get("ISteamUser/GetFriendList/v1/", steamid=me, relationship="friend")
+        friends = [f["steamid"] for f in (fl.get("friendslist") or {}).get("friends") or [] if f.get("steamid") not in mine]
+        wanted = {n.strip().lower() for n in self.cfg.get("friend_filter") or [] if n.strip()}
+        now_playing = {}
+        for i in range(0, len(friends), 100):
+            summ = self._get("ISteamUser/GetPlayerSummaries/v2/", steamids=",".join(friends[i:i + 100]))
+            for p in (summ.get("response") or {}).get("players") or []:
+                if wanted and (p.get("personaname") or "").lower() not in wanted:
+                    continue
+                now_playing[p["steamid"]] = (p.get("gameid"), p)
+        first = self._friend_games is None
+        prev = self._friend_games or {}
+        for sid, (appid, p) in now_playing.items():
+            if appid and prev.get(sid) != appid and not first:
+                self._add_event({"key": f"friend:{sid}", "kind": "friend", "name": p.get("personaname", ""),
+                                 "game": p.get("gameextrainfo") or "a game", "appid": appid,
+                                 "avatar": fetch_image(p.get("avatarmedium"), 24, 24) if p.get("avatarmedium") else None})
+            if not appid:
+                self.events = [e for e in self.events if e["key"] != f"friend:{sid}"]   # they stopped playing
+        self._friend_games = {sid: appid for sid, (appid, _p) in now_playing.items()}
+
+    def _check_achievements(self, sid, p):
+        appid = p["appid"]
+        j = self._get("ISteamUserStats/GetPlayerAchievements/v1/", steamid=sid, appid=appid, l="english")
+        stats = j.get("playerstats") or {}
+        got = [a for a in stats.get("achievements") or [] if a.get("achieved")]
+        newest = max((int(a.get("unlocktime") or 0) for a in got), default=0)
+        key = (sid, appid)
+        if key not in self._ach_seen:            # first look at this game: remember, don't announce old ones
+            self._ach_seen[key] = newest
+            return
+        fresh = [a for a in got if int(a.get("unlocktime") or 0) > self._ach_seen[key]]
+        self._ach_seen[key] = max(newest, self._ach_seen[key])
+        if not fresh:
+            return
+        rarity = self._rarity_for(appid)
+        for a in sorted(fresh, key=lambda a: int(a.get("unlocktime") or 0)):
+            self._add_event({"key": f"ach:{sid}:{appid}:{a.get('apiname')}", "kind": "achievement",
+                             "name": a.get("name") or a.get("apiname") or "Achievement",
+                             "game": stats.get("gameName") or p.get("game") or "", "player": p.get("name", ""),
+                             "percent": rarity.get(a.get("apiname"))})
+
+    def _rarity_for(self, appid):
+        cached = self._rarity.get(appid)
+        if cached and time.time() - cached[0] < 3600:
+            return cached[1]
+        out = {}
+        try:
+            j = self._get("ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2/", gameid=appid)
+            for a in (j.get("achievementpercentages") or {}).get("achievements") or []:
+                try:
+                    out[a.get("name")] = float(a.get("percent"))
+                except (TypeError, ValueError):
+                    pass
+        except Exception as e:
+            log.debug("rarity unavailable: %s", e)
+        self._rarity[appid] = (time.time(), out)
+        return out
 
     def _game_stats(self, sid, appid):
         """Total hours and the icon hash from the player's recently played games."""
@@ -170,14 +275,62 @@ class SteamBoard(Board):
         return out
 
     def slides(self):
-        return self._visible()
+        now = time.time()
+        ev = [e["key"] for e in self.events if e["until"] > now and
+              (self.cfg.get("show_friends", True) if e["kind"] == "friend" else self.cfg.get("show_achievements", True))]
+        return ev + self._visible()
 
     def takeover_slides(self):
         if not self.cfg.get("takeover"):
             return []
         return [sid for sid in self._visible() if self.players[sid]["appid"]]
 
+    def _render_friend(self, c, e, t):
+        W, H = c.width, c.height
+        c.rect(0, 0, 1, H - 1, INGAME_GREEN)
+        if e.get("avatar") is not None:
+            c.paste(e["avatar"], 4, 4)
+        else:
+            self._steam_badge(c, 4, 4, 24)
+        x0 = 33
+        c.text(x0, 0, "FRIEND NOW PLAYING", "4x6", INGAME_GREEN)
+        c.scroll_text(x0, W, 8, e["name"], "6x10", WHITE, t)
+        c.scroll_text(x0, W, 20, e["game"], "5x7", STEAM_BLUE, t)
+
+    def _render_achievement(self, c, e, t):
+        import math
+        W, H = c.width, c.height
+        gold = (255, 200, 40)
+        d = c.draw
+        d.rectangle((8, 5, 19, 14), fill=gold)
+        d.ellipse((8, 9, 19, 19), fill=gold)
+        d.arc((3, 6, 11, 14), 90, 270, fill=gold)
+        d.arc((16, 6, 24, 14), 270, 90, fill=gold)
+        d.rectangle((12, 19, 15, 22), fill=gold)
+        d.rectangle((9, 23, 18, 25), fill=gold)
+        glow = 0.6 + 0.4 * math.sin(t * 4)
+        for a in range(0, 360, 45):                                # sparkles circling the trophy
+            ang = math.radians(a + t * 60)
+            c.pixel(round(14 + 13 * math.cos(ang)), round(15 + 13 * math.sin(ang)),
+                    tuple(round(v * glow) for v in gold))
+        x0 = 32
+        c.text(x0, 0, "ACHIEVEMENT UNLOCKED", "4x6", gold)
+        c.scroll_text(x0, W, 8, e["name"], "6x10", WHITE, t)
+        c.scroll_text(x0, W, 19, e["game"], "4x6", STEAM_BLUE, t)
+        pct = e.get("percent")
+        if pct is not None:
+            tier, col = (("ULTRA RARE", (255, 90, 200)) if pct < 2 else ("RARE", (200, 120, 255)) if pct < 10
+                         else ("UNCOMMON", (100, 180, 255)) if pct < 35 else ("COMMON", GRAY))
+            c.text(x0, H - 6, f"{tier} · {pct:.1f}% OF PLAYERS", "4x6", col)
+        elif len(self.players) > 1 and e.get("player"):
+            c.text(x0, H - 6, e["player"], "4x6", GRAY)
+
     def render(self, c, slide, t):
+        if isinstance(slide, str) and (slide.startswith("friend:") or slide.startswith("ach:")):
+            e = next((x for x in self.events if x["key"] == slide), None)
+            if e:
+                (self._render_friend if e["kind"] == "friend" else self._render_achievement)(c, e, t)
+            return
         p = self.players.get(slide)
         if not p:
             return

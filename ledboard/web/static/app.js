@@ -455,6 +455,12 @@ function partitionRotation(d) {
   d.rotation = on.concat(d.rotation.filter((n) => !d.boards[n]?.enabled));
 }
 
+const TRANSITIONS = {
+  off: "Off (instant cut)", slide: "Slide (new board pushes in from the right)", "push-up": "Push up (like a ticker)",
+  wipe: "Wipe (a bright line sweeps across)", fade: "Fade (through black)", dissolve: "Dissolve (pixels switch over randomly)",
+  random: "Random (a different one each time)",
+};
+
 function renderBoards() {
   const root = $("#boards");
   const visible = (n) => SCHEMA[n] && (showDisabled || draft.boards[n].enabled || openBoards.has(n));
@@ -588,6 +594,14 @@ function renderOtherTabs() {
     renderField(draft.scroll, { key: "speed", label: "Scroll mode speed (pixels per second)", type: "number",
       help: "Used by every board in scroll mode unless that board sets its own speed." }),
     renderField(draft.scroll, { key: "gap", label: "Scroll mode gap between slides (pixels)", type: "number" }));
+  draft.transitions = draft.transitions || { style: "slide", seconds: 0.6, scope: "boards" };
+  $("#transitions-form").replaceChildren(
+    renderField(draft.transitions, { key: "style", label: "Style", type: "select", options: Object.keys(TRANSITIONS),
+      option_labels: TRANSITIONS }),
+    renderField(draft.transitions, { key: "seconds", label: "Length (seconds)", type: "number",
+      help: "0.4–0.8 looks smooth. Alerts and takeovers always cut in instantly." }),
+    renderField(draft.transitions, { key: "scope", label: "Use between", type: "select", options: ["boards", "all"],
+      option_labels: { boards: "Boards only (e.g. Clock → Weather)", all: "Every screen (also between a board's own screens)" } }));
   $("#general-form").replaceChildren(
     renderField(draft, { key: "fallback_board", label: "Show when nothing else has content", type: "select", options: Object.keys(SCHEMA) }),
     renderField(draft.web, { key: "port", label: "Web UI port (restart needed)", type: "number" }),

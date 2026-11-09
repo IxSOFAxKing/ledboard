@@ -4,16 +4,19 @@ Uses:
   GET /printer/objects/query?print_stats&virtual_sdcard&display_status&extruder&heater_bed&webhooks
   GET /server/files/metadata?filename=...   (slicer time estimate, layer count, thumbnails)
   GET /server/files/gcodes/<dir>/<thumbnail>  (model thumbnail)
+  GET /server/webcams/list + the webcam's snapshot URL  (live camera picture, optional)
 An API key is only needed if Moonraker's authorization is enabled for your network.
 """
 from __future__ import annotations
 
+import io
 import os
 import time
 import urllib.parse
 from datetime import datetime, timedelta
 
 import requests
+from PIL import Image
 
 from .base import Board
 from ..gfx import DIM, GRAY, RED, WHITE, YELLOW, fetch_image
@@ -41,7 +44,7 @@ class KlipperBoard(Board):
         "enabled": False, "duration": 12, "refresh": 5,
         "url": "http://printer.local:7125", "api_key": "", "printer_name": "",
         "takeover": False, "show_when_idle": False, "show_finished_minutes": 15,
-        "show_thumbnail": True, "eta_style": "time_left",
+        "show_thumbnail": True, "picture_source": "thumbnail", "camera_url": "", "eta_style": "time_left",
     }
     FIELDS = [
         {"key": "url", "label": "Moonraker URL", "type": "text", "section": "Connection",
@@ -54,8 +57,16 @@ class KlipperBoard(Board):
          "section": "When to show"},
         {"key": "show_finished_minutes", "label": "Keep showing a finished print for (minutes)", "type": "number",
          "section": "When to show"},
-        {"key": "show_thumbnail", "label": "Show the model thumbnail from the slicer", "type": "bool", "section": "Display",
-         "help": "Needs thumbnails enabled in your slicer (e.g. PrusaSlicer/OrcaSlicer 'G-code thumbnails')."},
+        {"key": "show_thumbnail", "label": "Show a picture next to the progress", "type": "bool", "section": "Display"},
+        {"key": "picture_source", "label": "Picture", "type": "select", "section": "Display",
+         "options": ["thumbnail", "camera"], "show_if": {"show_thumbnail": True},
+         "option_labels": {"thumbnail": "Model thumbnail from the slicer",
+                           "camera": "Live camera snapshot (refreshes every poll)"},
+         "help": "Thumbnail needs 'G-code thumbnails' on in your slicer. The camera uses the webcam set up in "
+                 "Mainsail/Fluidd (falls back to the thumbnail if it can't be reached)."},
+        {"key": "camera_url", "label": "Camera snapshot URL (optional)", "type": "text", "section": "Display",
+         "show_if": {"picture_source": "camera"}, "placeholder": "found automatically from Moonraker",
+         "help": "Only if the automatic one doesn't work, e.g. http://printer.local/webcam/?action=snapshot"},
         {"key": "eta_style", "label": "Time display", "type": "select", "section": "Display",
          "options": ["time_left", "finish_time"],
          "option_labels": {"time_left": "Time left (1h23m)", "finish_time": "Finish time (4:35 PM)"}},
@@ -74,6 +85,9 @@ class KlipperBoard(Board):
         self.connection = None       # Moonraker's klippy_state, or "offline"
         self._history_for = None     # (filename, state) the cached history lookup belongs to
         self._history_end = None
+        self.camera = None           # latest camera snapshot (PIL image, 4:3, display height)
+        self.camera_at = 0.0
+        self._cam_urls = None        # (looked up at, [candidate snapshot URLs])
 
     # -- data -----------------------------------------------------------------
     def _base(self):
@@ -149,6 +163,69 @@ class KlipperBoard(Board):
             self._history_for = None
         self.printer = st
         self.fetched_at = time.time()
+        if (self.cfg.get("show_thumbnail", True) and self.cfg.get("picture_source") == "camera"
+                and st["state"] in ("printing", "paused", "complete", "error", "cancelled")):
+            try:
+                self._snapshot()
+            except Exception as e:
+                self.log_camera_error(e)
+
+    # -- camera -----------------------------------------------------------------
+    def log_camera_error(self, e):
+        if time.time() - getattr(self, "_cam_err_at", 0) > 300:       # don't flood the log
+            self._cam_err_at = time.time()
+            import logging
+            logging.getLogger(__name__).info("printer camera unavailable: %s", e)
+
+    def _camera_urls(self):
+        """Snapshot URL candidates: the configured one, else Moonraker's webcam list (cached 10 min)."""
+        own = (self.cfg.get("camera_url") or "").strip()
+        if own:
+            return [own]
+        if self._cam_urls and time.time() - self._cam_urls[0] < 600:
+            return self._cam_urls[1]
+        urls = []
+        r = requests.get(f"{self._base()}/server/webcams/list", headers=self._headers(), timeout=8)
+        r.raise_for_status()
+        cams = [w for w in (r.json().get("result") or {}).get("webcams") or [] if w.get("enabled", True)]
+        u = urllib.parse.urlparse(self._base())
+        for w in cams:
+            snap = (w.get("snapshot_url") or "").strip()
+            if not snap:
+                continue
+            if snap.startswith("http"):
+                urls.append(snap)
+            else:   # relative: normally served by the web UI's nginx (port 80), sometimes by Moonraker itself
+                path = snap if snap.startswith("/") else "/" + snap
+                urls += [f"{u.scheme}://{u.hostname}{path}", f"{self._base()}{path}"]
+        self._cam_urls = (time.time(), urls)
+        return urls
+
+    def _snapshot(self):
+        H = self.app.height
+        last = None
+        for url in self._camera_urls():
+            try:
+                r = requests.get(url, headers=self._headers(), timeout=6)
+                r.raise_for_status()
+                img = Image.open(io.BytesIO(r.content)).convert("RGB")
+            except Exception as e:
+                last = e
+                continue
+            w = round(H * 4 / 3)
+            src_ratio = img.width / img.height
+            if src_ratio > 4 / 3:                       # crop to 4:3 (keep the middle)
+                nw = round(img.height * 4 / 3)
+                img = img.crop(((img.width - nw) // 2, 0, (img.width + nw) // 2, img.height))
+            elif src_ratio < 4 / 3:
+                nh = round(img.width * 3 / 4)
+                img = img.crop((0, (img.height - nh) // 2, img.width, (img.height + nh) // 2))
+            self.camera = img.resize((w, H), Image.LANCZOS)
+            self.camera_at = time.time()
+            return
+        if last:
+            raise last
+        raise RuntimeError("no webcam with a snapshot URL in Moonraker")
 
     def _history_end_time(self, fn):
         """End time (epoch) of the most recent job for this file, from Moonraker's history."""
@@ -275,7 +352,16 @@ class KlipperBoard(Board):
         if vs == "idle":
             self._render_idle(c, st)
             return
-        if thumb is not None:
+        cam = None
+        if self.cfg.get("show_thumbnail", True) and self.cfg.get("picture_source") == "camera" \
+                and self.camera is not None and time.time() - self.camera_at < 90:
+            cam = self.camera
+        if cam is not None:
+            c.paste(cam, 0, 0)
+            if vs in ("printing", "paused") and int(t * 2) % 2 == 0:       # blinking 'live' dot
+                c.draw.ellipse((cam.width - 5, 1, cam.width - 2, 4), fill=(240, 40, 40))
+            x0 = cam.width + 3
+        elif thumb is not None:
             c.paste(thumb, 0, 0)
             x0 = H + 2
         else:

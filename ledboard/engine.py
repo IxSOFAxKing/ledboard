@@ -415,7 +415,36 @@ class Engine:
             c.clear()
             c.text(0, 0, name, "5x8", RED)
             c.scroll_text(0, c.width, 12, f"{type(e).__name__}: {e}", "5x8", RED, now - started)
+        self._apply_transition(c, (name, id(slides), idx), slides[idx], now)
         return c.image
+
+    def _apply_transition(self, c, key, slide, now):
+        """Animate from the previous slide's last frame into the new one when the slide changes."""
+        tcfg = self.cfg.get("transitions") or {}
+        style = tcfg.get("style", "off")
+        prev_key, prev_frame = getattr(self, "_last_key", None), getattr(self, "_last_frame", None)
+        if key != prev_key:
+            self._last_key = key
+            board_changed = prev_key is None or prev_key[0] != key[0]
+            continuous = isinstance(slide, (ComboSlide, ScrollSlide))
+            if (style != "off" and prev_frame is not None and not continuous
+                    and (board_changed or tcfg.get("scope") == "all")):
+                from .transitions import Transition
+                try:
+                    secs = float(tcfg.get("seconds") or 0.6)
+                except (TypeError, ValueError):
+                    secs = 0.6
+                self._transition = Transition(style, prev_frame, now, secs)
+            else:
+                self._transition = None
+        tr = getattr(self, "_transition", None)
+        if tr is not None:
+            out = tr.frame(c.image, now)
+            if out is None:
+                self._transition = None
+            else:
+                c.image.paste(out)
+        self._last_frame = c.image.copy()
 
     def run(self):
         self.running = True

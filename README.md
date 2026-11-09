@@ -8,10 +8,11 @@ It's built for two chained 64×32 panels (128×32), and the layouts scale to oth
 |---|---|
 | **Sports** | One board per league, using ESPN's free API (no key needed): NFL, NBA, MLB, NHL, college football and basketball, WNBA, MLS, EPL, La Liga, Bundesliga, Serie A, Ligue 1, Champions League. See [Sports](#sports) for the settings and the live-game details each sport shows. |
 | **Now Playing** | Album art, scrolling title and artist, and an animated wavy progress bar (Material 3 style; a straight bar is an option), from a **Home Assistant media player** (HA's Spotify integration, Sonos and so on) or directly from the Spotify API. It's skipped when nothing is playing and can take over the display while music plays. |
-| **Steam** | What you're playing on Steam: the game icon, name, session time and total hours. It can take over the display while you play, and supports several players. |
-| **Plex** | Active streams (movies, TV, music) with the poster, title, S/E or artist, who's watching, and a wavy (or straight) progress bar. You can filter by user. |
+| **Steam** | What you're playing on Steam: the game icon, name, session time and total hours. It can take over the display while you play, and supports several players. Also "friend now playing" and "achievement unlocked" (with how rare it is) screens. |
+| **Plex** | Active streams (movies, TV, music) with the poster, title, S/E or artist, who's watching, and a wavy (or straight) progress bar. You can filter by user. Plus a carousel of recently added movies and episodes. |
+| **Server Status** | Your Uptime Kuma monitors: green/red dots and response times, and an automatic critical alert when one goes down that clears when it's back. |
 | **Home Assistant** | Any entities (sensors, locks, doors, lights, thermostats, and so on) at 1, 2 or 3 per screen, with automatic formatting and colors. |
-| **3D Printer (Klipper)** | Print progress from Klipper via Moonraker: the model thumbnail, progress, time left or finish time, layer, nozzle and bed temperatures, and paused, finished and error states. |
+| **3D Printer (Klipper)** | Print progress from Klipper via Moonraker: the model thumbnail or a live camera snapshot, progress, time left or finish time, layer, nozzle and bed temperatures, and paused, finished and error states. |
 | **Weather** | Animated icons (spinning sun, drifting clouds, falling rain and snow, lightning flashes, fog, wind), current conditions, a 4-day forecast and a 24-hour temperature and rain graph. Data comes from Open-Meteo (free, no key) or your Home Assistant weather entity. |
 | **Clock** | The time and date. Every piece of text (time, AM/PM, date, an optional extra line) has its own font size, color and format. It's also the fallback when nothing else has content. |
 | **Custom message** | Your own text in the rotation. You can also flash a one-off message from the UI or API. |
@@ -22,7 +23,9 @@ Also included:
 - **[Alerts](#alerts)**: animated, prioritized interruptions such as the doorbell, washer finished or garage open.
 - **[Home Assistant control over MQTT](#home-assistant-control-mqtt)**.
 - **[One-click updates and backups](#updates-and-backups)**.
-- **[Next-game countdowns and standings](#sports)**.
+- **[Next-game countdowns, standings and the playoff picture](#sports)**.
+- **[Scoring play recaps](#sports)** after favorite-team celebrations.
+- **[Transitions](#global-settings-settings-tab)** between boards: slide, push up, wipe, fade or dissolve.
 - **[Sun-following brightness](#global-settings-settings-tab)**.
 - **[A combined ticker](#global-settings-settings-tab)**: all boards in one continuous scroll.
 
@@ -93,6 +96,7 @@ The speed (20 px/s by default) and the gap between slides are set once for all b
 
 ### Global settings (Settings tab)
 - **Defaults for all boards**: scroll mode speed and gap.
+- **Transitions**: how the display changes from one board to the next: slide, push up, wipe, fade (through black), dissolve, random, or off. Set the length (0.4–0.8 s looks smooth) and whether to use it between boards only or between every screen. Alerts and takeovers always cut in instantly.
 - **Combined ticker**:
   - All enabled boards' slides scroll by as one continuous line, with fresh data on every pass.
   - You can set the speed and gap, and a pause on each slide once it's fully on screen.
@@ -192,6 +196,9 @@ How it works:
 - Celebrations are skipped in spoiler mode, and when the score was already on the board as LEDBoard started.
 - Up to three can queue, and they expire after 30 minutes.
 - To see one now, use the **Simulate** buttons on the league's board (under Celebrations). Simulate uses a live game with your favorite if there is one, or a sample game otherwise.
+- **Scoring play recap** (on by default): right after the celebration, a team-colored "TOUCHDOWN PACKERS" banner with the clock, the play scrolling by ("J. Love 24 yd pass to C. Watson"), the new score and, for football, the drive. The play comes from ESPN's game summary; if that isn't available yet, the scoreboard's last play is used.
+
+**Playoff picture.** Turn on **Show the playoff picture** (under **Off days**, for NFL, NBA, WNBA, NHL, MLB and MLS) to add your favorite team's conference seeds, with clinch status (clinched top seed / division / playoffs, play-in, eliminated) and up to three teams "in the hunt". Your team is highlighted. For the NFL, once the playoffs start, a bracket shows wild-card results, the divisional games with their times, and the conference championship.
 
 **Classic view.** Every sport's standard view puts each team's abbreviation (and AP rank for college) under its logo. Two settings change this, under **Logos** on each league board:
 - **Show team abbreviations**: turn it off to make the logos fill the whole 32×32 space. College ranks then sit in a small corner badge.
@@ -299,7 +306,8 @@ Leave the time's size blank and it grows as large as fits around the other lines
 1. Turn on **3D Printer (Klipper)**.
 2. Set **Moonraker URL** to the address Mainsail or Fluidd uses, normally `http://<printer-ip>:7125`.
 3. **API key**: only needed if Moonraker's `[authorization]` doesn't already trust the Pi's network. Mainsail and Fluidd show the key under their settings.
-4. **Thumbnails**: turn on G-code thumbnails in your slicer to see the model on the panel. PrusaSlicer, OrcaSlicer and SuperSlicer all support this; include a 32×32 size if you can. Without one, a printer icon is shown instead.
+4. **Picture**: the model thumbnail, or a **live camera snapshot** refreshed on every poll, with a blinking red dot while printing. The camera is found automatically from the webcam set up in Mainsail or Fluidd; enter a snapshot URL only if that doesn't work. If the camera can't be reached, the thumbnail is shown instead.
+   **Thumbnails**: turn on G-code thumbnails in your slicer to see the model on the panel. PrusaSlicer, OrcaSlicer and SuperSlicer all support this; include a 32×32 size if you can. Without one, a printer icon is shown instead.
 5. **Options**:
    - take over the display while printing
    - show temperatures when idle
@@ -314,6 +322,16 @@ Time left averages the file-progress estimate and the slicer's estimate, the way
 - **Switched off:** never. That covers Klipper being unable to reach the printer and the printer's computer being unreachable.
 - **Failure:** if Klipper loses the printer in the middle of a print, the error shows for the same window.
 
+### Server status (Uptime Kuma)
+1. In Uptime Kuma, go to **Status Pages → New Status Page**, give it a slug (for example `home`) and add the monitors you want on the panel. Save.
+2. Turn on **Server Status** and paste the page's address, for example `http://192.168.1.10:3001/status/home`. No login or API key is needed.
+3. **Options:**
+   - only show certain monitors
+   - only show the board when something is down
+   - **Critical alert when a monitor goes down** (on by default): the alert stays on screen until the monitor is back up (then it clears itself) or you dismiss it. If you set up the Home Assistant Plex automation earlier, you can turn that off, or you'll get two alerts.
+
+The board shows 6 monitors per page, down ones first, with the average 24-hour uptime. Monitors in maintenance show in blue.
+
 ### Steam
 1. Get a free **Steam Web API key** at <https://steamcommunity.com/dev/apikey>. Any domain name works, for example `ledboard`.
 2. On the **Steam** board, paste the key and your **profile URL** (`https://steamcommunity.com/id/yourname`), custom URL name or 17-digit Steam ID. Add more, comma-separated, for others in the house.
@@ -326,10 +344,17 @@ Time left averages the file-progress estimate and the slicer's estimate, the way
 
 The session timer counts from when LEDBoard first sees you in a game.
 
+**Friends & achievements** (both on by default):
+- **Friend now playing**: when a friend starts a game. It uses the first Steam ID, and needs your friends list (and their game details) to be public. You can limit it to certain friends.
+- **Achievement unlocked**: a trophy, the achievement, the game and how rare it is (from Steam's global stats). Achievements you already had are never announced.
+- Each shows for 10 minutes by default (adjustable).
+
 ### Plex
 1. Enter your server URL, for example `http://192.168.1.10:32400`.
 2. Enter your **X-Plex-Token**. To find it, open Plex Web, go to any item → **⋯** → **Get Info** → **View XML**, and copy the `X-Plex-Token=…` value from the URL.
 3. Click **Test connection**.
+
+**Recently added** (on by default): new movies, episodes, seasons (and optionally music albums) from the last 24 hours, with the poster, title, season/episode or year/runtime/rating, and how long ago they were added. Set how far back and how many to show.
 
 ### Home Assistant
 1. Enter your HA URL, for example `http://homeassistant.local:8123`.
@@ -513,7 +538,9 @@ ledboard/
   fonts.py         BDF bitmap font renderer (crisp pixel text)
   gfx.py           drawing helpers, marquee text, image cache
   config.py        JSON config + sportsmatrix.conf importer
-  boards/          sports (one board per league), spotify (now playing), plex, homeassistant, clock, message
+  boards/          sports (one board per league) + layouts, playoffs, recap; weather (+ extra screens), spotify,
+                   plex, steam, uptime, klipper, homeassistant, clock, ambient, message
+  transitions.py   slide / push / wipe / fade / dissolve between boards
   web/             Flask API + single-page UI (static/)
 ```
 
