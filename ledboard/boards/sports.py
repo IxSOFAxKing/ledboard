@@ -348,6 +348,7 @@ class LeagueBoard(Board):
         "use_dark_logos": True, "live_layout": "classic", "show_win_probability": True, "goal_animation": True,
         "celebrations": True, "celebrate_field_goals": False, "celebrate_runs": False,
         "next_game": "no_games", "show_standings": False,
+        "show_abbreviations": True, "show_final_records": True,
     }
 
     @classmethod
@@ -429,6 +430,9 @@ class LeagueBoard(Board):
             {"key": "duration", "label": "Seconds per game", "type": "number", "section": "Timing"},
             {"key": "refresh", "label": "Refresh interval (s)", "type": "number", "section": "Timing"},
             {"key": "live_refresh", "label": "Refresh interval while games are live (s)", "type": "number", "section": "Timing"},
+            {"key": "show_abbreviations", "label": "Show team abbreviations under the logos", "type": "bool",
+             "section": "Logos", "help": "Off: logos grow to fill the space (standard view)."},
+            {"key": "show_final_records", "label": "Show team records on final scores", "type": "bool", "section": "Logos"},
             {"key": "use_dark_logos", "label": "Prefer logos designed for dark backgrounds", "type": "bool", "section": "Logos"},
         ]
         return f
@@ -740,27 +744,43 @@ class LeagueBoard(Board):
             self._scores_draw(c, g, mid, y=2)
             if g["state"] == "in" and detailed:
                 self._live_graphics(c, g, x0, x1, mid)
+            if g["state"] == "post" and self.cfg.get("show_final_records", True):
+                # updated records under each team's side of the score
+                c.text(x0 + 1, 17, away["record"], "4x6", GRAY)
+                c.text_right(x1 - 1, 17, home["record"], "4x6", GRAY)
             items = self._info_items(g)
         text, color, local_t = _cycle(c, items, t, x1 - x0)
         c.scroll_text(x0, x1, H - 7, text, "5x7", color, local_t, speed=INFO_SPEED, align="center", pause=0.6, gap=200)
 
     def _team_columns(self, c, g, col, detailed):
-        """Logo with the team abbreviation centered underneath, for each side."""
+        """Logo for each side, with the team abbreviation centered underneath (or a full-size
+        logo when abbreviations are turned off)."""
         from .football_layouts import logo_fit
         H, W = c.height, c.width
         show_rank = self.league in COLLEGE and self.cfg.get("show_rankings", True)
+        names = self.cfg.get("show_abbreviations", True)
         for side, cx0 in (("away", 0), ("home", W - col)):
             team = g[side]
-            # logo fills the column (minus a 1px gap on the inner side) and everything above the name
-            c.paste(logo_fit(self, team, col - 1, H - 7), cx0 if side == "away" else cx0 + 1, 0)
+            lx = cx0 if side == "away" else cx0 + 1          # 1px gap on the inner side
             rank = str(team["rank"]) if show_rank and team["rank"] else ""
-            aw = c.text_width(team["abbr"], "5x8")
-            rw = c.text_width(rank, "4x6") + 1 if rank else 0
-            x = cx0 + (col - aw - rw) // 2
-            if rank:
-                c.text(x, H - 7, rank, "4x6", GRAY)
-                x += rw
-            c.text(x, H - 8, team["abbr"], "5x8", team_color(team))
+            if not names:
+                # logo takes the whole column; a college rank sits in the outer bottom corner
+                c.paste(logo_fit(self, team, col - 1, H), lx, 0)
+                if rank:
+                    rw = c.text_width(rank, "4x6")
+                    rx = cx0 if side == "away" else cx0 + col - rw - 1
+                    c.rect(rx, H - 7, rx + rw, H - 1, (0, 0, 0))
+                    c.text(rx + (1 if side == "away" else 0), H - 6, rank, "4x6", WHITE)
+            else:
+                # logo fills the column and everything above the name
+                c.paste(logo_fit(self, team, col - 1, H - 7), lx, 0)
+                aw = c.text_width(team["abbr"], "5x8")
+                rw = c.text_width(rank, "4x6") + 1 if rank else 0
+                x = cx0 + (col - aw - rw) // 2
+                if rank:
+                    c.text(x, H - 7, rank, "4x6", GRAY)
+                    x += rw
+                c.text(x, H - 8, team["abbr"], "5x8", team_color(team))
             if g["state"] != "in" or not detailed:
                 continue
             # markers in the team's column: possession (football), red cards (soccer)

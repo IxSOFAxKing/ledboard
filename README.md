@@ -192,7 +192,9 @@ How it works:
 - Up to three can queue, and they expire after 30 minutes.
 - To see one now, use the **Simulate** buttons on the league's board (under Celebrations). Simulate uses a live game with your favorite if there is one, or a sample game otherwise.
 
-**Classic view.** Every sport's standard view puts each team's abbreviation (and AP rank for college) under its logo.
+**Classic view.** Every sport's standard view puts each team's abbreviation (and AP rank for college) under its logo. Two settings change this, under **Logos** on each league board:
+- **Show team abbreviations**: turn it off to make the logos fill the whole 32×32 space. College ranks then sit in a small corner badge.
+- **Show team records on final scores**: shows each team's updated record under the score once a game ends.
 
 > **Note:** The live details read optional fields from ESPN's unofficial API. If ESPN doesn't send a field for a game, that detail is simply left out.
 
