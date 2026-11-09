@@ -263,8 +263,7 @@ LEDBoard saves the refresh token, so you only do this once.
    - **Home Assistant**: enter your weather entity, for example `weather.forecast_home`. It uses the Home Assistant board's URL and token, and gets forecasts through `weather.get_forecasts`. Night icons follow `sun.sun`.
 3. Optionally:
    - switch units (°F/mph or °C/km/h)
-   - turn the **Now**, **4-day forecast** and **Next 24 hours** screens on or off
-4. Turn on any of the **More screens** (all off by default):
+4. Under **Screens**, switch screens on or off and use the ▲ ▼ arrows to set the order they're shown in. The new screens are all off by default:
    - **Sun arc**: where the sun is in its path, sunrise/sunset and daylight left (sunrise countdown at night).
    - **Rain soon**: rain (or snow) for the next 2 hours in 15-minute bars, e.g. "RAIN IN 25 MIN". Only shows when rain is coming.
    - **Wind**: compass arrow, speed, gusts and a plain-English description.

@@ -276,7 +276,7 @@ function renderForm(obj, fields, rerender) {
   for (const f of fields) {
     if (f.show_if && !Object.entries(f.show_if).every(([k, v]) => (obj[k] ?? false) === v)) continue;
     if (f.section && f.section !== section) { section = f.section; out.push(h("h4", { class: "section" }, section)); }
-    out.push(renderField(obj, f, deps.has(f.key) ? rerender : null));
+    out.push(renderField(obj, f, deps.has(f.key) || f.type === "screens" ? rerender : null));
   }
   return out;
 }
@@ -312,6 +312,7 @@ function renderField(obj, f, onDepChange) {
         h("button", { class: "small", onclick: () => loadHaEntities() }, "Load from HA")), f.help);
     }
     case "entities": return entitiesField(obj, f);
+    case "screens": return screensField(obj, f, onDepChange);
     case "geocode": return geocodeField(obj, f);
     case "simulate": return actionsField({ ...f, action: "simulate" }, f, "Simulate a score",
       "Plays the celebration now, then this board's games, exactly as it would after a real score.");
@@ -320,6 +321,38 @@ function renderField(obj, f, onDepChange) {
     default:
       return field(f.label, h("input", { type: "text", value: val ?? "", oninput: (e) => set(e.target.value) }), f.help);
   }
+}
+
+// Ordered list of screens: on/off switch + up/down arrows. Order is saved as a list of ids in obj[f.key];
+// each screen's on/off is its own setting (item.toggle).
+function screensField(obj, f, onChange) {
+  const ids = f.items.map((it) => it.slide);
+  const order = (obj[f.key] || []).filter((s) => ids.includes(s));
+  ids.forEach((s) => { if (!order.includes(s)) order.push(s); });
+  const byId = Object.fromEntries(f.items.map((it) => [it.slide, it]));
+  const wrap = h("div", { class: "screens" });
+  const draw = () => {
+    wrap.replaceChildren(...order.map((sid, i) => {
+      const it = byId[sid];
+      const move = (d) => {
+        const j = i + d;
+        if (j < 0 || j >= order.length) return;
+        [order[i], order[j]] = [order[j], order[i]];
+        obj[f.key] = [...order]; markDirty(); draw();
+      };
+      const on = obj[it.toggle] ?? ["current", "daily", "hourly"].includes(sid);
+      return h("div", { class: "screen-row" + (on ? "" : " off") },
+        h("label", { class: "switch" }, h("input", { type: "checkbox", checked: !!on,
+          onchange: (e) => { obj[it.toggle] = e.target.checked; markDirty(); if (onChange) onChange(); else draw(); } }), h("span")),
+        h("span", { class: "screen-label" }, it.label),
+        h("div", { class: "order" },
+          h("button", { title: "Move up", disabled: i === 0, onclick: () => move(-1) }, "▲"),
+          h("button", { title: "Move down", disabled: i === order.length - 1, onclick: () => move(1) }, "▼")));
+    }));
+  };
+  draw();
+  return h("div", { class: "field" }, f.label && f.label !== f.section ? h("label", {}, f.label) : null, wrap,
+    f.help ? h("div", { class: "help" }, f.help) : null);
 }
 
 function entitiesField(obj, f) {

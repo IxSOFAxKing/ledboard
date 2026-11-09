@@ -160,6 +160,19 @@ def parse_ha(state, daily, hourly, sun_up=True):
     return out
 
 
+ALL_SCREENS = [("current", "show_current", "Current conditions"),
+               ("daily", "show_daily", "4-day forecast"),
+               ("hourly", "show_hourly", "Next 24 hours graph")] + \
+              [(slide, key, label) for slide, (key, label, _h, _r) in SCREENS.items()]
+
+
+def screen_order(cfg):
+    """Every slide id, in the user's order (new / unknown ids fall back to the default order)."""
+    known = [s for s, _k, _l in ALL_SCREENS]
+    order = [s for s in (cfg.get("screen_order") or []) if s in known]
+    return order + [s for s in known if s not in order]
+
+
 class WeatherBoard(Board):
     name = "weather"
     title = "Weather"
@@ -174,6 +187,7 @@ class WeatherBoard(Board):
         "show_sun": False, "show_rain_soon": False, "show_wind": False, "show_week": False, "show_scene": False,
         "show_air": False, "show_moon": False, "show_parts": False, "show_yesterday": False,
         "aqi_scale": "us", "yesterday_threshold": 8,
+        "screen_order": [],          # slide ids in the order to show them ([] = default order)
     }
     FIELDS = [
         {"key": "source", "label": "Weather data from", "type": "select", "section": "Source",
@@ -189,16 +203,14 @@ class WeatherBoard(Board):
          "help": "e.g. weather.forecast_home. Uses the URL and token from the Home Assistant board."},
         {"key": "units", "label": "Units", "type": "select", "section": "Display", "options": ["fahrenheit", "celsius"],
          "option_labels": {"fahrenheit": "°F, mph", "celsius": "°C, km/h"}, "show_if": {"source": "openmeteo"}},
-        {"key": "show_current", "label": "Show current conditions", "type": "bool", "section": "Display"},
-        {"key": "show_daily", "label": "Show 4-day forecast", "type": "bool", "section": "Display"},
-        {"key": "show_hourly", "label": "Show next-24-hours graph", "type": "bool", "section": "Display"},
-        *[{"key": key, "label": label, "type": "bool", "section": "More screens"}
-          for key, label, _h, _r in SCREENS.values()],
-        {"key": "aqi_scale", "label": "Air quality scale", "type": "select", "section": "More screens",
+        {"key": "screen_order", "label": "Screens", "type": "screens", "section": "Screens",
+         "items": [{"slide": slide, "toggle": key, "label": label} for slide, key, label in ALL_SCREENS],
+         "help": "Switch screens on or off, and use the arrows to set the order they're shown in."},
+        {"key": "aqi_scale", "label": "Air quality scale", "type": "select", "section": "Screens",
          "options": ["us", "european"], "option_labels": {"us": "US AQI (0-500)", "european": "European AQI (0-100+)"},
          "show_if": {"show_air": True}},
         {"key": "yesterday_threshold", "label": "Show 'compared to yesterday' when highs differ by at least (degrees)",
-         "type": "number", "section": "More screens", "show_if": {"show_yesterday": True}},
+         "type": "number", "section": "Screens", "show_if": {"show_yesterday": True}},
         {"key": "duration", "label": "Seconds per screen", "type": "number", "section": "Display"},
         {"key": "refresh", "label": "Refresh interval (s)", "type": "number", "section": "Display"},
     ]
@@ -305,20 +317,22 @@ class WeatherBoard(Board):
         w = self.weather
         if not w:
             return []
+        builtin = {
+            "current": ("show_current", lambda: w.get("temp") is not None),
+            "daily": ("show_daily", lambda: len(w.get("daily") or []) >= 2),
+            "hourly": ("show_hourly", lambda: len(w.get("hourly") or []) >= 6),
+        }
         out = []
-        if self.cfg.get("show_current", True) and w.get("temp") is not None:
-            out.append("current")
-        if self.cfg.get("show_daily", True) and len(w.get("daily") or []) >= 2:
-            out.append("daily")
-        if self.cfg.get("show_hourly", True) and len(w.get("hourly") or []) >= 6:
-            out.append("hourly")
-        for slide, (key, _label, has, _render) in SCREENS.items():
-            if self.cfg.get(key):
-                try:
-                    if has(w, self.cfg):
+        for slide in screen_order(self.cfg):
+            try:
+                if slide in builtin:
+                    key, has = builtin[slide]
+                    if self.cfg.get(key, True) and has():
                         out.append(slide)
-                except Exception as e:          # a missing field shouldn't take the board down
-                    log.debug("weather %s skipped: %s", slide, e)
+                elif self.cfg.get(SCREENS[slide][0]) and SCREENS[slide][2](w, self.cfg):
+                    out.append(slide)
+            except Exception as e:          # a missing field shouldn't take the board down
+                log.debug("weather %s skipped: %s", slide, e)
         return out
 
     def render(self, c, slide, t):
