@@ -41,7 +41,7 @@ class Alert:
     dismissed: bool = False
 
     def public(self):
-        return {"id": self.id, "title": self.title, "message": self.message, "icon": self.icon,
+        return {"id": self.id, "key": getattr(self, "key", None), "title": self.title, "message": self.message, "icon": self.icon,
                 "priority": [k for k, v in PRIORITIES.items() if v == self.priority][0],
                 "repeating": bool(self.repeat_every), "until_dismissed": self.until_dismissed,
                 "shown": self.shown_count, "source": self.source, "created": self.created}
@@ -66,7 +66,8 @@ class AlertManager:
         a = Alert(title=str(title or "")[:120], message=str(message or "")[:500], icon=icon or "bell",
                   color=hex_to_rgb(color, (255, 170, 0)), priority=pr, seconds=max(3.0, float(seconds or 10)),
                   repeat_every=repeat, until_dismissed=bool(until_dismissed),
-                  expires=time.time() + float(expires_in) if expires_in else (time.time() + 86400 if repeat else 0),
+                  expires=(time.time() + float(expires_in) if expires_in
+                           else (0 if until_dismissed else (time.time() + 86400 if repeat else 0))),
                   source=source)
         with self.lock:
             if replace_key:          # e.g. the same NWS warning updated: replace instead of duplicating
@@ -77,11 +78,16 @@ class AlertManager:
             self.alerts.append(a)
         return a
 
-    def dismiss(self, alert_id="all"):
+    def dismiss(self, alert_id="all", key=None):
+        """Dismiss one alert by id, every alert with `key`, or all of them."""
         with self.lock:
             n = 0
             for a in self.alerts:
-                if alert_id in ("all", None) or a.id == int(alert_id):
+                if key is not None:
+                    hit = getattr(a, "key", None) == key
+                else:
+                    hit = alert_id in ("all", None) or a.id == int(alert_id)
+                if hit and not a.dismissed:
                     a.dismissed = True
                     n += 1
             if self.current and self.current.dismissed:

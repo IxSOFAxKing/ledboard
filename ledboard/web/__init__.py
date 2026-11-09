@@ -200,7 +200,8 @@ def create_app(engine):
                               icon=j.get("icon", "bell"), color=j.get("color", "#ffaa00"),
                               priority=j.get("priority", "normal"), seconds=j.get("seconds", 10),
                               repeat_minutes=j.get("repeat_minutes", 0), until_dismissed=j.get("until_dismissed"),
-                              source=j.get("source", "api"))
+                              expires_in=j.get("expires_in"), source=j.get("source", "api"),
+                              replace_key=j.get("key") or None)
         return jsonify({"ok": True, "id": a.id})
 
     @app.get("/api/alerts")
@@ -211,6 +212,8 @@ def create_app(engine):
     @app.post("/api/alert/dismiss")
     def alert_dismiss():
         j = request.get_json(silent=True) or {}
+        if j.get("key"):
+            return jsonify({"ok": True, "dismissed": engine.alerts.dismiss(key=str(j["key"]))})
         return jsonify({"ok": True, "dismissed": engine.alerts.dismiss(j.get("id", "all"))})
 
     @app.post("/api/restart")

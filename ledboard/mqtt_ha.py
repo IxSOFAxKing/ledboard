@@ -167,12 +167,14 @@ class MQTTBridge:
                 j = _json(payload)
                 if j is None:
                     j = {"title": payload}
-                if j.get("title") or j.get("message"):
+                if j.get("dismiss"):                       # {"dismiss": "<key>"} clears that alert
+                    e.alerts.dismiss(key=str(j["dismiss"]))
+                elif j.get("title") or j.get("message"):
                     e.alerts.add(j.get("title") or j.get("message"), j.get("message", "") if j.get("title") else "",
                                  icon=j.get("icon", "bell"), color=j.get("color", "#ffaa00"),
                                  priority=j.get("priority", "normal"), seconds=j.get("seconds", 10),
                                  repeat_minutes=j.get("repeat_minutes", 0), until_dismissed=j.get("until_dismissed"),
-                                 source="mqtt")
+                                 expires_in=j.get("expires_in"), source="mqtt", replace_key=j.get("key") or None)
         except Exception as ex:
             log.warning("MQTT command on %s failed: %s", topic, ex)
         self._published.pop(topic.replace("/set", "/state"), None)   # force a fresh state publish

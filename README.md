@@ -375,6 +375,16 @@ curl -X POST http://<pi-ip>:8080/api/alert -H 'Content-Type: application/json' \
   -d '{"title": "Garage open", "message": "Open for 30 minutes", "icon": "garage", "priority": "critical", "color": "#ff8c00"}'
 ```
 
+**Alert keys (auto-clearing alerts):** give an alert a `"key"`. Sending again with the same key replaces it instead of stacking a duplicate, and `/api/alert/dismiss` with `{"key": "..."}` clears it. Use this for "something is down" alerts that should go away on their own when it recovers. Critical alerts with a key repeat until dismissed and never expire on their own.
+
+```bash
+curl -X POST http://<pi-ip>:8080/api/alert -H 'Content-Type: application/json' \
+  -d '{"key": "plex_down", "title": "PLEX DOWN", "message": "Plex server is not responding", "icon": "warning", "priority": "critical", "color": "#ff2020"}'
+curl -X POST http://<pi-ip>:8080/api/alert/dismiss -H 'Content-Type: application/json' -d '{"key": "plex_down"}'
+```
+
+Over MQTT, add `"key"` to the alert JSON; send `{"dismiss": "plex_down"}` to `<base>/alert/set` to clear it.
+
 ## Home Assistant control (MQTT)
 1. In Home Assistant you need an MQTT broker, for example the **Mosquitto broker** add-on, and the MQTT integration.
 2. In LEDBoard, go to **Settings → Home Assistant (MQTT)**. Turn it on and enter the broker host (your Home Assistant's IP), port 1883, and an MQTT username and password.
@@ -427,9 +437,9 @@ It refuses to run if files in `/opt/ledboard` were edited by hand, so it never o
 | POST | `/api/control` | `{"action": "next"}`, `"pause"`, `"resume"`, `"refresh"`, `{"action": "power", "on": false}`, `{"action": "brightness", "value": 40}`, `{"action": "jump", "board": "nfl"}` |
 | GET/POST | `/api/config` | GET returns the config with secrets masked. POST takes a partial config and merges it in. |
 | POST | `/api/restart` | Restarts the process |
-| POST | `/api/alert` | `{"title", "message", "icon", "color", "priority", "seconds", "repeat_minutes", "until_dismissed"}` |
+| POST | `/api/alert` | `{"title", "message", "icon", "color", "priority", "seconds", "repeat_minutes", "until_dismissed", "key", "expires_in"}` |
 | GET | `/api/alerts` | Returns the active alerts and the available icons |
-| POST | `/api/alert/dismiss` | `{"id": 3}` or `{"id": "all"}` |
+| POST | `/api/alert/dismiss` | `{"id": 3}`, `{"key": "plex_down"}` or `{"id": "all"}` |
 | GET/POST | `/api/update`, `/api/update/check`, `/api/update/apply` | Software update status, check, apply |
 | GET/POST | `/api/config/export`, `/api/config/import` | Backup download and restore |
 
