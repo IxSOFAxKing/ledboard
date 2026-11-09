@@ -352,6 +352,15 @@ UPCOMING_STYLES = {
     "trim": "Team trim lines (team-color lines above and below)",
 }
 
+LIVE_STYLES = {
+    "plain": "Plain (no accents)",
+    "leader": "Leader color (leading team's score in its color, with underlines)",
+    "splitbar": "Team split bar (bar under the score split by points)",
+    "tint": "Tinted halves (each side washed in its team color, leader brighter)",
+    "banner": "Info banner (clock / info line on a two-team color banner)",
+    "trim": "Team trim lines (team-color lines above and below)",
+}
+
 
 class LeagueBoard(Board):
     """One league. Concrete classes are generated per league at the bottom of this file."""
@@ -369,7 +378,8 @@ class LeagueBoard(Board):
         "next_game": "no_games", "show_standings": False,
         "show_abbreviations": True, "show_final_records": True, "logo_enhance": True, "logo_edges": "auto",
         "text_score": "#ffffff", "text_status": "#ffc800", "text_info": "#787878", "text_loser": "#787878",
-        "abbr_color_mode": "team", "abbr_color": "#ffffff", "final_style": "plain", "upcoming_style": "plain",
+        "abbr_color_mode": "team", "abbr_color": "#ffffff", "final_style": "plain", "upcoming_style": "plain", "live_style": "plain",
+        "network_logos": True,
     }
 
     @classmethod
@@ -395,6 +405,10 @@ class LeagueBoard(Board):
             {"key": "max_games", "label": "Max games per rotation", "type": "number", "section": "Which games"},
             {"key": "show_records", "label": "Show team records before the game", "type": "bool", "section": "Upcoming games"},
             {"key": "show_network", "label": "Show TV network", "type": "bool", "section": "Upcoming games"},
+            {"key": "network_logos", "label": "Show the TV network's logo instead of its name", "type": "bool",
+             "section": "Upcoming games", "show_if": {"show_network": True},
+             "help": "Built-in logos for ESPN, ABC, CBS, NBC, FOX, FS1, NFL Network, Prime Video, Peacock, Apple TV, "
+                     "Netflix, TNT, TBS, MLB/NHL/NBA networks and more; other networks still show as text."},
             {"key": "show_odds", "label": "Show betting line / over-under", "type": "bool", "section": "Upcoming games"},
             {"key": "upcoming_style", "label": "Upcoming style", "type": "select", "section": "Upcoming games",
              "options": list(UPCOMING_STYLES), "option_labels": UPCOMING_STYLES,
@@ -424,6 +438,10 @@ class LeagueBoard(Board):
              "help": live_help, "show_if": {"live_layout": "classic"} if layouts else None},
             {"key": "show_last_play", "label": "Scroll the last play", "type": "bool", "section": "Live games"},
             {"key": "score_flash", "label": "Flash the score when it changes", "type": "bool", "section": "Live games"},
+            {"key": "live_style", "label": "Live style", "type": "select", "section": "Live games",
+             "options": list(LIVE_STYLES), "option_labels": LIVE_STYLES,
+             "show_if": {"live_layout": "classic"} if live_layouts(sport) else None,
+             "help": "Team color accents on live games in the Classic layout. Use Preview > Live game to try them."},
         ]
         if sport in CELEBRATED:
             what = {"football": "touchdown", "hockey": "goal", "soccer": "goal", "baseball": "home run"}[sport]
@@ -784,7 +802,12 @@ class LeagueBoard(Board):
         pre = self.cfg.get("upcoming_style", "plain") if g["state"] == "pre" else "plain"
         if pre not in UPCOMING_STYLES:
             pre = "plain"
-        if final == "tint" or pre == "tint":
+        live = self.cfg.get("live_style", "plain") if g["state"] == "in" else "plain"
+        if live not in LIVE_STYLES:
+            live = "plain"
+        if live != "plain":
+            winner = self._final_winner(g, live=True)             # the team that's ahead (None when tied)
+        if final == "tint" or pre == "tint" or live == "tint":
             self._final_tint(c, g, mid, winner)
         self._team_columns(c, g, col, detailed)
         if g["state"] == "pre":
@@ -807,6 +830,8 @@ class LeagueBoard(Board):
             if final == "winner" and winner:
                 lose = scale(self._tc("text_loser"), 0.8)
                 score_cols = tuple(team_color(g[s]) if s == winner else lose for s in ("away", "home"))
+            elif live == "leader" and winner:
+                score_cols = tuple(team_color(g[s]) if s == winner else self._tc("text_score") for s in ("away", "home"))
             self._scores_draw(c, g, mid, y=2, colors=score_cols)
             if g["state"] == "in" and detailed:
                 self._live_graphics(c, g, x0, x1, mid)
@@ -820,10 +845,26 @@ class LeagueBoard(Board):
             items = self._info_items(g)
             if final != "plain":
                 items = self._final_accents(c, g, final, winner, x0, x1, mid, items)
+            elif live == "banner":
+                items = self._upcoming_accents(c, g, "banner", x0, x1, mid, items)
+            elif live != "plain":
+                items = self._final_accents(c, g, {"leader": "winner"}.get(live, live), winner, x0, x1, mid, items,
+                                            live=True)
         if not items:
             return
         text, color, local_t = _cycle(c, items, t, x1 - x0)
+        logo = self._network_logo(g, text)
+        if logo is not None:
+            c.paste(logo, x0 + (x1 - x0 - logo.width) // 2, H - 7)
+            return
         c.scroll_text(x0, x1, H - 7, text, "5x7", color, local_t, speed=INFO_SPEED, align="center", pause=0.6, gap=200)
+
+    def _network_logo(self, g, text):
+        """The network's pixel logo when `text` is the network line and logos are turned on."""
+        if not (self.cfg.get("network_logos", True) and g.get("network") and text == g["network"].upper()):
+            return None
+        from .networks import network_logo
+        return network_logo(g["network"])
 
     MAX_COLUMN = 44
 
@@ -903,11 +944,14 @@ class LeagueBoard(Board):
         return team_color(team)
 
     # ---------------------------------------------------------------- final-score accents
-    def _final_winner(self, g):
-        """'away' / 'home' / None. None while the favorite's score is hidden (don't give it away)."""
+    def _final_winner(self, g, live=False):
+        """'away' / 'home' / None. None while the favorite's score is hidden (don't give it away).
+        With `live`, the team that's currently ahead."""
         if self.cfg.get("hide_favorite_score") and self.is_favorite(g):
             return None
         a, h = g["away"], g["home"]
+        if live:
+            return "away" if _num(a["score"]) > _num(h["score"]) else ("home" if _num(h["score"]) > _num(a["score"]) else None)
         if a["winner"] or _num(a["score"]) > _num(h["score"]):
             return "away"
         if h["winner"] or _num(h["score"]) > _num(a["score"]):
@@ -921,7 +965,7 @@ class LeagueBoard(Board):
             k = 0.8 if side == winner else (0.4 if winner else 0.6)
             c.rect(xa, 0, xb, H - 1, scale(panel_color(g[side]), k))
 
-    def _final_accents(self, c, g, style, winner, x0, x1, mid, items):
+    def _final_accents(self, c, g, style, winner, x0, x1, mid, items, live=False):
         """Draw the chosen final style's extras; returns the (possibly changed) info line items."""
         from .football_layouts import panel_color
         H = c.height
@@ -935,6 +979,8 @@ class LeagueBoard(Board):
         win_col = team_color(g[winner]) if winner else None
 
         def recolor(col):
+            if live:                       # live games keep their clock / info colors
+                return items
             return [(txt, col) for txt, _ in items]
 
         if style == "winner":

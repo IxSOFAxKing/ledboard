@@ -176,6 +176,10 @@ def render_next_game(board, c, g, fav, t, team_color):
     vs = ("@ " if side == "away" else "VS ") + opp["abbr"]
     info = [x for x in (when, vs, (g.get("network") or "").upper()) if x]
     text = info[int(t // 3) % len(info)] if info else ""
+    logo = board._network_logo(g, text) if hasattr(board, "_network_logo") else None
+    if logo is not None:
+        c.paste(logo, x0 + (x1 - x0 - logo.width) // 2, H - 8)
+        return
     c.text_centered(H - 8, text, "5x8", team_color(me) if text == vs else GRAY, x0, x1)
 
 

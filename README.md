@@ -225,6 +225,14 @@ How it works:
   - **Team trim lines**: team-color lines along the top and bottom, and records in team colors.
 
   Use **Preview → Upcoming** to try each one.
+- **Live style** (per league, under **Live games**, Classic layout): team color accents on live games. The graphical live layouts (Scorebug, Drive, Diamond...) are unchanged.
+  - **Plain**: no accents (the original look).
+  - **Leader color**: the leading team's score in its color, with team-color underlines.
+  - **Team split bar**: a bar under the score split by points.
+  - **Tinted halves**: each side washed in its team color, the leader brighter.
+  - **Info banner**: the clock / info line on a two-team color banner.
+  - **Team trim lines**: team-color lines along the top and bottom.
+- **TV network logos** (under **Upcoming games**, on by default): shows the network's logo instead of its name, on upcoming games and the next-game countdown. Built-in pixel logos cover ESPN (ESPN2, ESPNU, ESPN+), ABC, CBS, NBC, FOX, FS1, NFL Network, NFL+, Prime Video, Peacock, Apple TV, Netflix, TNT, TBS, truTV, USA, Max, MLB/NHL/NBA networks, SEC/ACC/Big Ten networks and Paramount+. Any other network still shows as text.
 - **Text colors** (per league): pick the colors for scores and start times, the live clock, records / TV network / FINAL, and the losing team's score on finals. Team abbreviations can use team colors (default) or one color for all. These apply to the standard game view; the special live layouts keep their own colors.
 
 > **Note:** The live details read optional fields from ESPN's unofficial API. If ESPN doesn't send a field for a game, that detail is simply left out.
