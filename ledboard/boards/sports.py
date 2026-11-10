@@ -609,26 +609,74 @@ class LeagueBoard(Board):
         return g["home"]["abbr"].upper() in fav or g["away"]["abbr"].upper() in fav
 
     # -- data ---------------------------------------------------------------
-    def update(self):
-        sport, path, _, extra = LEAGUES[self.league]
-        params = {"limit": 200}
-        if self.favorites():
-            params.update(extra)  # e.g. all FBS games so unranked favorites show up
-        if sport != "football":
-            # Without dates ESPN only returns *today's* games (by US Eastern date), so tomorrow's games
-            # never showed up as upcoming cards and last night's finals vanished early. Ask for
-            # yesterday .. as far ahead as the "upcoming games" window reaches.
-            try:
-                ahead = float(self.cfg.get("upcoming_hours", 48) or 48)
-            except (TypeError, ValueError):
-                ahead = 48
-            today = datetime.now().astimezone().date()
-            days = max(1, min(7, math.ceil(ahead / 24))) if self.cfg.get("show_pregame", True) else 0
-            params["dates"] = f"{today - timedelta(days=1):%Y%m%d}-{today + timedelta(days=days):%Y%m%d}"
-            params["limit"] = 500
+    def _scoreboard(self, params):
+        sport, path, _, _ = LEAGUES[self.league]
         r = self.session.get(ESPN.format(sport=sport, league=path), params=params, timeout=15)
         r.raise_for_status()
-        games = [g for g in (parse_event(ev, self.league) for ev in r.json().get("events", [])) if g]
+        return r.json().get("events", []) or []
+
+    def _fetch_events(self):
+        """Scoreboard events: yesterday through the upcoming-games window.
+
+        Without dates ESPN only returns *today's* games (by US Eastern date), so tomorrow's games
+        never showed as upcoming cards. Not every league accepts a date range, so this tries, in
+        order: one request for the whole range, then one request per day (future days cached for
+        10 minutes), then plain today-only; it remembers what worked.
+        """
+        sport, _path, _, extra = LEAGUES[self.league]
+        base = {"limit": 200}
+        if self.favorites():
+            base.update(extra)  # e.g. all FBS games so unranked favorites show up
+        if sport == "football":                     # ESPN's football scoreboard already covers the week
+            return self._scoreboard(base)
+        try:
+            ahead = float(self.cfg.get("upcoming_hours", 48) or 48)
+        except (TypeError, ValueError):
+            ahead = 48
+        today = datetime.now().astimezone().date()
+        days_ahead = max(1, min(7, math.ceil(ahead / 24))) if self.cfg.get("show_pregame", True) else 0
+        days = [today + timedelta(days=d) for d in range(-1, days_ahead + 1)]
+        mode = getattr(self, "_sb_mode", "range")
+
+        def rejected(e):
+            return isinstance(e, requests.HTTPError) and e.response is not None and 400 <= e.response.status_code < 500
+
+        if mode == "range":
+            try:
+                return self._scoreboard(dict(base, dates=f"{days[0]:%Y%m%d}-{days[-1]:%Y%m%d}"))
+            except requests.HTTPError as e:
+                if not rejected(e):
+                    raise
+                log.info("[%s] ESPN rejected a date range (%s); asking one day at a time", self.name, e)
+                self._sb_mode = mode = "daily"
+        if mode == "daily":
+            cache = getattr(self, "_day_cache", {})
+            events, seen = [], set()
+            try:
+                for d in days:
+                    key = f"{d:%Y%m%d}"
+                    hit = cache.get(key)
+                    if d > today and hit and time.time() - hit[0] < 600:
+                        evs = hit[1]
+                    else:
+                        evs = self._scoreboard(dict(base, dates=key))
+                        cache[key] = (time.time(), evs)
+                    for ev in evs:
+                        if ev.get("id") not in seen:
+                            seen.add(ev.get("id"))
+                            events.append(ev)
+                self._day_cache = {k: v for k, v in cache.items() if k >= f"{days[0]:%Y%m%d}"}
+                return events
+            except requests.HTTPError as e:
+                if not rejected(e):
+                    raise
+                log.info("[%s] ESPN rejected dates (%s); showing today's games only", self.name, e)
+                self._sb_mode = "plain"
+        return self._scoreboard(base)
+
+    def update(self):
+        events = self._fetch_events()
+        games = [g for g in (parse_event(ev, self.league) for ev in events) if g]
         now = time.monotonic()
         for g in games:
             for side in ("home", "away"):
