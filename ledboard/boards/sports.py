@@ -1517,7 +1517,7 @@ class LeagueBoard(Board):
             winner = self._final_winner(g, live=True)             # the team that's ahead (None when tied)
         if final == "tint" or pre == "tint" or live == "tint":
             self._final_tint(c, g, mid, winner)
-        self._team_columns(c, g, col, detailed)
+        self._team_columns(c, g, col, detailed, inset=2 if pre == "splitborder" else 0)
         if g["state"] == "pre":
             if self.cfg.get("show_records", True):
                 rc = (self._tc("text_info"),) * 2
@@ -1604,20 +1604,22 @@ class LeagueBoard(Board):
         col = (W - need) // 2
         return max(H, min(self.MAX_COLUMN, col))
 
-    def _team_columns(self, c, g, col, detailed):
+    def _team_columns(self, c, g, col, detailed, inset=0):
         """Logo for each side, with the team abbreviation centered underneath (or a full-size
-        logo when abbreviations are turned off)."""
+        logo when abbreviations are turned off). `inset` keeps logos that many pixels away from the
+        panel's outer edges (for designs with a border)."""
         from .football_layouts import logo_fit
         H, W = c.height, c.width
         show_rank = self.league in COLLEGE and self.cfg.get("show_rankings", True)
         names = self.cfg.get("show_abbreviations", True)
         for side, cx0 in (("away", 0), ("home", W - col)):
             team = g[side]
-            lx = cx0 if side == "away" else cx0 + 1          # 1px gap on the inner side
+            lx = cx0 + inset if side == "away" else cx0 + 1  # 1px gap on the inner side
+            lw = col - 1 - inset
             rank = str(team["rank"]) if show_rank and team["rank"] else ""
             if not names:
                 # logo takes the whole column; a college rank sits in the outer bottom corner
-                c.paste(logo_fit(self, team, col - 1, H, g["home" if side == "away" else "away"]), lx, 0)
+                c.paste(logo_fit(self, team, lw, H - 2 * inset, g["home" if side == "away" else "away"]), lx, inset)
                 if rank:
                     rw = c.text_width(rank, "4x6")
                     rx = cx0 if side == "away" else cx0 + col - rw - 1
@@ -1625,7 +1627,7 @@ class LeagueBoard(Board):
                     c.text(rx + (1 if side == "away" else 0), H - 6, rank, "4x6", WHITE)
             else:
                 # logo fills the column and everything above the name
-                c.paste(logo_fit(self, team, col - 1, H - 7, g["home" if side == "away" else "away"]), lx, 0)
+                c.paste(logo_fit(self, team, lw, H - 7 - inset, g["home" if side == "away" else "away"]), lx, inset)
                 aw = c.text_width(team["abbr"], "5x8")
                 rw = c.text_width(rank, "4x6") + 1 if rank else 0
                 x = cx0 + (col - aw - rw) // 2
@@ -1756,13 +1758,14 @@ class LeagueBoard(Board):
             if style == "splitborder":
                 from .countdown_layouts import secondary_color
                 W = c.width
+                from PIL import Image, ImageDraw
                 ca, ch = secondary_color(away), secondary_color(home)      # each team's accent (Packers gold)
-                c.rect(0, 0, mid - 1, 0, ca)                                 # top
-                c.rect(mid, 0, W - 1, 0, ch)
-                c.rect(0, H - 1, mid - 1, H - 1, ca)                         # bottom
-                c.rect(mid, H - 1, W - 1, H - 1, ch)
-                c.rect(0, 0, 0, H - 1, ca)                                   # sides
-                c.rect(W - 1, 0, W - 1, H - 1, ch)
+                # rounded border (same radius as the ticket countdown): away half, then home half
+                for col_, x0_, x1_ in ((ca, 0, mid), (ch, mid, W)):
+                    layer = Image.new("RGBA", (W, H))
+                    ImageDraw.Draw(layer).rounded_rectangle((0, 0, W - 1, H - 1), radius=3, outline=col_ + (255,))
+                    part = layer.crop((x0_, 0, x1_, H))
+                    c.image.paste(part, (x0_, 0), part)
         elif style == "tint":
             items = recolor(WHITE)
         elif style == "banner":
