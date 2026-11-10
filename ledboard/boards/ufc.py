@@ -39,10 +39,15 @@ FIGHT_LAYOUTS = {
     "tape": "Tale of the tape (names, records and flags side by side)",
 }
 COUNTDOWN_LAYOUTS = {
+    "event": "Event (UFC logo and event number, date and start time, who's fighting)",
+    "fightweek": "Fight week (DAYS / HRS / MIN / SEC tiles)",
+    "versus": "Versus (big names on red and blue corners)",
     "poster": "Fight poster (main event fighters at the edges, countdown in the middle)",
     "octagon": "Octagon (days to go inside an eight-sided cage)",
     "minimal": "Minimal (event name and a big countdown)",
 }
+LOGO_URLS = ["https://a.espncdn.com/i/teamlogos/leagues/500-dark/ufc.png",
+             "https://a.espncdn.com/i/teamlogos/leagues/500/ufc.png"]
 PICTURES = {"headshots": "Headshots (flag if there's no photo)", "flags": "Country flags", "none": "No pictures"}
 WIN_SECONDS = 8.0
 
@@ -274,7 +279,30 @@ def parse_event(ev):
         "end": parse_time(ev.get("endDate")),
         "state": state, "fights": fights,
         "venue": venue.get("fullName") or "", "city": city, "networks": nets,
+        "logo": next((lo.get("href") for lo in map(_d, _l(ev.get("logos"))) if isinstance(lo.get("href"), str)), ""),
     }
+
+
+def league_logos(j):
+    """UFC logo URLs from the scoreboard, versions made for dark backgrounds first."""
+    out = []
+    for lg in _l(_d(j).get("leagues")):
+        for lo in _l(_d(lg).get("logos")):
+            lo = _d(lo)
+            if isinstance(lo.get("href"), str):
+                out.append((0 if "dark" in " ".join(map(str, _l(lo.get("rel")))) else 1, lo["href"]))
+    return [u for _k, u in sorted(out)]
+
+
+def event_number(short):
+    """('310', None) for 'UFC 310'; (None, ['FIGHT', 'NIGHT']) for a Fight Night."""
+    m = re.search(r"\b(\d{2,4})\b", short or "")
+    if m:
+        return m.group(1), None
+    rest = re.sub(r"^\s*UFC\s*", "", short or "", flags=re.I).upper().split()
+    if not rest or rest[:2] in (["FIGHT", "NIGHT"], ["FN"]):
+        return None, ["FIGHT", "NIGHT"]
+    return None, rest[:2]
 
 
 def parse_calendar(j):
@@ -405,7 +433,7 @@ class UFCBoard(Board):
     DEFAULTS = {"enabled": False, "duration": 8, "refresh": 900, "live_refresh": 30,
                 "favorites": [], "favorites_only": False, "bouts": "main_card",
                 "layout": "card", "pictures": "headshots", "show_network": True,
-                "show_countdown": True, "countdown_days": 7, "countdown_layout": "poster", "countdown_to": "main",
+                "show_countdown": True, "countdown_days": 7, "countdown_layout": "poster", "event_logo_url": "", "countdown_to": "main",
                 "card_days": 2, "final_hours": 24,
                 "show_schedule": True, "schedule_count": 6, "schedule_when": "always",
                 "takeover": False, "celebrate": True}
@@ -434,6 +462,11 @@ class UFCBoard(Board):
          "show_if": {"show_countdown": True}},
         {"key": "countdown_layout", "label": "Countdown design", "type": "select", "options": list(COUNTDOWN_LAYOUTS),
          "option_labels": COUNTDOWN_LAYOUTS, "show_if": {"show_countdown": True}},
+        {"key": "event_logo_url", "label": "Event logo image (optional URL)", "type": "text",
+         "placeholder": "UFC logo from ESPN",
+         "help": "Leave blank for the UFC logo. Paste a link to an image (e.g. a PNG of the event's own logo) to use "
+                 "that instead on the countdown designs that show a logo.",
+         "show_if": {"show_countdown": True}},
         {"key": "card_days", "label": "Show the upcoming bouts this many days before", "type": "number",
          "help": "0 = only on fight day."},
         {"key": "final_hours", "label": "Show results for (hours after the event)", "type": "number"},
@@ -453,7 +486,8 @@ class UFCBoard(Board):
         ("Fighters", ["favorites", "favorites_only", "bouts"]),
         ("Preview", ["preview"]),
         ("Fight screens", ["layout", "pictures", "show_network"]),
-        ("Before the event", ["show_countdown", "countdown_days", "countdown_to", "countdown_layout", "card_days"]),
+        ("Before the event", ["show_countdown", "countdown_days", "countdown_to", "countdown_layout", "event_logo_url",
+                              "card_days"]),
         ("After the event", ["final_hours"]),
         ("Schedule", ["show_schedule", "schedule_count", "schedule_when"]),
         ("Live", ["takeover", "celebrate", "live_refresh"]),
@@ -465,6 +499,7 @@ class UFCBoard(Board):
         self.events = {}            # id -> parsed event
         self.calendar = []          # [{label, start, end}]
         self.pics = {}              # url -> trimmed source image (None = failed)
+        self.logo_urls = []
         self._cut = {}              # (url, w, h, flip, mode) -> ready image
         self._ended = {}            # event id -> when we first saw it finished
         self._seen_wins = None      # fight ids with a winner (None until the first load)
@@ -489,6 +524,7 @@ class UFCBoard(Board):
             except Exception as ex:
                 log.info("skipping UFC event: %s", ex)
         cal = parse_calendar(j) or self.calendar
+        self.logo_urls = league_logos(j) or self.logo_urls
         now = datetime.now(timezone.utc)
         # make sure the next event (or two) on the calendar has its fight card loaded
         loaded_days = {e["start"].date() for e in events.values() if e["start"]}
@@ -523,6 +559,56 @@ class UFCBoard(Board):
             for f in e["fights"]:
                 for fi in f["fighters"]:
                     self._load_pics(fi)
+        self._load_logos(list(self.events.values()))
+
+    def _logo_cands(self, e=None):
+        custom = (self.cfg.get("event_logo_url") or "").strip()
+        return [u for u in [custom, (e or {}).get("logo")] + self.logo_urls + LOGO_URLS if u]
+
+    def _load_logos(self, events):
+        retry = self.__dict__.setdefault("_pic_retry", {})
+        for e in events or [None]:
+            for u in self._logo_cands(e):
+                if self.pics.get(u) is not None:
+                    break
+                if u in self.pics and time.time() < retry.get(u, 0):
+                    continue
+                img = fetch_image(u, 200, 200, trim=True)
+                self.pics[u] = trim_alpha(img) if img is not None else None
+                if img is not None:
+                    break
+                retry[u] = time.time() + 3600
+
+    def _logo(self, e, w, h):
+        """The event's (or UFC's) logo fitted to w x h; dark logos are lit up so they show on the panel."""
+        for u in self._logo_cands(e):
+            src = self.pics.get(u)
+            if src is None:
+                continue
+            key = (u, w, h, False, "logo")
+            if key not in self._cut:
+                img = fit_image(src, w, h).copy()
+                px = [p for p in img.getdata() if p[3] > 128]
+                if px and sum(max(p[:3]) for p in px) / len(px) < 70:      # black wordmark: make it white
+                    a = img.getchannel("A")
+                    img = Image.new("RGBA", img.size, (235, 235, 235, 255))
+                    img.putalpha(a)
+                self._cut[key] = img
+            return self._cut[key]
+        return None
+
+    def _draw_logo(self, c, e, x, y, w, h):
+        """Logo inside the box; a pixel 'UFC' when no logo could be downloaded."""
+        img = self._logo(e, w, h)
+        if img is not None:
+            c.paste(img, x + (w - img.width) // 2, y + (h - img.height) // 2)
+            return
+        font = "10x20" if w >= 32 and h >= 18 else ("7x13B" if h >= 12 else "5x7")
+        tw = c.text_width("UFC", font)
+        fh = {"10x20": 20, "7x13B": 13}.get(font, 7)
+        tx, ty = x + (w - tw) // 2, y + (h - fh) // 2
+        c.text(tx + 1, ty + 1, "UFC", font, scale(RED, 0.35))
+        c.text(tx, ty, "UFC", font, RED)
 
     def _check_wins(self, events):
         wins = {}
@@ -776,6 +862,7 @@ class UFCBoard(Board):
         for f in ev["fights"]:
             for fi in f["fighters"]:
                 self._load_pics(fi)
+        self._load_logos([ev])
         if kind == "schedule" and not self._schedule():
             now = datetime.now(timezone.utc)
             self.calendar = [{"label": lbl, "start": now + timedelta(days=d), "end": None} for d, lbl in (
@@ -854,7 +941,8 @@ class UFCBoard(Board):
             return
         if kind == "countdown":
             lay = self.cfg.get("countdown_layout", "poster")
-            {"octagon": self._cd_octagon, "minimal": self._cd_minimal}.get(lay, self._cd_poster)(c, e, t)
+            {"octagon": self._cd_octagon, "minimal": self._cd_minimal, "event": self._cd_event,
+             "fightweek": self._cd_fightweek, "versus": self._cd_versus}.get(lay, self._cd_poster)(c, e, t)
             return
         if f is None:
             return
@@ -1146,6 +1234,130 @@ class UFCBoard(Board):
         font = "7x13B" if c.text_width(txt, "7x13B") <= W - 2 else "6x10"
         c.text_centered(9, txt, font, WHITE)
         c.scroll_text(1, W - 1, H - 7, head, "5x7", scale(WHITE, 0.7), t, align="center")
+
+    def _matchup_parts(self, e):
+        """[(text, color)]: red corner name, VS, blue corner name, for the main event."""
+        if not e["fights"]:
+            return [(self._cd_parts(e)[3], WHITE)]
+        red, blue = e["fights"][0]["fighters"]
+        return [(red["last"].upper(), (255, 120, 120)), (" VS ", GOLD), (blue["last"].upper(), (130, 165, 255))]
+
+    @staticmethod
+    def _scroll_parts(c, x0, x1, y, parts, font, t, speed=18.0, pause=1.5, gap=24):
+        """Like scroll_text, for text in several colors."""
+        w = sum(c.text_width(p, font) for p, _ in parts)
+        if w <= x1 - x0:
+            x = x0
+            for text, col in parts:
+                x += c.text(x, y, text, font, col)
+            return
+        cycle = w + gap
+        offset = int(max(0.0, t - pause) * speed) % cycle
+        for start in (x0 - offset, x0 - offset + cycle):
+            if start >= x1:
+                break
+            x = start
+            for text, col in parts:
+                c.text(x, y, text, font, col, clip=(x0, x1))
+                x += c.text_width(text, font)
+
+    def _cd_event(self, c, e, t):
+        W, H = c.width, c.height
+        target, secs, short, head = self._cd_parts(e)
+        # left: logo + event number
+        num, words = event_number(short)
+        self._draw_logo(c, e, 1, 0, 36, 19 if (num or words) else 32)
+        if num:
+            c.text_centered(21, num, "6x10" if len(num) <= 4 else "5x7", GOLD, 0, 38)
+        elif words:
+            for i, wd in enumerate(words[:2]):
+                c.text_centered(20 + i * 6, wd, "4x6", GOLD, 0, 38)
+        c.line(39, 1, 39, H - 2, scale(RED, 0.8))
+        x0 = 42
+        # who's fighting
+        self._scroll_parts(c, x0, W, 0, self._matchup_parts(e), "5x7", t)
+        if e["fights"]:
+            f = e["fights"][0]
+            tag = ((f["weight"] + " ") if f["weight"] else "").upper() + ("TITLE FIGHT" if f["title"] else "")
+            c.scroll_text(x0, W, 8, tag.strip() or "MAIN EVENT", "4x6", scale(GOLD, 0.85), t, speed=24)
+        # date and start time
+        if target is not None:
+            local = target.astimezone()
+            hm = local.strftime("%I:%M%p").lstrip("0").replace(":00", "")
+            room = W - x0 - c.text_width(hm, "5x7") - 4
+            day = next((d for d in (local.strftime("%a %b %-d").upper(), local.strftime("%a %-m/%-d").upper(),
+                                    local.strftime("%-m/%-d")) if c.text_width(d, "5x7") <= room),
+                       local.strftime("%-m/%-d"))
+            c.text(x0, 15, day, "5x7", WHITE)
+            c.text_right(W - 1, 15, hm, "5x7", GOLD)
+        # countdown (and network / city)
+        items = [("IN " + countdown_text(secs) if secs > 0 else "TONIGHT", scale(WHITE, 0.75))]
+        if self.cfg.get("show_network", True) and e["networks"]:
+            items.append((e["networks"][0].upper(), (150, 200, 255)))
+        if e["city"]:
+            items.append((e["city"].upper(), GRAY))
+        text, col, tt = self._cycle(c, items, t, W - x0)
+        c.scroll_text(x0, W, H - 6, text, "4x6", col, tt, pause=0.5)
+
+    def _cd_fightweek(self, c, e, t):
+        W, H = c.width, c.height
+        target, secs, short, head = self._cd_parts(e)
+        self._draw_logo(c, e, 0, 0, 20, 8)
+        when = when_text(target)
+        items = [(short + " · " + when, GOLD), ("".join(p for p, _ in self._matchup_parts(e)), WHITE)]
+        text, col, tt = self._cycle(c, items, t, W - 23)
+        c.scroll_text(23, W, 1, text, "4x6", col, tt, pause=0.5)
+        secs = max(0, int(secs))
+        d, rem = divmod(secs, 86400)
+        hh, rem = divmod(rem, 3600)
+        mm, ss = divmod(rem, 60)
+        tiles = [(f"{min(d, 99):02d}", "DAYS"), (f"{hh:02d}", "HRS"), (f"{mm:02d}", "MIN"), (f"{ss:02d}", "SEC")]
+        tw = (W - 2) // 4
+        for i, (val, lab) in enumerate(tiles):
+            x = 1 + i * tw
+            c.draw.rounded_rectangle((x + 1, 9, x + tw - 2, H - 1), radius=2, fill=scale(RED, 0.3),
+                                     outline=scale(RED, 0.75))
+            c.line(x + 2, 15, x + tw - 3, 15, scale(RED, 0.18))          # flip-card seam
+            col = WHITE if not (i == 3 and int(t * 2) % 2) else scale(WHITE, 0.85)
+            c.text_centered(10, val, "7x13B" if tw >= 20 else "6x10", col, x, x + tw)
+            c.text_centered(H - 7, lab, "4x6", GOLD, x, x + tw)
+
+    def _cd_versus(self, c, e, t):
+        W, H = c.width, c.height
+        target, secs, short, head = self._cd_parts(e)
+        mid = W // 2
+        bar = H - 9
+        for y in range(bar):
+            cut = mid + 5 - round(y * 10 / max(1, bar - 1))
+            c.line(0, y, cut - 1, y, scale(RED, 0.4))
+            c.line(cut, y, W - 1, y, scale(BLUE, 0.4))
+        if e["fights"]:
+            red, blue = e["fights"][0]["fighters"]
+            for fi, side in ((red, 0), (blue, 1)):
+                name = fi["last"].upper()
+                a, b = (2, mid - 6) if side == 0 else (mid + 6, W - 2)
+                font = next((fn for fn in ("6x10", "5x7", "4x6") if c.text_width(name, fn) <= b - a), "4x6")
+                if c.text_width(name, font) > b - a:
+                    c.scroll_text(a, b, 2, name, font, WHITE, t)
+                elif side == 0:
+                    c.text(a, 2, name, font, WHITE)
+                else:
+                    c.text_right(b, 2, name, font, WHITE)
+                rec = fi["record"]
+                if rec and side == 0:
+                    c.text(a, 13, rec, "4x6", scale(WHITE, 0.7))
+                elif rec:
+                    c.text_right(b, 13, rec, "4x6", scale(WHITE, 0.7))
+        k = 0.8 + 0.2 * math.sin(time.monotonic() * 3)
+        c.text_centered(12, "VS", "5x7", scale(GOLD, k), mid - 8, mid + 8)
+        c.rect(0, bar, W - 1, H - 1, (0, 0, 0))
+        c.line(0, bar, W - 1, bar, scale(GOLD, 0.6))
+        self._draw_logo(c, e, 1, bar + 1, 16, 8)
+        items = [(short + "  " + when_text(target), WHITE), (countdown_text(secs) + " TO GO", GOLD)]
+        if self.cfg.get("show_network", True) and e["networks"]:
+            items.append((e["networks"][0].upper(), (150, 200, 255)))
+        text, col, tt = self._cycle(c, items, t, W - 20)
+        c.scroll_text(19, W, bar + 2, text, "5x7", col, tt, align="center", pause=0.5)
 
     # -- schedule -----------------------------------------------------------------
     def _render_schedule(self, c, page, t):

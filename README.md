@@ -313,10 +313,15 @@ Upgrading from an earlier LEDBoard with a single "Sports" board moves your setti
 
 The UFC board uses ESPN's free MMA data (no key needed), like the other sports boards. It shows:
 
-- **Countdown to the next event**: starts a set number of days before (7 by default) and counts down to the main card or the first prelim. There are three designs:
+- **Countdown to the next event**: starts a set number of days before (7 by default) and counts down to the main card or the first prelim. There are six designs:
+  - **Event**: the UFC logo with the event number (or FIGHT NIGHT), who's fighting in their corner colors, the weight class and title, and the date and start time.
+  - **Fight week**: DAYS / HRS / MIN / SEC tiles.
+  - **Versus**: big names on red and blue corners, with the date and countdown underneath.
   - **Fight poster**: the main event's fighters at the edges.
   - **Octagon**: the days to go inside an eight-sided cage.
   - **Minimal**.
+
+  The logo is ESPN's UFC logo. You can paste a link to any image (for example the event's own logo) under **Event logo image**. If no logo can be downloaded, a pixel "UFC" is drawn instead.
 - **The fight card**: the main event only, the main card (default) or the full card including prelims. Bouts start showing a set number of days before the event (2 by default). Each bout shows:
   - the fighters with their records and red / blue corner colors
   - the weight class, and MAIN EVENT / CO-MAIN / TITLE tags
