@@ -51,17 +51,18 @@ def _is_today(g):
 
 
 def _info_line(g, side, other, t):
-    items = [x for x in (_when(g), _vs(g, side, other), (g.get("network") or "").upper()) if x]
+    items = [x for x in (_when(g), _vs(g, side, other), (g.get("note") or "").upper(),
+                         (g.get("series") or "").upper(), (g.get("network") or "").upper()) if x]
     return items[int(t // 3) % len(items)] if items else ""
 
 
-def _draw_info(board, c, g, text, x0, x1, y, color, font="5x7"):
+def _draw_info(board, c, g, text, x0, x1, y, color, font="5x7", t=0.0):
     """Info line text, or the TV network's logo when that's the item and logos are on."""
     logo = board._network_logo(g, text) if hasattr(board, "_network_logo") else None
     if logo is not None:
         c.paste(logo, x0 + (x1 - x0 - logo.width) // 2, y)
     else:
-        c.text_centered(y, text, font, color, x0, x1)
+        c.scroll_text(x0, x1, y, text, font, color, t % 3, speed=30, align="center", pause=0.3)
 
 
 def _flip_tiles(c, x, y, digits, t):
@@ -125,7 +126,7 @@ def render_flip(board, c, g, fav, t, team_color):
             gx = x + i * 24
             c.text_centered(18, lab, "4x6", GRAY, gx, gx + 19)
     _draw_info(board, c, g, _info_line(g, side, other, t), x0, x1, H - 7,
-               team_color(me) if int(t // 3) % 3 == 1 else GRAY)
+               team_color(me) if int(t // 3) % 3 == 1 else GRAY, t=t)
 
 
 def render_ticket(board, c, g, fav, t, team_color):
@@ -195,7 +196,7 @@ def render_matchup(board, c, g, fav, t, team_color):
     font = "7x13B" if c.text_width(cd, "7x13B") <= px1 - px0 - 2 else "6x10"
     c.text_centered(9, cd, font, YELLOW if secs is not None and secs < 86400 else WHITE, px0, px1 + 1)
     _draw_info(board, c, g, _when(g, "%a %-I:%M%p") if int(t // 3) % 2 == 0 or not g.get("network")
-               else (g.get("network") or "").upper(), px0, px1 + 1, H - 8, WHITE, font="4x6")
+               else (g.get("network") or "").upper(), px0, px1 + 1, H - 8, WHITE, font="4x6", t=t)
 
 
 def render_road(board, c, g, fav, t, team_color):
@@ -257,7 +258,7 @@ def render_hype(board, c, g, fav, t, team_color):
         line = "STARTING"
     c.text_centered(14, line, "5x7", WHITE, x0, x1)
     items = [_when(g, "%-I:%M%p"), _vs(g, side, other)] + ([(g.get("network") or "").upper()] if g.get("network") else [])
-    _draw_info(board, c, g, items[int(t // 3) % len(items)], x0, x1, H - 8, team_color(me))
+    _draw_info(board, c, g, items[int(t // 3) % len(items)], x0, x1, H - 8, team_color(me), t=t)
 
 
 RENDERERS = {"flip": render_flip, "ticket": render_ticket, "matchup": render_matchup, "road": render_road,

@@ -218,6 +218,10 @@ def parse_event(ev, league_key):
         "half": _half(stype.get("shortDetail") or stype.get("detail") or ""),
         "last_play": ((sit.get("lastPlay") or {}).get("text") or "").strip(),
         "last_goal": "",
+        # playoffs: series standing ("STL leads 2-1") and round / game note ("West 1st Round - Game 3")
+        "series": _series(comp),
+        "note": _note(comp),
+        "postseason": _postseason(ev, comp),
     }
     poss = str(sit.get("possession", "") or "")
     if poss:
@@ -251,6 +255,48 @@ def parse_event(ev, league_key):
             game["last_goal"] = " ".join(x for x in ("GOAL", teams[side]["abbr"] if side else "", who, minute_txt) if x)
     game["minute"] = _minute(game["clock"]) if game["sport"] == "soccer" else None
     return game
+
+
+def _series(comp):
+    se = comp.get("series")
+    if isinstance(se, dict):
+        txt = (se.get("summary") or se.get("description") or "").strip()
+        txt = re.sub(r"(?i)\bseries\s+tied\b", "TIED", txt)            # 'Series tied 2-2' -> 'TIED 2-2'
+        return re.sub(r"(?i)\s*\bseries\b", "", txt).strip().upper()  # 'STL leads series 2-1' -> 'STL LEADS 2-1'
+    return ""
+
+
+def _note(comp):
+    for n in comp.get("notes") or []:
+        if isinstance(n, dict) and n.get("headline"):
+            return short_note(n["headline"])
+    return ""
+
+
+_NOTE_SUBS = [
+    (r"\s*-\s*Game\s+(\d+)", r" G\1"), (r"\bGame\s+(\d+)", r"G\1"),
+    (r"\b1st Round\b", "RD1"), (r"\b2nd Round\b", "RD2"), (r"\bFirst Round\b", "RD1"),
+    (r"\bSecond Round\b", "RD2"), (r"\bWild ?Card Round\b", "WILD CARD"), (r"\bDivisional Round\b", "DIVISIONAL"),
+    (r"\bConference Finals?\b", "CONF FINAL"), (r"\bConference Semifinals?\b", "CONF SEMI"),
+    (r"\bChampionship\b", "CHAMP"), (r"\bEastern\b", "EAST"), (r"\bWestern\b", "WEST"),
+    (r"\bAmerican League\b", "AL"), (r"\bNational League\b", "NL"), (r"\bPlayoffs?\b", ""),
+    (r"\s+", " "),
+]
+
+
+def short_note(text):
+    """'West 1st Round - Game 4' -> 'WEST RD1 G4' (fits the panel's info line)."""
+    out = text or ""
+    for pat, rep in _NOTE_SUBS:
+        out = re.sub(pat, rep, out, flags=re.I)
+    return out.strip(" -·").upper()
+
+
+def _postseason(ev, comp):
+    st = ev.get("seasonType") if isinstance(ev.get("seasonType"), dict) else {}
+    season = ev.get("season") if isinstance(ev.get("season"), dict) else {}
+    kind = st.get("type") or season.get("type")
+    return str(kind) == "3" or isinstance(comp.get("series"), dict)
 
 
 def _score(v):
@@ -1421,8 +1467,10 @@ class LeagueBoard(Board):
         """Lines for the bottom info row; they rotate every few seconds."""
         c = self.cfg
         items = []
+        playoff = [(x.upper(), YELLOW) for x in (g.get("note"), g.get("series")) if x]
         if g["state"] == "pre":
             items.append((self._start_text(g), self._tc("text_score")))
+            items += playoff
             if c.get("show_network", True) and g["network"]:
                 items.append((g["network"].upper(), self._tc("text_info")))
             if c.get("show_odds"):
@@ -1435,9 +1483,12 @@ class LeagueBoard(Board):
             return items
         if g["state"] == "post":
             d = g["detail"].upper()
-            return [("FINAL" + d[5:] if d.startswith("FINAL") else d or "FINAL", self._tc("text_info"))]
+            return [("FINAL" + d[5:] if d.startswith("FINAL") else d or "FINAL", self._tc("text_info"))] + \
+                [(x.upper(), YELLOW) for x in (g.get("series"),) if x]
 
         items.append((self._clock_text(g), self._tc("text_status")))
+        if g.get("series"):
+            items.append((g["series"].upper(), YELLOW))
         if c.get("detailed_live", True):
             sport = self.sport
             if sport == "football":

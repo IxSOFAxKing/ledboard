@@ -17,14 +17,42 @@ ROWS_PER_PAGE = 4
 
 
 # ---------------------------------------------------------------- data
-def next_game(sport, league_path, league_key, team_id, parse_event):
-    """The team's next not-yet-finished game (parsed like a scoreboard game), or None."""
-    r = requests.get(SCHEDULE_URL.format(sport=sport, league=league_path, team=team_id), timeout=15)
+def _schedule_events(sport, league_path, team_id):
+    """Every event ESPN lists for the team: the default schedule (the current season type), plus the
+    postseason and regular season explicitly (the default alone misses playoff games), plus upcoming
+    fixtures for soccer (whose default schedule lists results). Merged by event id."""
+    url = SCHEDULE_URL.format(sport=sport, league=league_path, team=team_id)
+    r = requests.get(url, timeout=15)
     r.raise_for_status()
+    events, seen = [], set()
+
+    def add(evs):
+        for ev in evs or []:
+            eid = ev.get("id") if isinstance(ev, dict) else None
+            if eid not in seen:
+                seen.add(eid)
+                events.append(ev)
+
+    add(r.json().get("events"))
+    extra = [{"seasontype": 3}, {"seasontype": 2}]
+    if sport == "soccer":
+        extra.insert(0, {"fixture": "true"})
+    for params in extra:
+        try:
+            rr = requests.get(url, params=params, timeout=15)
+            if rr.ok:
+                add(rr.json().get("events"))
+        except Exception as e:                 # optional extras: never fail the lookup over them
+            log.debug("schedule %s %s unavailable: %s", url, params, e)
+    return events
+
+
+def next_game(sport, league_path, league_key, team_id, parse_event):
+    """The team's next not-yet-finished game (regular season or playoffs), parsed like a scoreboard game."""
     now = datetime.now(timezone.utc)
     best = None
     bad = 0
-    for ev in r.json().get("events") or []:
+    for ev in _schedule_events(sport, league_path, team_id):
         try:
             g = parse_event(ev, league_key)
         except Exception as e:                 # one odd event (old game, special format) mustn't stop the rest
@@ -182,13 +210,15 @@ def render_next_game(board, c, g, fav, t, team_color):
         c.text_centered(8, "TBD", "7x13B", WHITE, x0, x1)
         when = ""
     vs = ("@ " if side == "away" else "VS ") + opp["abbr"]
-    info = [x for x in (when, vs, (g.get("network") or "").upper()) if x]
+    info = [x for x in (when, vs, (g.get("note") or "").upper(), (g.get("series") or "").upper(),
+                        (g.get("network") or "").upper()) if x]
     text = info[int(t // 3) % len(info)] if info else ""
     logo = board._network_logo(g, text) if hasattr(board, "_network_logo") else None
     if logo is not None:
         c.paste(logo, x0 + (x1 - x0 - logo.width) // 2, H - 8)
         return
-    c.text_centered(H - 8, text, "5x8", team_color(me) if text == vs else GRAY, x0, x1)
+    c.scroll_text(x0, x1, H - 8, text, "5x8", team_color(me) if text == vs else GRAY, t % 3, speed=30,
+                  align="center", pause=0.3)
 
 
 def render_standings(board, c, group, rows, page, sport, team_color):

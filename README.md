@@ -147,6 +147,8 @@ In more detail:
 
   The countdown appears per team: with the default setting it shows whenever *your team* has no game on the board, even if other teams' games are showing.
 
+  **Playoffs:** postseason games show like any other game (as upcoming cards and in the countdown). The info line adds the round and series, shortened to fit (for example "WEST RD1 G4" and "STL LEADS 2-1"). The next-game lookup checks the playoff schedule as well as the regular season, and for soccer it also checks upcoming fixtures.
+
   **Countdown design** (under **Between games**):
   - **Classic**: logos at the sides, the countdown, and a rotating line (time, opponent, TV).
   - **Flip clock**: split-flap digit tiles for days / hours / minutes (hours / minutes / seconds in the last day).
