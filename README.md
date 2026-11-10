@@ -7,6 +7,7 @@ It's built for two chained 64×32 panels (128×32), and the layouts scale to oth
 | Board | What it shows |
 |---|---|
 | **Sports** | One board per league, using ESPN's free API (no key needed): NFL, NBA, MLB, NHL, college football and basketball, WNBA, MLS, EPL, La Liga, Bundesliga, Serie A, Ligue 1, Champions League. See [Sports](#sports) for the settings and the live-game details each sport shows. |
+| **UFC** | The next event's countdown, the fight card with fighter headshots (or flags) and records, live round and clock, results (KO/TKO, submission, decision with the round and time), a winner celebration for your favorite fighters, and the upcoming event schedule. See [UFC](#ufc). |
 | **Now Playing** | Album art, scrolling title and artist, and an animated wavy progress bar (Material 3 style; a straight bar is an option), from a **Home Assistant media player** (HA's Spotify integration, Sonos and so on) or directly from the Spotify API. It's skipped when nothing is playing and can take over the display while music plays. |
 | **Steam** | What you're playing on Steam: the game icon, name, session time and total hours. It can take over the display while you play, and supports several players. Also "friend now playing" and "achievement unlocked" (with how rare it is) screens. |
 | **Plex** | Active streams (movies, TV, music) with the poster, title, S/E or artist, who's watching, and a wavy (or straight) progress bar. You can filter by user. Plus a carousel of recently added movies and episodes. |
@@ -25,6 +26,7 @@ Also included:
 - **[One-click updates and backups](#updates-and-backups)**.
 - **[Next-game countdowns, standings and the playoff picture](#sports)**.
 - **[Scoring play recaps](#sports)** after favorite-team celebrations.
+- **[A UFC board](#ufc)**: event countdowns, fight cards, live rounds and results.
 - **[Transitions](#global-settings-settings-tab)** between boards: slide, push up, wipe, fade or dissolve.
 - **[Sun-following brightness](#global-settings-settings-tab)**.
 - **[A combined ticker](#global-settings-settings-tab)**: all boards in one continuous scroll.
@@ -306,6 +308,38 @@ How it works:
 > **Note:** The live details read optional fields from ESPN's unofficial API. If ESPN doesn't send a field for a game, that detail is simply left out.
 
 Upgrading from an earlier LEDBoard with a single "Sports" board moves your settings over automatically. Each league keeps its favorites and on/off state, and the old config is saved as `config.json.bak`.
+
+### UFC
+
+The UFC board uses ESPN's free MMA data (no key needed), like the other sports boards. It shows:
+
+- **Countdown to the next event**: starts a set number of days before (7 by default) and counts down to the main card or the first prelim. There are three designs:
+  - **Fight poster**: the main event's fighters at the edges.
+  - **Octagon**: the days to go inside an eight-sided cage.
+  - **Minimal**.
+- **The fight card**: the main event only, the main card (default) or the full card including prelims. Bouts start showing a set number of days before the event (2 by default). Each bout shows:
+  - the fighters with their records and red / blue corner colors
+  - the weight class, and MAIN EVENT / CO-MAIN / TITLE tags
+  - the start time, the number of rounds and the network
+- **Live bouts**: the round and clock with a blinking live dot. Live bouts go first, and the board checks every 30 seconds while fights are on.
+- **Results**: the winner in gold and the loser dimmed, plus the method (KO/TKO, SUB, U DEC / S DEC, and so on) with the round and time. Results stay up for 24 hours after the event by default.
+- **Upcoming events list**: date, event and headline bout, three to a page. It can show always, or only when there's no fight card to show.
+
+Bout designs:
+- **Fight card**: pictures at the edges, names and records stacked.
+- **Face-off**: red and blue corner halves with VS (or a belt for title fights).
+- **Tale of the tape**: names, records and country flags side by side.
+
+Fighter pictures can be ESPN headshots (with the country flag when there's no photo), flags only, or none.
+
+**Favorite fighters**: list them by name; last names are enough. Favorites get:
+- a ★
+- a **winner celebration** when they win
+- their bouts shown even when they're on the prelims
+
+You can also show only bouts with a favorite, and have the board **take over the display** while a favorite (or the main event) is fighting.
+
+**Preview** shows the upcoming, live, results, countdown, schedule or winner screens for 3 minutes, using the next real event's fighters when one is loaded.
 
 ### Now Playing
 
@@ -607,7 +641,7 @@ ledboard/
   fonts.py         BDF bitmap font renderer (crisp pixel text)
   gfx.py           drawing helpers, marquee text, image cache
   config.py        JSON config + sportsmatrix.conf importer
-  boards/          sports (one board per league) + layouts, playoffs, recap; weather (+ extra screens), spotify,
+  boards/          sports (one board per league) + layouts, playoffs, recap; ufc; weather (+ extra screens), spotify,
                    plex, steam, uptime, klipper, homeassistant, clock, ambient, message
   transitions.py   slide / push / wipe / fade / dissolve between boards
   web/             Flask API + single-page UI (static/)

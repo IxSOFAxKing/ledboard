@@ -10,12 +10,13 @@ from .plex import PlexBoard
 from .sports import LEAGUE_BOARDS, LEAGUES, LeagueBoard
 from .spotify import SpotifyBoard
 from .steam import SteamBoard
+from .ufc import UFCBoard
 from .uptime import UptimeBoard
 from .weather import WeatherBoard
 from .weather_alerts import WeatherAlertsBoard
 
 BOARD_CLASSES = {cls.name: cls for cls in (
-    *LEAGUE_BOARDS, WeatherBoard, WeatherAlertsBoard, SpotifyBoard, SteamBoard, PlexBoard, HomeAssistantBoard, UptimeBoard, KlipperBoard, ClockBoard, AmbientBoard, MessageBoard)}
+    *LEAGUE_BOARDS, UFCBoard, WeatherBoard, WeatherAlertsBoard, SpotifyBoard, SteamBoard, PlexBoard, HomeAssistantBoard, UptimeBoard, KlipperBoard, ClockBoard, AmbientBoard, MessageBoard)}
 
 
 def board_defaults():

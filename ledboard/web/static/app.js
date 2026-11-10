@@ -543,7 +543,7 @@ function renderBoards() {
 function summary(name, bc) {
   const tags = [];
   if (SCHEMA[name].group === "Sports") {
-    tags.push((bc.favorites || []).length ? "★ " + bc.favorites.join(", ") : "all teams");
+    tags.push((bc.favorites || []).length ? "★ " + bc.favorites.join(", ") : (name === "ufc" ? "all fighters" : "all teams"));
     if (bc.favorites_only) tags.push("favorites only");
     if (bc.live_only) tags.push("live only");
     if (bc.takeover) tags.push("takeover");
