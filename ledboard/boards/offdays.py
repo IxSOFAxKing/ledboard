@@ -47,12 +47,28 @@ def _schedule_events(sport, league_path, team_id):
     return events
 
 
-def next_game(sport, league_path, league_key, team_id, parse_event):
-    """The team's next not-yet-finished game (regular season or playoffs), parsed like a scoreboard game."""
+def _next_season_events(sport, league_path, team_id):
+    """Offseason: next season's schedule (preseason / spring training and regular season). ESPN names
+    seasons by the year they start (NFL, MLB, MLS) or end (NBA, NHL), so try this year and next."""
+    url = SCHEDULE_URL.format(sport=sport, league=league_path, team=team_id)
+    year = datetime.now().year
+    events = []
+    for season in (year, year + 1):
+        for st in ({}, {"seasontype": 1}, {"seasontype": 2}) + (({"fixture": "true"},) if sport == "soccer" else ()):
+            try:
+                rr = requests.get(url, params=dict(st, season=season), timeout=15)
+                if rr.ok:
+                    events += rr.json().get("events") or []
+            except Exception as e:
+                log.debug("schedule %s season %s %s unavailable: %s", url, season, st, e)
+    return events
+
+
+def _soonest(events, league_key, parse_event, team_abbr=None):
     now = datetime.now(timezone.utc)
     best = None
     bad = 0
-    for ev in _schedule_events(sport, league_path, team_id):
+    for ev in events:
         try:
             g = parse_event(ev, league_key)
         except Exception as e:                 # one odd event (old game, special format) mustn't stop the rest
@@ -63,10 +79,32 @@ def next_game(sport, league_path, league_key, team_id, parse_event):
             continue
         if not g or g["state"] == "post":
             continue
+        if team_abbr and team_abbr not in (g["home"]["abbr"].upper(), g["away"]["abbr"].upper()):
+            continue
         if g["start"] and g["start"] < now and g["state"] == "pre":
             continue           # stale "pre" from the past (postponed etc.)
         if best is None or (g["start"] or now) < (best["start"] or now):
             best = g
+    return best
+
+
+def next_game(sport, league_path, league_key, team_id, parse_event, scoreboard_scan=None, team_abbr=None):
+    """The team's next not-yet-finished game: regular season, playoffs, or (in the offseason) next
+    season's first game, parsed like a scoreboard game.
+
+    `scoreboard_scan` (optional) returns the league scoreboard's events for the coming weeks; it catches
+    games that a team's schedule doesn't list (e.g. newly set playoff matchups)."""
+    best = _soonest(_schedule_events(sport, league_path, team_id), league_key, parse_event)
+    if scoreboard_scan is not None and team_abbr:
+        try:
+            alt = _soonest(scoreboard_scan(), league_key, parse_event, team_abbr)
+        except Exception as e:
+            log.debug("scoreboard scan unavailable: %s", e)
+            alt = None
+        if alt and (best is None or (alt["start"] and best["start"] and alt["start"] < best["start"])):
+            best = alt
+    if best is None:
+        best = _soonest(_next_season_events(sport, league_path, team_id), league_key, parse_event)
     return best
 
 

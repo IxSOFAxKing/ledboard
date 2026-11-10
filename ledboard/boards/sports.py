@@ -220,7 +220,8 @@ def parse_event(ev, league_key):
         "last_goal": "",
         # playoffs: series standing ("STL leads 2-1") and round / game note ("West 1st Round - Game 3")
         "series": _series(comp),
-        "note": _note(comp),
+        "note": _note(comp) or ({"baseball": "SPRING TRAINING"}.get(LEAGUES[league_key][0], "PRESEASON")
+                                if _season_type(ev) == "1" else ""),
         "postseason": _postseason(ev, comp),
     }
     poss = str(sit.get("possession", "") or "")
@@ -290,6 +291,12 @@ def short_note(text):
     for pat, rep in _NOTE_SUBS:
         out = re.sub(pat, rep, out, flags=re.I)
     return out.strip(" -·").upper()
+
+
+def _season_type(ev):
+    st = ev.get("seasonType") if isinstance(ev.get("seasonType"), dict) else {}
+    season = ev.get("season") if isinstance(ev.get("season"), dict) else {}
+    return str(st.get("type") or season.get("type") or "")
 
 
 def _postseason(ev, comp):
@@ -741,6 +748,31 @@ class LeagueBoard(Board):
                 self._sb_mode = "plain"
         return self._scoreboard(base)
 
+    SCAN_DAYS = 21
+
+    def _scan_ahead(self):
+        """League scoreboard events for the next three weeks (for the next-game lookup). Cached for the
+        favorites in this round of lookups; uses whatever date mode ESPN accepted for this league."""
+        cached = getattr(self, "_scan_cache", None)
+        if cached and time.time() - cached[0] < 600:
+            return cached[1]
+        today = datetime.now().astimezone().date()
+        mode = getattr(self, "_sb_mode", "range")
+        events = []
+        if mode == "range":
+            try:
+                events = self._scoreboard({"limit": 300, "dates": f"{today:%Y%m%d}-{today + timedelta(days=self.SCAN_DAYS):%Y%m%d}"})
+            except requests.HTTPError:
+                mode = "daily"
+        if mode == "daily":
+            for d in range(self.SCAN_DAYS + 1):
+                try:
+                    events += self._scoreboard({"limit": 200, "dates": f"{today + timedelta(days=d):%Y%m%d}"})
+                except requests.HTTPError:
+                    break
+        self._scan_cache = (time.time(), events)
+        return events
+
     def update(self):
         events = self._fetch_events()
         games = [g for g in (parse_event(ev, self.league) for ev in events) if g]
@@ -800,7 +832,9 @@ class LeagueBoard(Board):
                     log.warning("[%s] favorite %s not found in ESPN's team list", self.name, fav)
                     continue
                 try:
-                    g = offdays.next_game(sport, path, self.league, tid, parse_event)
+                    g = offdays.next_game(sport, path, self.league, tid, parse_event,
+                                          scoreboard_scan=self._scan_ahead if sport != "football" else None,
+                                          team_abbr=fav)
                 except Exception as e:
                     log.info("[%s] schedule for %s unavailable: %s", self.name, fav, e)
                     problems[fav] = f"schedule unavailable ({e.__class__.__name__}: {str(e)[:80]})"
