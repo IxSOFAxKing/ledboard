@@ -326,7 +326,13 @@ The UFC board uses ESPN's free MMA data (no key needed), like the other sports b
   - the fighters with their records and red / blue corner colors
   - the weight class, and MAIN EVENT / CO-MAIN / TITLE tags
   - the start time, the number of rounds and the network
-- **Live bouts**: the round and clock with a blinking live dot. Live bouts go first, and the board checks every 30 seconds while fights are on.
+- **Live bouts**: the round and clock with a blinking live dot. A separate **Live design** can be used while a bout is on:
+  - **TV scorebug**: red and blue name bars with pictures and records, plus a round / clock box with round dots.
+  - **Big clock**: ROUND 2 OF 5 over a large clock, with the fighters at the edges.
+  - **Octagon**: the round number inside the cage, with the names, records, flags and clock around it.
+  - **Round tracker**: one segment per round, with finished rounds in gold and the current one pulsing red.
+
+  Between rounds, the designs show END R1 instead of the clock. Live bouts go first, and the board checks every 30 seconds while fights are on.
 - **Results**: the winner in gold and the loser dimmed, plus the method (KO/TKO, SUB, U DEC / S DEC, and so on) with the round and time. Results stay up for 24 hours after the event by default.
 - **Upcoming events list**: date, event and headline bout, three to a page. It can show always, or only when there's no fight card to show.
 

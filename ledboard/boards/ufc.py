@@ -38,6 +38,13 @@ FIGHT_LAYOUTS = {
     "faceoff": "Face-off (red and blue corners, VS in the middle)",
     "tape": "Tale of the tape (names, records and flags side by side)",
 }
+LIVE_LAYOUTS = {
+    "same": "Same as the Design above",
+    "scorebug": "TV scorebug (red / blue name bars, round and clock box)",
+    "clock": "Big clock (round clock in the middle, round dots, fighters at the edges)",
+    "octagon": "Octagon (round number inside the cage, clock underneath)",
+    "rounds": "Round tracker (a segment per round, the current one pulsing)",
+}
 COUNTDOWN_LAYOUTS = {
     "event": "Event (UFC logo and event number, date and start time, who's fighting)",
     "fightweek": "Fight week (DAYS / HRS / MIN / SEC tiles)",
@@ -432,7 +439,7 @@ class UFCBoard(Board):
     PREVIEW_SECONDS = 180
     DEFAULTS = {"enabled": False, "duration": 8, "refresh": 900, "live_refresh": 30,
                 "favorites": [], "favorites_only": False, "bouts": "main_card",
-                "layout": "card", "pictures": "headshots", "show_network": True,
+                "layout": "card", "live_layout": "same", "pictures": "headshots", "show_network": True,
                 "show_countdown": True, "countdown_days": 7, "countdown_layout": "poster", "event_logo_url": "", "countdown_to": "main",
                 "card_days": 2, "final_hours": 24,
                 "show_schedule": True, "schedule_count": 6, "schedule_when": "always",
@@ -451,6 +458,8 @@ class UFCBoard(Board):
                  "loaded (sample fighters otherwise)."},
         {"key": "layout", "label": "Design", "type": "select", "options": list(FIGHT_LAYOUTS),
          "option_labels": FIGHT_LAYOUTS},
+        {"key": "live_layout", "label": "Live design (while a bout is on)", "type": "select",
+         "options": list(LIVE_LAYOUTS), "option_labels": LIVE_LAYOUTS},
         {"key": "pictures", "label": "Fighter pictures", "type": "select", "options": list(PICTURES),
          "option_labels": PICTURES},
         {"key": "show_network", "label": "Show the TV / streaming network", "type": "bool"},
@@ -485,7 +494,7 @@ class UFCBoard(Board):
     FIELDS = organize(FIELDS, [
         ("Fighters", ["favorites", "favorites_only", "bouts"]),
         ("Preview", ["preview"]),
-        ("Fight screens", ["layout", "pictures", "show_network"]),
+        ("Fight screens", ["layout", "live_layout", "pictures", "show_network"]),
         ("Before the event", ["show_countdown", "countdown_days", "countdown_to", "countdown_layout", "event_logo_url",
                               "card_days"]),
         ("After the event", ["final_hours"]),
@@ -947,6 +956,11 @@ class UFCBoard(Board):
         if f is None:
             return
         lay = self.cfg.get("layout", "card")
+        live = self.cfg.get("live_layout", "same")
+        if f["state"] == "in" and live in LIVE_LAYOUTS and live != "same":
+            {"scorebug": self._live_scorebug, "clock": self._live_clock, "octagon": self._live_octagon,
+             "rounds": self._live_rounds}[live](c, e, f, t)
+            return
         {"faceoff": self._render_faceoff, "tape": self._render_tape}.get(lay, self._render_card)(c, e, f, t)
 
     # -- shared bits --------------------------------------------------------------
@@ -1083,6 +1097,155 @@ class UFCBoard(Board):
             if rec:
                 c.text_right(x1, y + 1, rec, "4x6", scale(GRAY, 0.9))
         self._draw_parts(c, x0, H - 7, self._status_line(e, f, t), "5x7", center=(x0, x1 + 1))
+
+    # -- live designs ---------------------------------------------------------------
+    @staticmethod
+    def _round_state(f):
+        """('R2', '3:12', 2) while fighting, ('END R1', '', 1) between rounds."""
+        rnd = f["round"] or 1
+        det = (f.get("detail") or "").lower()
+        if "end" in det and "round" in det or "between" in det:
+            return f"END R{rnd}", "", rnd
+        return f"R{rnd}", f["clock"] or "", rnd
+
+    @staticmethod
+    def _live_tag(c, x, y, t):
+        """Blinking red dot + LIVE (19 px wide)."""
+        if int(t * 2) % 2 == 0:
+            c.draw.ellipse((x, y + 1, x + 3, y + 4), fill=LIVE_RED)
+        c.text(x + 5, y, "LIVE", "4x6", LIVE_RED)
+
+    def _round_dots(self, c, f, cx, y, t, gap=5):
+        rnd, n = f["round"] or 1, max(1, f["rounds"] or 3)
+        x = cx - ((n - 1) * gap) // 2
+        for i in range(1, n + 1):
+            if i < rnd:
+                col = GOLD
+            elif i == rnd:
+                col = scale(LIVE_RED, 0.5 + 0.5 * abs(math.sin(t * 3)))
+            else:
+                col = (45, 45, 50)
+            c.draw.ellipse((x - 1, y, x + 1, y + 2), fill=col)
+            x += gap
+
+    def _live_scorebug(self, c, e, f, t):
+        W, H = c.width, c.height
+        bx = W - 34                                     # round / clock box on the right
+        for row, (fi, corner) in enumerate(zip(f["fighters"], CORNERS)):
+            y = 1 + row * 15
+            c.rect(0, y, bx - 3, y + 13, scale(corner, 0.45))
+            c.rect(0, y, 2, y + 13, corner)
+            pic = self._picture(fi, 14, 14, flip=False) if self._pic_mode() != "none" else None
+            x = 5
+            if pic is not None:
+                c.rect(4, y, 18, y + 13, (0, 0, 0))
+                c.paste(pic, 4 + (14 - pic.width) // 2, y + (14 - pic.height) // 2)
+                x = 21
+            rec = fi["record"]
+            rw = c.text_width(rec, "4x6") + 3 if rec else 0
+            self._name(c, fi, x, bx - 5 - rw, y + 4, "5x7", WHITE, t)
+            if rec:
+                c.text_right(bx - 5, y + 5, rec, "4x6", scale(WHITE, 0.75))
+        c.draw.rounded_rectangle((bx, 1, W - 1, H - 2), radius=2, fill=(18, 18, 22), outline=(70, 70, 80))
+        rl, clk, _r = self._round_state(f)
+        c.text_centered(3, rl, "5x7", GOLD, bx, W)
+        if clk:
+            c.text_centered(12, clk, "6x10", WHITE, bx, W)
+        self._round_dots(c, f, bx + (W - bx) // 2, H - 6, t, gap=5 if f["rounds"] <= 3 else 4)
+
+    def _live_clock(self, c, e, f, t):
+        W, H = c.width, c.height
+        red, blue = f["fighters"]
+        pics = self._pic_mode() != "none"
+        pw = 28 if pics else 0
+        if pics:
+            self._paste_pic(c, red, 0, 0, pw, H, RED)
+            self._paste_pic(c, blue, W - pw, 0, pw, H, BLUE, flip=True)
+        x0, x1 = pw + 1, W - pw - 1
+        mid = (x0 + x1) // 2
+        rl, clk, rnd = self._round_state(f)
+        top = f"ROUND {rnd} OF {f['rounds']}" if clk else rl
+        c.text_centered(0, top, "4x6", GOLD, x0, x1)
+        big = clk or "BREAK"
+        font = "7x13B" if c.text_width(big, "7x13B") <= x1 - x0 else "6x10"
+        c.text_centered(7, big, font, WHITE)
+        self._round_dots(c, f, mid, 21, t)
+        # names along the bottom, in their corner colors
+        half = (x1 - x0) // 2
+        for fi, (a, b), corner, align in ((red, (x0, x0 + half - 1), RED, "left"), (blue, (x0 + half + 1, x1), BLUE, "right")):
+            col = tuple(min(255, v + 70) for v in corner)
+            font = "4x6"
+            self._name(c, fi, a, b, H - 6, font, col, t, align)
+        if not pics:
+            self._live_tag(c, 0, 0, t)
+
+    def _live_octagon(self, c, e, f, t):
+        W, H = c.width, c.height
+        mid = W // 2
+        red, blue = f["fighters"]
+        cx, cy, r = mid, 15, 15
+        ang = [math.radians(22.5 + 45 * i) for i in range(8)]
+        c.draw.polygon([(cx + r * math.cos(a), cy + r * math.sin(a)) for a in ang], fill=(22, 22, 26),
+                       outline=(150, 150, 160))
+        k = 0.5 + 0.5 * abs(math.sin(t * 2))
+        c.draw.polygon([(cx + (r - 3) * math.cos(a), cy + (r - 3) * math.sin(a)) for a in ang],
+                       outline=scale(LIVE_RED, 0.4 + 0.5 * k))
+        rl, clk, rnd = self._round_state(f)
+        c.text_centered(4, "RD" if clk else "END", "4x6", GOLD, cx - 12, cx + 13)
+        c.text_centered(10, str(rnd), "7x13B", WHITE, cx - 12, cx + 13)
+        pw = 0                                           # names need the room: no pictures here
+        for fi, corner, side in ((red, RED, 0), (blue, BLUE, 1)):
+            flag = self._flag(fi, 10, 7) if self._pic_mode() != "none" else None
+            if flag is not None:
+                c.paste(flag, 2 if side == 0 else W - 12, H - 8)
+            a, b = (pw + 2, cx - r - 2) if side == 0 else (cx + r + 3, W - pw - 2)
+            align = "left" if side == 0 else "right"
+            room = b - a - (7 if self._is_fav(fi) else 0)
+            font = "5x7" if c.text_width(self._label(fi), "5x7") <= room else "4x6"
+            self._name(c, fi, a, b, 3, font, WHITE, t, align)
+            c.rect(a if side == 0 else b - 9, 12, (a + 9) if side == 0 else b, 13, corner)
+            if fi["record"]:
+                if side == 0:
+                    c.text(a, 16, fi["record"], "4x6", scale(WHITE, 0.65))
+                else:
+                    c.text_right(b, 16, fi["record"], "4x6", scale(WHITE, 0.65))
+        # the clock under the left names, LIVE tag on the right
+        if clk:
+            c.text(15, H - 8, clk, "5x7", WHITE)
+        self._live_tag(c, W - 36, H - 7, t)
+
+    def _live_rounds(self, c, e, f, t):
+        W, H = c.width, c.height
+        red, blue = f["fighters"]
+        pics = self._pic_mode() != "none"
+        pw = 24 if pics else 0
+        if pics:
+            self._paste_pic(c, red, 0, 0, pw, 22, RED)
+            self._paste_pic(c, blue, W - pw, 0, pw, 22, BLUE, flip=True)
+        x0, x1 = pw + 2, W - pw - 2
+        half = (x0 + x1) // 2
+        for fi, (a, b), align, corner in ((red, (x0, half - 2), "left", RED), (blue, (half + 2, x1), "right", BLUE)):
+            room = b - a - (7 if self._is_fav(fi) else 0)
+            font = "5x7" if c.text_width(self._label(fi), "5x7") <= room else "4x6"
+            self._name(c, fi, a, b, 1, font, tuple(min(255, v + 80) for v in corner), t, align)
+        rl, clk, rnd = self._round_state(f)
+        self._live_tag(c, x0, 10, t)
+        c.text_right(x1, 10, (rl + "  " + clk).strip(), "5x7", WHITE)
+        # one segment per round across the bottom
+        n = max(1, f["rounds"] or 3)
+        y0, y1 = H - 8, H - 1
+        seg = (W - 2 - (n - 1) * 2) // n
+        for i in range(n):
+            x = 1 + i * (seg + 2)
+            if i + 1 < rnd:
+                fill, out = scale(GOLD, 0.55), GOLD
+            elif i + 1 == rnd:
+                k = 0.45 + 0.35 * abs(math.sin(t * 3))
+                fill, out = scale(LIVE_RED, k), LIVE_RED
+            else:
+                fill, out = (20, 20, 24), (60, 60, 66)
+            c.draw.rectangle((x, y0, x + seg - 1, y1), fill=fill, outline=out)
+            c.text_centered(y0 + 1, f"R{i + 1}", "4x6", WHITE if i + 1 <= rnd else GRAY, x, x + seg)
 
     # -- design: face-off ---------------------------------------------------------
     def _render_faceoff(self, c, e, f, t):
