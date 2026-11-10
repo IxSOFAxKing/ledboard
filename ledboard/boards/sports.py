@@ -117,25 +117,32 @@ def parse_event(ev, league_key):
     stype = status.get("type", {})
     teams = {}
     for c in comp.get("competitors", []):
-        t = c.get("team", {})
-        rec = c.get("records") or []
+        if not isinstance(c, dict):
+            continue
+        t = c.get("team") if isinstance(c.get("team"), dict) else {}
+        # scoreboard: "records" + "summary"; team schedule: "record" + "displayValue"
+        rec = [r for r in (c.get("records") or c.get("record") or []) if isinstance(r, dict)] \
+            if isinstance(c.get("records") or c.get("record"), list) else []
         side = c.get("homeAway", "home")
-        rank = (c.get("curatedRank") or {}).get("current")
+        cr = c.get("curatedRank")
+        rank = cr.get("current") if isinstance(cr, dict) else None
         leaders = []
         for cat in c.get("leaders") or []:
+            if not isinstance(cat, dict):
+                continue
             top = (cat.get("leaders") or [{}])[0]
-            if top.get("athlete"):
+            if isinstance(top, dict) and top.get("athlete"):
                 leaders.append((cat.get("abbreviation") or cat.get("shortDisplayName") or cat.get("name", ""),
                                 _athlete(top), top.get("displayValue", "")))
         teams[side] = {
             "id": str(t.get("id", c.get("id", ""))),
             "abbr": t.get("abbreviation") or (t.get("shortDisplayName") or "?")[:4].upper(),
             "name": t.get("shortDisplayName") or t.get("displayName") or "",
-            "score": c.get("score", ""),
+            "score": _score(c.get("score", "")),
             "color": hex_to_rgb(t.get("color"), GRAY),
             "alt": hex_to_rgb(t.get("alternateColor"), WHITE),
             "logo_url": t.get("logo") or ((t.get("logos") or [{}])[0].get("href")),
-            "record": rec[0].get("summary", "") if rec else "",
+            "record": (rec[0].get("summary") or rec[0].get("displayValue") or "") if rec else "",
             "winner": bool(c.get("winner")),
             "rank": rank if isinstance(rank, int) and 0 < rank <= 25 else None,
             "hits": c.get("hits"),
@@ -156,12 +163,17 @@ def parse_event(ev, league_key):
     if "home" not in teams or "away" not in teams:
         return None
 
-    sit = comp.get("situation") or {}
-    odds = (comp.get("odds") or [{}])[0] or {}
+    sit = comp.get("situation") if isinstance(comp.get("situation"), dict) else {}
+    odds = (comp.get("odds") or [{}])[0] if isinstance(comp.get("odds"), list) else {}
     network = ""
     for b in comp.get("broadcasts") or []:
+        if not isinstance(b, dict):
+            continue
         if b.get("names"):
             network = b["names"][0]
+            break
+        if isinstance(b.get("media"), dict) and b["media"].get("shortName"):   # team schedule format
+            network = b["media"]["shortName"]
             break
     if not network:
         for b in comp.get("geoBroadcasts") or []:
@@ -218,6 +230,8 @@ def parse_event(ev, league_key):
     # soccer: goals / cards are listed in competition "details"
     game["events"] = []
     for d in comp.get("details") or []:
+        if not isinstance(d, dict):
+            continue
         tid = str((d.get("team") or {}).get("id", ""))
         side = "home" if tid == teams["home"]["id"] else "away" if tid == teams["away"]["id"] else None
         clock = d.get("clock") or {}
@@ -237,6 +251,13 @@ def parse_event(ev, league_key):
             game["last_goal"] = " ".join(x for x in ("GOAL", teams[side]["abbr"] if side else "", who, minute_txt) if x)
     game["minute"] = _minute(game["clock"]) if game["sport"] == "soccer" else None
     return game
+
+
+def _score(v):
+    """Scoreboard scores are strings; team schedules send {"value": 3.0, "displayValue": "3"}."""
+    if isinstance(v, dict):
+        return v.get("displayValue") or ("" if v.get("value") is None else str(int(v["value"])))
+    return v
 
 
 def _fnum(v):
@@ -736,7 +757,7 @@ class LeagueBoard(Board):
                     g = offdays.next_game(sport, path, self.league, tid, parse_event)
                 except Exception as e:
                     log.info("[%s] schedule for %s unavailable: %s", self.name, fav, e)
-                    problems[fav] = f"schedule unavailable ({e.__class__.__name__})"
+                    problems[fav] = f"schedule unavailable ({e.__class__.__name__}: {str(e)[:80]})"
                     continue
                 if g is None:
                     problems[fav] = "no upcoming game on ESPN's schedule"

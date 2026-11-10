@@ -23,8 +23,16 @@ def next_game(sport, league_path, league_key, team_id, parse_event):
     r.raise_for_status()
     now = datetime.now(timezone.utc)
     best = None
+    bad = 0
     for ev in r.json().get("events") or []:
-        g = parse_event(ev, league_key)
+        try:
+            g = parse_event(ev, league_key)
+        except Exception as e:                 # one odd event (old game, special format) mustn't stop the rest
+            bad += 1
+            if bad == 1:
+                log.info("skipping unreadable schedule event %s: %r", (ev or {}).get("id") if isinstance(ev, dict) else "?", e,
+                         exc_info=True)
+            continue
         if not g or g["state"] == "post":
             continue
         if g["start"] and g["start"] < now and g["state"] == "pre":
