@@ -469,6 +469,24 @@ UPCOMING_STYLES = {
 from .countdown_layouts import STYLES as COUNTDOWN_STYLES  # noqa: E402
 from .pregame_layouts import LAYOUTS as PREGAME_LAYOUTS  # noqa: E402
 
+# Every upcoming-game design in one list: the classic view (plain or with one of its team color
+# accents) and the full-screen layouts.
+UPCOMING_DESIGNS = {"classic": "Classic (logos, start time, records)"}
+UPCOMING_DESIGNS.update({k: "Classic + " + v for k, v in UPCOMING_STYLES.items() if k != "plain"})
+UPCOMING_DESIGNS.update({k: v for k, v in PREGAME_LAYOUTS.items() if k != "classic"})
+
+
+def upcoming_design(cfg):
+    """(full-screen layout or None, classic accent) for the 'Design' setting (older configs kept the
+    accent in 'upcoming_style')."""
+    d = cfg.get("upcoming_layout", "classic")
+    if d in PREGAME_LAYOUTS and d != "classic":
+        return d, "plain"
+    if d in UPCOMING_STYLES and d != "plain":
+        return None, d
+    style = cfg.get("upcoming_style", "plain")
+    return None, style if style in UPCOMING_STYLES else "plain"
+
 # How a league board's settings are grouped in the web UI (top to bottom).
 LEAGUE_LAYOUT = [
     ("Teams", ["favorites", "favorites_only", "takeover", "hide_favorite_score"]),
@@ -476,7 +494,7 @@ LEAGUE_LAYOUT = [
     ("Which games", ["live_only", "show_final", "final_hours", "show_pregame", "upcoming_hours", "max_games"]),
     ("Between games", ["next_game", "next_game_style", "offseason_countdown", "opener_days", "show_standings",
                        "show_playoffs"]),
-    ("Upcoming games", ["upcoming_layout", "upcoming_style", "show_records", "show_network", "network_logos", "show_odds"]),
+    ("Upcoming games", ["upcoming_layout", "show_records", "show_network", "network_logos", "show_odds"]),
     ("Live games", ["live_layout", "live_style", "detailed_live", "show_win_probability", "show_last_play",
                     "score_flash", "goal_animation"]),
     ("Final scores", ["final_style", "show_final_records"]),
@@ -661,13 +679,9 @@ class LeagueBoard(Board):
              "help": "Built-in logos for ESPN, ABC, CBS, NBC, FOX, FS1, NFL Network, Prime Video, Peacock, Apple TV, "
                      "Netflix, TNT, TBS, MLB/NHL/NBA networks and more; other networks still show as text."},
             {"key": "show_odds", "label": "Show betting line / over-under", "type": "bool", "section": "Upcoming games"},
-            {"key": "upcoming_layout", "label": "Layout", "type": "select", "section": "Upcoming games",
-             "options": list(PREGAME_LAYOUTS), "option_labels": PREGAME_LAYOUTS,
+            {"key": "upcoming_layout", "label": "Design", "type": "select", "section": "Upcoming games",
+             "options": list(UPCOMING_DESIGNS), "option_labels": UPCOMING_DESIGNS,
              "help": "Use Preview > Upcoming to try them."},
-            {"key": "upcoming_style", "label": "Upcoming style", "type": "select", "section": "Upcoming games",
-             "show_if": {"upcoming_layout": "classic"},
-             "options": list(UPCOMING_STYLES), "option_labels": UPCOMING_STYLES,
-             "help": "Team color accents on upcoming games (standard view). Use Preview > Upcoming to try them."},
         ]
         if cls.league in COLLEGE:
             f.append({"key": "show_rankings", "label": "Show AP Top 25 rankings", "type": "bool", "section": "Upcoming games"})
@@ -1472,9 +1486,9 @@ class LeagueBoard(Board):
             if side:
                 render_goal(self, c, g, side, team_color)
                 return
-        if g["state"] == "pre" and self.cfg.get("upcoming_layout", "classic") != "classic":
+        if g["state"] == "pre" and upcoming_design(self.cfg)[0]:
             from .pregame_layouts import RENDERERS as PRE
-            fn = PRE.get(self.cfg.get("upcoming_layout"))
+            fn = PRE.get(upcoming_design(self.cfg)[0])
             if fn:
                 fn(self, c, g, t, team_color)
                 return
@@ -1494,9 +1508,7 @@ class LeagueBoard(Board):
         if final not in FINAL_STYLES:
             final = "plain"
         winner = self._final_winner(g) if final != "plain" else None
-        pre = self.cfg.get("upcoming_style", "plain") if g["state"] == "pre" else "plain"
-        if pre not in UPCOMING_STYLES:
-            pre = "plain"
+        pre = upcoming_design(self.cfg)[1] if g["state"] == "pre" else "plain"
         live = self.cfg.get("live_style", "plain") if g["state"] == "in" else "plain"
         if live not in LIVE_STYLES:
             live = "plain"

@@ -276,13 +276,13 @@ How it works:
   - **Team trim lines**: team-color lines above and below the score, records in team colors and FINAL in the winner's color.
 
   With "hide favorite's score" on, the accents never give away who won. Use **Preview → Final** to try each one.
-- **Upcoming game layout** (per league, under **Upcoming games**):
-  - **Classic**: the standard view (works with the team color accents below).
+- **Upcoming game design** (per league, under **Upcoming games → Design**), all in one list:
+  - **Classic**: the standard view, plain or with one of the team color accents below (**Classic + Matchup badge / Team split bar / Tinted halves / Info banner / Team trim lines**).
   - **Versus**: logos on a diagonal split in both teams' colors, a pulsing "VS" badge, and the start time.
   - **Tale of the tape**: logos and abbreviations at the top, then records, rankings, betting line, series and TV side by side.
   - **Marquee**: a chasing light-bulb border like a theater sign, "TONIGHT" / "TODAY", the matchup and the time.
   - **Broadcast**: TV-style team bars with names and records, and a box with the time and network.
-- **Team color accents** for upcoming games (Classic layout, under **Upcoming games**):
+- The **Classic +** team color accents for upcoming games:
   - **Plain**: no accents (the original look).
   - **Matchup badge**: the "@" sits in a badge colored half and half in both teams' colors, and records are in team colors.
   - **Team split bar**: a half-and-half team-color bar under the start time, and records in team colors.

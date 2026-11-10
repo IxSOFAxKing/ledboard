@@ -80,4 +80,11 @@ def migrate(data: dict) -> bool:
                 b["final_hours"] = 24
         data["_final_hours_v4"] = True
         changed = True
+    # v4 -> v5: the upcoming-game accent ('upcoming_style') joined the single 'Design' list
+    for name in LEAGUES:
+        b = boards.get(name)
+        if isinstance(b, dict) and b.get("upcoming_style") not in (None, "", "plain") \
+                and b.get("upcoming_layout", "classic") == "classic":
+            b["upcoming_layout"], b["upcoming_style"] = b["upcoming_style"], "plain"
+            changed = True
     return changed
