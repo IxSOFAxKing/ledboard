@@ -57,14 +57,14 @@ def render_sun(c, w, t, cfg):
     day = rise <= now <= sett
     frac = (now - rise).total_seconds() / max(1, (sett - rise).total_seconds()) if day else None
     c.line(2, cy, 62, cy, (60, 45, 20))                                   # horizon
-    for a in range(0, 181, 6):                                            # the sun's path, brighter where it's been
-        ang = math.radians(a)
-        x, y = cx - r * math.cos(ang), cy - r * 0.95 * math.sin(ang)
-        done = frac is not None and a <= frac * 180
-        c.pixel(round(x), round(y), (160, 115, 30) if done else (60, 50, 28))
+    # the sun's path: one smooth, continuous arc (dim), brighter over the part the sun has covered
+    box = (cx - r, cy - r, cx + r, cy + r)
+    c.draw.arc(box, 180, 360, fill=(60, 50, 28))
+    if frac is not None and frac > 0:
+        c.draw.arc(box, 180, 180 + 180 * frac, fill=(160, 115, 30))
     if frac is not None:
         ang = math.radians(frac * 180)
-        sx, sy = cx - r * math.cos(ang), cy - r * 0.95 * math.sin(ang)
+        sx, sy = cx - r * math.cos(ang), cy - r * math.sin(ang)
         glow = 0.75 + 0.25 * math.sin(t * 3)
         from PIL import Image, ImageDraw
         layer = Image.new("RGBA", c.image.size)
