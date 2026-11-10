@@ -382,15 +382,42 @@ def short_down(text):
     return out
 
 
-def team_color(team):
-    """Pick whichever of the team's colors is most visible on black, then brighten it."""
+def _neutral(c):
+    """White, black or gray (no real hue)."""
+    if not c:
+        return True
+    _h, s, _v = colorsys.rgb_to_hsv(*(x / 255 for x in c[:3]))
+    return s < 0.18
+
+
+def _team_colors(team):
+    """(main, other) raw team colors, preferring real colors over white / black / gray."""
     def val(c):
-        h, s, v = colorsys.rgb_to_hsv(*(x / 255 for x in c))
+        _h, s, v = colorsys.rgb_to_hsv(*(x / 255 for x in c))
         return v * (0.5 + s / 2)
-    base = team["color"]
-    if val(base) < 0.35 and val(team["alt"]) > val(base) and team["alt"] not in ((255, 255, 255), (0, 0, 0)):
-        base = team["alt"]
-    return readable(base, min_value=0.9)
+    col, alt = team.get("color") or (128, 128, 128), team.get("alt") or (255, 255, 255)
+    real = [x for x in (col, alt) if not _neutral(x)]
+    if len(real) == 2:
+        main = alt if val(col) < 0.35 and val(alt) > val(col) else col
+        return main, (col if main is alt else alt)
+    if len(real) == 1:
+        return real[0], None                 # the other one is white / black / gray
+    return (col if val(col) >= val(alt) else alt), None
+
+
+def team_color(team):
+    """Pick whichever of the team's colors is most visible on black, then brighten it. A white or
+    gray color is only used when the team has no real color."""
+    return readable(_team_colors(team)[0], min_value=0.9)
+
+
+def accent_color(team):
+    """The team's second color for stripes and trims: the other real team color, never white;
+    a darker shade of the main color when the team has only one."""
+    main, other = _team_colors(team)
+    if other is not None:
+        return readable(other, min_value=0.6)
+    return scale(readable(main, min_value=0.9), 0.55)
 
 
 def _snapshot(g):
@@ -1488,8 +1515,7 @@ class LeagueBoard(Board):
         elif style == "trim":
             for side, xa, xb in (("away", x0, mid - 1), ("home", mid, x1 - 1)):
                 tm = g[side]
-                alt = tm.get("alt")
-                second = scale(alt, 0.9) if alt and alt not in ((255, 255, 255), (0, 0, 0)) else team_color(tm)
+                second = accent_color(tm)
                 c.rect(xa, 0, xb, 0, team_color(tm))
                 c.rect(xa, H - 1, xb, H - 1, second)
             if winner:
@@ -1528,8 +1554,7 @@ class LeagueBoard(Board):
         elif style == "trim":
             for side, xa, xb in (("away", x0, mid - 1), ("home", mid, x1 - 1)):
                 tm = g[side]
-                alt = tm.get("alt")
-                second = scale(alt, 0.9) if alt and alt not in ((255, 255, 255), (0, 0, 0)) else team_color(tm)
+                second = accent_color(tm)
                 c.rect(xa, 0, xb, 0, team_color(tm))
                 c.rect(xa, H - 1, xb, H - 1, second)
             c.rect(mid - 5, 0, mid + 4, 0, (0, 0, 0))                 # leave room around the '@'

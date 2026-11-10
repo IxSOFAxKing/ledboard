@@ -81,10 +81,10 @@ def render(board, c, r, t, team_color, clock_text):
     other = g["home" if side == "away" else "away"]
     from ..gfx import readable
     panel = panel_color(team)
-    alt = team.get("alt") or WHITE
-    stripe = readable(alt, min_value=0.9) if alt not in ((0, 0, 0),) else team_color(team)
+    from .sports import accent_color
+    stripe = accent_color(team)
     if sum(abs(a - b) for a, b in zip(stripe, panel)) < 120:      # stripe would vanish on the panel
-        stripe = WHITE
+        stripe = team_color(team)
     c.rect(0, 0, W - 1, 8, panel)
     c.rect(0, 8, W - 1, 8, stripe)
     head = f"{HEADLINE.get(r.kind, 'SCORE')} {(team.get('name') or team['abbr']).upper()}"

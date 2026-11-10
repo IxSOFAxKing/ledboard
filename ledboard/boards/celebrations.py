@@ -12,7 +12,7 @@ import random
 import time
 
 from .. import fonts
-from ..gfx import WHITE, YELLOW, readable
+from ..gfx import scale, WHITE, YELLOW, readable
 
 DURATION = 6.0
 KINDS = {
@@ -77,10 +77,11 @@ def classify(sport, diff, last_play="", cfg=None, recent_td=False):
 
 # ---------------------------------------------------------------- drawing helpers
 def _colors(team, team_color):
+    from .sports import accent_color
     a = team_color(team)
-    b = readable(team.get("alt") or WHITE, 0.8)
+    b = accent_color(team)                    # the team's other real color, never plain white
     if sum(abs(x - y) for x, y in zip(a, b)) < 90:
-        b = WHITE
+        b = scale(a, 0.5)
     return a, b
 
 

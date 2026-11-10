@@ -108,14 +108,18 @@ def _enhance(img, pal, led=True):
     if not pal:
         return img
     out_cols = [led_color(p) for p in pal] if led else list(pal)
+    whiteish = [min(p) >= 200 for p in pal]
     data = []
     for r, g, b, a in img.getdata():
         if a < 110:
             data.append((0, 0, 0, 0))
             continue
+        light = min(r, g, b) > 175
         best, bd = 0, 1 << 30
         for i, (pr, pg, pb) in enumerate(pal):
             d = (r - pr) * (r - pr) * 2 + (g - pg) * (g - pg) * 4 + (b - pb) * (b - pb) * 3
+            if whiteish[i] and not light:
+                d = d * 5 // 2        # edge blends go to the color, not white: keeps white details thin, not blotchy
             if d < bd:
                 best, bd = i, d
         data.append(out_cols[best] + (255,))
@@ -180,6 +184,37 @@ def _despeckle(img):
     return out
 
 
+def _strip_white_rim(img):
+    """Drop a white outline: white pixels on the logo's edge (next to transparency) that border a
+    colored part. Dark-background logos add these outlines; at LED size they turn into blotchy white
+    edges. All-white logos / white letters with no color next to them are left alone."""
+    w, h = img.size
+    src = img.load()
+    out = img.copy()
+    dst = out.load()
+
+    def white(p):
+        return p[3] and min(p[:3]) >= 200
+
+    def colored(p):
+        return p[3] and max(p[:3]) - min(p[:3]) > 40
+
+    for y in range(h):
+        for x in range(w):
+            p = src[x, y]
+            if not white(p):
+                continue
+            n4 = [src[x + dx, y + dy] if 0 <= x + dx < w and 0 <= y + dy < h else (0, 0, 0, 0)
+                  for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))]
+            if not any(q[3] == 0 for q in n4):
+                continue
+            n8 = [src[x + dx, y + dy] for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+                  if (dx or dy) and 0 <= x + dx < w and 0 <= y + dy < h]
+            if any(colored(q) for q in n8):
+                dst[x, y] = (0, 0, 0, 0)
+    return out
+
+
 def logo_image(board, team, w, h=None, partner=None):
     """`team`'s logo inside a w x h box (centered, transparent padding).
 
@@ -217,7 +252,7 @@ def logo_image(board, team, w, h=None, partner=None):
     crisp = edges == "crisp" or (edges == "auto" and min(w, h) >= CRISP_MIN)
     if clean:
         # simplified: the logo's 4 main colors, hard edges, and no stray pixels
-        img = _despeckle(_enhance(img, palette(t)[:4], led=enhance))
+        img = _despeckle(_strip_white_rim(_enhance(img, palette(t)[:4], led=enhance)))
     elif crisp:
         img = _enhance(img, palette(t), led=enhance)   # hard edges in the logo's exact colors
     elif enhance:

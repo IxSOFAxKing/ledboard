@@ -256,7 +256,8 @@ How it works:
   - brightens dark team colors (such as Packers green or navy) so they show up
   - keeps black truly black (only colors that are dark but not black get lifted)
 - **Logo version** (under **Logos**): **Automatic** uses ESPN's small-size "scoreboard" logos for MLB (for example the Cardinals' STL cap logo instead of the birds-on-the-bat wordmark) and full logos elsewhere. You can choose small-size or full logos for any league; teams without a small-size logo always use their full one.
-- **Logo detail** (under **Logos**): **Clean** keeps each logo's 4 main colors, hard edges and no stray pixels, so busy logos (scripts, thin outlines) read better. On by default for MLB.
+- **Logo detail** (under **Logos**): **Clean** keeps each logo's 4 main colors, hard edges and no stray pixels, and drops the white outline that dark-background logos add around colored parts (all-white logos are left alone), so busy logos read better. On by default for MLB.
+- **Team colors on the panel:** wherever a board uses a team's second ("accent") color (trim lines, recap stripes, celebrations), a white, black or gray alternate color is never used; the team's other real color is, or a darker shade of the main color if the team only has one.
 - **Logo edges** (under **Logos**):
   - **Automatic**: crisp hard pixel edges for big logos, smooth anti-aliased edges for small ones, where the soft edge pixels carry the detail.
   - **Smooth**: soft edges at every size, like the clock's "Smooth edges".
