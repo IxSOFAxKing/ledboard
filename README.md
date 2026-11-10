@@ -342,6 +342,8 @@ LEDBoard saves the refresh token, so you only do this once.
    - **Today in 4 parts**: morning / afternoon / evening / night, starting from now.
    - **Compared to yesterday**: shows only when today's high differs from yesterday's by at least the set number of degrees.
 
+   **24-hour graph rain bars** (under Screens): the blue bars along the bottom show each hour's chance of rain (taller = more likely). Settings: turn them off, show only hours with at least a set chance (20% by default, which hides the faint 1-pixel line small chances made), and a legend in the top-right corner with a raindrop and the day's highest chance (that hour's bar is drawn lighter).
+
    With the Home Assistant source, Rain soon and Compared to yesterday aren't available, and air quality isn't either; UV shows if your weather entity reports it.
 
 ### Clock

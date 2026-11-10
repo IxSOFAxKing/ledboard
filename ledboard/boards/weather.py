@@ -26,6 +26,7 @@ AIR_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 HI = (255, 170, 60)
 LO = (90, 160, 255)
 RAIN_BAR = (30, 90, 220)
+RAIN_PEAK = (110, 170, 255)
 COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
 
 
@@ -187,6 +188,7 @@ class WeatherBoard(Board):
         "show_sun": False, "show_rain_soon": False, "show_wind": False, "show_week": False, "show_scene": False,
         "show_air": False, "show_moon": False, "show_parts": False, "show_yesterday": False,
         "aqi_scale": "us", "yesterday_threshold": 8,
+        "hourly_rain": True, "hourly_rain_min": 20, "hourly_rain_legend": True,
         "screen_order": [],          # slide ids in the order to show them ([] = default order)
     }
     FIELDS = [
@@ -211,6 +213,14 @@ class WeatherBoard(Board):
          "show_if": {"show_air": True}},
         {"key": "yesterday_threshold", "label": "Show 'compared to yesterday' when highs differ by at least (degrees)",
          "type": "number", "section": "Screens", "show_if": {"show_yesterday": True}},
+        {"key": "hourly_rain", "label": "24-hour graph: show rain chance bars", "type": "bool", "section": "Screens",
+         "show_if": {"show_hourly": True},
+         "help": "Blue bars along the bottom; taller = more likely to rain that hour."},
+        {"key": "hourly_rain_min", "label": "...only for hours with at least this chance (%)", "type": "number",
+         "section": "Screens", "show_if": {"show_hourly": True, "hourly_rain": True},
+         "help": "Hides the faint 1-pixel bars small chances make (0 = show every hour)."},
+        {"key": "hourly_rain_legend", "label": "...and a rain legend (drop + the highest chance, top right)",
+         "type": "bool", "section": "Screens", "show_if": {"show_hourly": True, "hourly_rain": True}},
         {"key": "duration", "label": "Seconds per screen", "type": "number", "section": "Display"},
         {"key": "refresh", "label": "Refresh interval (s)", "type": "number", "section": "Display"},
     ]
@@ -410,13 +420,20 @@ class WeatherBoard(Board):
         def ty(v):
             return y_bot - (v - lo) / ((hi - lo) or 1) * (y_bot - y_top)
 
-        # rain chance bars along the bottom
-        for i, h in enumerate(hours):
-            p = h.get("precip")
-            if p:
-                x = round(i * step)
-                bh = max(1, round(p / 100 * 8))
-                c.rect(x, H - bh, min(W - 1, x + max(1, round(step) - 1)), H - 1, RAIN_BAR)
+        # rain chance bars along the bottom (hours below the minimum chance are left out)
+        show_rain = self.cfg.get("hourly_rain", True)
+        try:
+            rain_min = float(self.cfg.get("hourly_rain_min", 20) or 0)
+        except (TypeError, ValueError):
+            rain_min = 20.0
+        rainy = [(i, h["precip"]) for i, h in enumerate(hours)
+                 if show_rain and h.get("precip") and h["precip"] >= max(1, rain_min)]
+        peak = max(rainy, key=lambda ip: ip[1]) if rainy else None
+        for i, p in rainy:
+            x = round(i * step)
+            bh = max(1, round(p / 100 * 8))
+            col = RAIN_PEAK if peak and i == peak[0] else RAIN_BAR
+            c.rect(x, H - bh, min(W - 1, x + max(1, round(step) - 1)), H - 1, col)
         # temperature line, colored by temperature, drawn in progressively so it "animates in"
         reveal = min(1.0, t / 1.5)
         pts = [(round(i * step), round(ty(h["temp"])), h["temp"]) for i, h in enumerate(hours) if h.get("temp") is not None]
@@ -439,6 +456,15 @@ class WeatherBoard(Board):
             if ly < 7:            # would collide with the hour labels on the top row
                 ly = y + 2
             c.text(max(0, min(W - lw, x - lw // 2)), max(0, min(H - 6, ly)), lab, "4x6", col)
+        # legend: a raindrop and the highest chance (its bar is drawn lighter), top-right corner
+        if peak and self.cfg.get("hourly_rain_legend", True):
+            txt = f"{round(peak[1])}%"
+            tw = c.text_width(txt, "4x6")
+            lx = W - tw - 5
+            c.rect(lx - 1, 0, W - 1, 6, (0, 0, 0))
+            for dx, dy in ((1, 0), (1, 1), (0, 2), (1, 2), (2, 2), (0, 3), (1, 3), (2, 3), (1, 4)):
+                c.pixel(lx + dx, 1 + dy, RAIN_PEAK)
+            c.text(lx + 4, 0, txt, "4x6", RAIN_PEAK)
 
     def status(self):
         s = super().status()
