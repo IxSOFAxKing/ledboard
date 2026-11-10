@@ -146,6 +146,11 @@ function renderStatus() {
     let info = !b.enabled ? "disabled" : `updated ${ago(b.last_update)} · ${b.slides} slide(s)`;
     if (n === "spotify" && b.enabled) info += b.now ? ` · ${b.now.playing ? "▶" : "⏸"} ${b.now.title} — ${b.now.artist}` : " · nothing playing";
     if (n === "plex" && b.enabled) info += ` · ${b.sessions.length} stream(s)`;
+    if (b.enabled && b.next_games) {
+      for (const [fav, when] of Object.entries(b.next_games))
+        info += ` · next ${fav}: ${when === "TBD" ? "TBD" : new Date(when).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`;
+      for (const [fav, why] of Object.entries(b.next_game_problems || {})) info += ` · next ${fav}: ${why}`;
+    }
     return h("div", { class: "status-row" },
       h("span", { class: "dot " + (!b.enabled ? "idle" : b.last_error ? "err" : "ok") }),
       h("span", { class: "nm" }, SCHEMA?.[n]?.title || n),

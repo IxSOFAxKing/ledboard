@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import colorsys
 import logging
+import math
 import re
 import threading
 import time
@@ -613,6 +614,18 @@ class LeagueBoard(Board):
         params = {"limit": 200}
         if self.favorites():
             params.update(extra)  # e.g. all FBS games so unranked favorites show up
+        if sport != "football":
+            # Without dates ESPN only returns *today's* games (by US Eastern date), so tomorrow's games
+            # never showed up as upcoming cards and last night's finals vanished early. Ask for
+            # yesterday .. as far ahead as the "upcoming games" window reaches.
+            try:
+                ahead = float(self.cfg.get("upcoming_hours", 48) or 48)
+            except (TypeError, ValueError):
+                ahead = 48
+            today = datetime.now().astimezone().date()
+            days = max(1, min(7, math.ceil(ahead / 24))) if self.cfg.get("show_pregame", True) else 0
+            params["dates"] = f"{today - timedelta(days=1):%Y%m%d}-{today + timedelta(days=days):%Y%m%d}"
+            params["limit"] = 500
         r = self.session.get(ESPN.format(sport=sport, league=path), params=params, timeout=15)
         r.raise_for_status()
         games = [g for g in (parse_event(ev, self.league) for ev in r.json().get("events", [])) if g]
@@ -661,21 +674,32 @@ class LeagueBoard(Board):
         self._offday_at = time.time()
         if want_next:
             teams = fetch_teams(sport, path)
-            found = {}
+            found, problems = {}, {}
             for fav in list(self.favorites())[:3]:
+                if not teams:
+                    problems[fav] = "ESPN team list unavailable"
+                    continue
                 tid = (teams.get(fav) or {}).get("id")
                 if not tid:
+                    problems[fav] = f"'{fav}' isn't an ESPN {LEAGUES[self.league][2]} abbreviation"
+                    log.warning("[%s] favorite %s not found in ESPN's team list", self.name, fav)
                     continue
                 try:
                     g = offdays.next_game(sport, path, self.league, tid, parse_event)
                 except Exception as e:
                     log.info("[%s] schedule for %s unavailable: %s", self.name, fav, e)
+                    problems[fav] = f"schedule unavailable ({e.__class__.__name__})"
                     continue
+                if g is None:
+                    problems[fav] = "no upcoming game on ESPN's schedule"
                 if g:
                     for side in ("home", "away"):
                         self._load_logo(g[side])
                     found[fav] = g
             self.next_games = found
+            self.next_game_problems = problems
+            if any(p != "no upcoming game on ESPN's schedule" for p in problems.values()):
+                self._offday_at = time.time() - self.OFFDAY_REFRESH + 600      # try again in 10 minutes
         if want_table:
             try:
                 self.standings_data = offdays.standings(sport, path, self.favorites())
@@ -935,6 +959,11 @@ class LeagueBoard(Board):
         s = super().status()
         s["games"] = len(self.games)
         s["live"] = sum(1 for g in self.games if g["state"] == "in")
+        s["next_games"] = {fav: (g["start"].isoformat() if g.get("start") else "TBD")
+                           for fav, g in self.next_games.items()}
+        problems = getattr(self, "next_game_problems", {})
+        if problems:
+            s["next_game_problems"] = problems
         return s
 
     # -- drawing --------------------------------------------------------------
