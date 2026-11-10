@@ -160,6 +160,10 @@ In more detail:
   - **Matchup**: each half of the panel in its team's colors, with the countdown on a center plate.
   - **Road to kickoff**: a ball travels along a one-week road toward the opponent's logo, with the time to kickoff (first pitch, tip-off, puck drop).
   - **Game day hype**: on the day of the game, a flashing "GAME DAY" in your team's colors with the time to kickoff; before that, the flip clock.
+  - **Stadium scoreboard**: amber light-bulb digits (days / hours / minutes) in a frame, with the occasional flicker.
+  - **Calendar**: a calendar page (month, day, weekday) in your team's color, with "IN 3 DAYS" / "TOMORROW" / "TODAY" and the time.
+  - **Countdown ring**: your logo inside a ring that fills up over the last week before the game.
+  - **Minimal**: just a huge countdown over a two-team color bar.
 
   To see your chosen design, use **Preview → Next-game countdown** on the league's board. It shows two sample countdowns for 3 minutes: one a few days out, and one later today (game day).
 - **Upcoming games**: team records, TV network, betting line and over/under, and AP Top 25 rankings (college leagues only).
@@ -251,6 +255,8 @@ How it works:
   - snaps the shrunken logo to them for crisp edges, with no muddy blended shades
   - brightens dark team colors (such as Packers green or navy) so they show up
   - keeps black truly black (only colors that are dark but not black get lifted)
+- **Logo version** (under **Logos**): **Automatic** uses ESPN's small-size "scoreboard" logos for MLB (for example the Cardinals' STL cap logo instead of the birds-on-the-bat wordmark) and full logos elsewhere. You can choose small-size or full logos for any league; teams without a small-size logo always use their full one.
+- **Logo detail** (under **Logos**): **Clean** keeps each logo's 4 main colors, hard edges and no stray pixels, so busy logos (scripts, thin outlines) read better. On by default for MLB.
 - **Logo edges** (under **Logos**):
   - **Automatic**: crisp hard pixel edges for big logos, smooth anti-aliased edges for small ones, where the soft edge pixels carry the detail.
   - **Smooth**: soft edges at every size, like the clock's "Smooth edges".
@@ -264,7 +270,13 @@ How it works:
   - **Team trim lines**: team-color lines above and below the score, records in team colors and FINAL in the winner's color.
 
   With "hide favorite's score" on, the accents never give away who won. Use **Preview → Final** to try each one.
-- **Team color accents** for upcoming games (per league, under **Upcoming games**):
+- **Upcoming game layout** (per league, under **Upcoming games**):
+  - **Classic**: the standard view (works with the team color accents below).
+  - **Versus**: logos on a diagonal split in both teams' colors, a pulsing "VS" badge, and the start time.
+  - **Tale of the tape**: logos and abbreviations at the top, then records, rankings, betting line, series and TV side by side.
+  - **Marquee**: a chasing light-bulb border like a theater sign, "TONIGHT" / "TODAY", the matchup and the time.
+  - **Broadcast**: TV-style team bars with names and records, and a box with the time and network.
+- **Team color accents** for upcoming games (Classic layout, under **Upcoming games**):
   - **Plain**: no accents (the original look).
   - **Matchup badge**: the "@" sits in a badge colored half and half in both teams' colors, and records are in team colors.
   - **Team split bar**: a half-and-half team-color bar under the start time, and records in team colors.

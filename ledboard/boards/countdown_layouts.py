@@ -14,6 +14,10 @@ STYLES = {
     "matchup": "Matchup (each half in its team's colors)",
     "road": "Road to kickoff (the ball travels toward the game over the last week)",
     "hype": "Game day hype (big GAME DAY on the day, flip clock before)",
+    "bulbs": "Stadium scoreboard (amber light-bulb digits in a frame)",
+    "calendar": "Calendar (a calendar page for game day, with the countdown)",
+    "ring": "Countdown ring (your logo inside a ring that fills up over the last week)",
+    "minimal": "Minimal (just a huge countdown over a team-color bar)",
 }
 
 BALL = {"football": ((150, 80, 30), (255, 255, 255)), "baseball": ((240, 240, 240), (220, 40, 40)),
@@ -261,5 +265,147 @@ def render_hype(board, c, g, fav, t, team_color):
     _draw_info(board, c, g, items[int(t // 3) % len(items)], x0, x1, H - 8, team_color(me), t=t)
 
 
+# ---------------------------------------------------------------- more designs
+# 3x5 light-bulb digits for the stadium scoreboard
+BULB_DIGITS = {
+    "0": ["111", "101", "101", "101", "111"], "1": ["010", "110", "010", "010", "111"],
+    "2": ["111", "001", "111", "100", "111"], "3": ["111", "001", "111", "001", "111"],
+    "4": ["101", "101", "111", "001", "001"], "5": ["111", "100", "111", "001", "111"],
+    "6": ["111", "100", "111", "101", "111"], "7": ["111", "001", "010", "010", "010"],
+    "8": ["111", "101", "111", "101", "111"], "9": ["111", "101", "111", "001", "111"],
+}
+AMBER = (255, 160, 20)
+
+
+def _bulb_digit(c, x, y, ch, on, off, pitch=3):
+    """A 3x5 digit of 2x2 'bulbs' with 1 px gaps (9 x 15 px)."""
+    rows = BULB_DIGITS.get(ch)
+    if not rows:
+        return
+    for r, row in enumerate(rows):
+        for k, bit in enumerate(row):
+            px, py = x + k * pitch, y + r * pitch
+            c.rect(px, py, px + 1, py + 1, on if bit == "1" else off)
+
+
+def render_bulbs(board, c, g, fav, t, team_color):
+    from .football_layouts import small_logo
+    W, H = c.width, c.height
+    side, other = _sides(g, fav)
+    me, opp = g[side], g[other]
+    c.draw.rectangle((0, 0, W - 1, H - 1), outline=(70, 50, 20))
+    c.paste(small_logo(board, me, 12, opp), 2, 2)
+    c.paste(small_logo(board, opp, 12, me), W - 14, 2)
+    c.text_centered(3, f"{me['abbr']} {'@' if side == 'away' else 'VS'} {opp['abbr']}", "4x6", AMBER, 16, W - 16)
+    secs = _secs(g)
+    off = (22, 14, 4)
+    if secs is None:
+        c.text_centered(13, "TBD", "6x10", AMBER)
+        return
+    digits, labels = _countdown_groups(secs)
+    dw, dgap, ggap = 8, 2, 6                      # digit width, gap inside a pair, gap between pairs
+    gw = 2 * dw + dgap
+    total = 3 * gw + 2 * ggap
+    x = (W - total) // 2
+    flick = 1.0 if int(t * 8) % 23 else 0.75      # the odd flicker, like real bulbs
+    on = scale(AMBER, flick)
+    for gi, (pair, lab) in enumerate(zip(digits, labels)):
+        gx = x + gi * (gw + ggap)
+        for k, ch in enumerate(pair):
+            _bulb_digit(c, gx + k * (dw + dgap), 10, ch, on, off)
+        c.text_centered(H - 6, lab, "4x6", scale(AMBER, 0.55), gx - 2, gx + gw + 2)
+        if gi < 2 and int(t * 2) % 2 == 0:
+            cx = gx + gw + ggap // 2 - 1
+            c.rect(cx, 13, cx + 1, 14, on)
+            c.rect(cx, 19, cx + 1, 20, on)
+
+
+def render_calendar(board, c, g, fav, t, team_color):
+    from .football_layouts import logo_fit
+    W, H = c.width, c.height
+    side, other = _sides(g, fav)
+    me, opp = g[side], g[other]
+    from .football_layouts import panel_color
+    col = panel_color(me)
+    # calendar page: team-colored header strip with the month, big day number, weekday under it
+    px0, px1 = 2, 33
+    c.draw.rounded_rectangle((px0, 1, px1, H - 2), radius=3, fill=(200, 200, 200))
+    c.draw.rounded_rectangle((px0, 1, px1, 9), radius=3, fill=col)
+    c.rect(px0, 6, px1, 9, col)
+    for rx in (9, 26):                                        # binder rings
+        c.rect(rx, 0, rx + 1, 3, (120, 120, 120))
+    if g.get("start"):
+        local = g["start"].astimezone()
+        c.text_centered(2, local.strftime("%b").upper(), "5x7", WHITE, px0, px1 + 1)
+        c.text_centered(10, str(local.day), "7x13B", (20, 20, 20), px0, px1 + 1)
+        c.text_centered(H - 8, local.strftime("%a").upper(), "4x6", (90, 90, 90), px0, px1 + 1)
+    else:
+        c.text_centered(12, "TBD", "6x10", (20, 20, 20), px0, px1 + 1)
+    x0 = 38
+    secs = _secs(g)
+    c.paste(logo_fit(board, opp, 22, 22, me), W - 23, 1)
+    vs = _vs(g, side, other)
+    c.text(x0, 1, vs, "6x10", team_color(opp))
+    if secs is not None:
+        d, rem = divmod(secs, 86400)
+        txt = ("TODAY" if _is_today(g) else "TOMORROW" if d < 2 and _days_until(g) == 1 else f"IN {_days_until(g)} DAYS")
+        c.text(x0, 12, txt, "5x7", YELLOW if d < 1 else WHITE)
+    c.text(x0, H - 8, _when(g, "%-I:%M %p"), "5x7", GRAY)
+
+
+def _days_until(g):
+    if not g.get("start"):
+        return 0
+    return (g["start"].astimezone().date() - datetime.now().astimezone().date()).days
+
+
+def render_ring(board, c, g, fav, t, team_color):
+    from .football_layouts import logo_fit
+    W, H = c.width, c.height
+    side, other = _sides(g, fav)
+    me, opp = g[side], g[other]
+    col = team_color(me)
+    cx, cy, r = 16, 15, 14
+    secs = _secs(g)
+    frac = 0.0 if secs is None else max(0.0, min(1.0, 1 - secs / (7 * 86400)))
+    c.draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=(40, 40, 46), width=3)
+    if frac > 0:
+        c.draw.arc((cx - r, cy - r, cx + r, cy + r), -90, -90 + 360 * frac, fill=col, width=3)
+        ang = math.radians(-90 + 360 * frac)                   # a bright head on the arc
+        hx, hy = cx + (r - 1) * math.cos(ang), cy + (r - 1) * math.sin(ang)
+        glow = 0.6 + 0.4 * math.sin(t * 4)
+        c.draw.ellipse((hx - 2, hy - 2, hx + 2, hy + 2), fill=scale(WHITE, glow))
+    logo = logo_fit(board, me, 18, 18, opp)
+    if logo is not None:
+        c.paste(logo, cx - 9, cy - 9)
+    x0 = 36
+    c.text(x0, 1, _vs(g, side, other), "6x10", team_color(opp))
+    cd = "TBD" if secs is None else _short_countdown(secs)
+    c.text(x0, 12, cd, "7x13B" if c.text_width(cd, "7x13B") < W - x0 else "6x10",
+           YELLOW if secs is not None and secs < 86400 else WHITE)
+    items = [x for x in (_when(g, "%a %-I:%M%p"), (g.get("note") or "").upper(), (g.get("network") or "").upper()) if x]
+    if items:
+        _draw_info(board, c, g, items[int(t // 3) % len(items)], x0, W, H - 6, GRAY, font="4x6", t=t)
+
+
+def render_minimal(board, c, g, fav, t, team_color):
+    W, H = c.width, c.height
+    side, other = _sides(g, fav)
+    me, opp = g[side], g[other]
+    secs = _secs(g)
+    c.rect(0, H - 3, W // 2 - 1, H - 1, team_color(g["away"]))
+    c.rect(W // 2, H - 3, W - 1, H - 1, team_color(g["home"]))
+    if secs is None:
+        big = "TBD"
+    else:
+        d, rem = divmod(secs, 86400)
+        h, m, s_ = rem // 3600, rem % 3600 // 60, rem % 60
+        big = f"{d}D {h:02d}H" if d else f"{h}:{m:02d}:{s_:02d}"
+    font = "10x20" if c.text_width(big, "10x20") <= W - 4 else "7x13B"
+    c.text_centered(2, big, font, WHITE if secs is None or secs > 86400 else YELLOW)
+    c.text_centered(H - 10, f"{g['away']['abbr']} @ {g['home']['abbr']} · {_when(g, '%a %-I:%M%p')}", "4x6", GRAY)
+
+
 RENDERERS = {"flip": render_flip, "ticket": render_ticket, "matchup": render_matchup, "road": render_road,
-             "hype": render_hype}
+             "hype": render_hype, "bulbs": render_bulbs, "calendar": render_calendar, "ring": render_ring,
+             "minimal": render_minimal}

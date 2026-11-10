@@ -439,6 +439,7 @@ UPCOMING_STYLES = {
 }
 
 from .countdown_layouts import STYLES as COUNTDOWN_STYLES  # noqa: E402
+from .pregame_layouts import LAYOUTS as PREGAME_LAYOUTS  # noqa: E402
 
 # How a league board's settings are grouped in the web UI (top to bottom).
 LEAGUE_LAYOUT = [
@@ -447,12 +448,12 @@ LEAGUE_LAYOUT = [
     ("Which games", ["live_only", "show_final", "final_hours", "show_pregame", "upcoming_hours", "max_games"]),
     ("Between games", ["next_game", "next_game_style", "offseason_countdown", "opener_days", "show_standings",
                        "show_playoffs"]),
-    ("Upcoming games", ["upcoming_style", "show_records", "show_network", "network_logos", "show_odds"]),
+    ("Upcoming games", ["upcoming_layout", "upcoming_style", "show_records", "show_network", "network_logos", "show_odds"]),
     ("Live games", ["live_layout", "live_style", "detailed_live", "show_win_probability", "show_last_play",
                     "score_flash", "goal_animation"]),
     ("Final scores", ["final_style", "show_final_records"]),
     ("Celebrations", ["celebrations", "celebrate_field_goals", "celebrate_runs", "recap", "simulate"]),
-    ("Logos", ["show_abbreviations", "logo_enhance", "logo_edges", "use_dark_logos"]),
+    ("Logos", ["show_abbreviations", "logo_version", "logo_detail", "logo_enhance", "logo_edges", "use_dark_logos"]),
     ("Text colors", ["text_score", "text_status", "text_info", "text_loser", "abbr_color_mode", "abbr_color"]),
     ("Timing", ["duration", "refresh", "live_refresh"]),
 ]
@@ -480,6 +481,8 @@ LIVE_STYLES = {
 
 # Teams whose ESPN "dark background" logo is an all-white version; always use their color logo.
 COLOR_LOGO_TEAMS = {"nfl": ("lar", "nyj")}
+# leagues whose primary logos are busy wordmarks / scripts: use ESPN's small-size logos by default
+SCOREBOARD_LOGO_LEAGUES = {"mlb"}
 
 
 def _prefers_color_logo(url):
@@ -516,8 +519,9 @@ class LeagueBoard(Board):
         "celebrations": True, "celebrate_field_goals": False, "celebrate_runs": False,
         "next_game": "no_games", "next_game_style": "classic", "offseason_countdown": True, "opener_days": 14, "show_standings": False, "show_playoffs": False, "recap": True,
         "show_abbreviations": True, "show_final_records": True, "logo_enhance": True, "logo_edges": "auto",
+        "logo_version": "auto", "logo_detail": "full",
         "text_score": "#ffffff", "text_status": "#ffc800", "text_info": "#787878", "text_loser": "#787878",
-        "abbr_color_mode": "team", "abbr_color": "#ffffff", "final_style": "plain", "upcoming_style": "plain", "live_style": "plain",
+        "abbr_color_mode": "team", "abbr_color": "#ffffff", "final_style": "plain", "upcoming_style": "plain", "upcoming_layout": "classic", "live_style": "plain",
         "network_logos": True,
     }
 
@@ -567,7 +571,11 @@ class LeagueBoard(Board):
              "help": "Built-in logos for ESPN, ABC, CBS, NBC, FOX, FS1, NFL Network, Prime Video, Peacock, Apple TV, "
                      "Netflix, TNT, TBS, MLB/NHL/NBA networks and more; other networks still show as text."},
             {"key": "show_odds", "label": "Show betting line / over-under", "type": "bool", "section": "Upcoming games"},
+            {"key": "upcoming_layout", "label": "Layout", "type": "select", "section": "Upcoming games",
+             "options": list(PREGAME_LAYOUTS), "option_labels": PREGAME_LAYOUTS,
+             "help": "Use Preview > Upcoming to try them."},
             {"key": "upcoming_style", "label": "Upcoming style", "type": "select", "section": "Upcoming games",
+             "show_if": {"upcoming_layout": "classic"},
              "options": list(UPCOMING_STYLES), "option_labels": UPCOMING_STYLES,
              "help": "Team color accents on upcoming games (standard view). Use Preview > Upcoming to try them."},
         ]
@@ -645,6 +653,16 @@ class LeagueBoard(Board):
              "option_labels": {"auto": "Automatic (crisp when big, smooth when small)",
                                "smooth": "Smooth (anti-aliased, softer)", "crisp": "Crisp (hard pixel edges)"},
              "help": "Smooth keeps soft edges like the clock's 'Smooth edges'; crisp snaps to the logo's exact colors."},
+            {"key": "logo_version", "label": "Logo version", "type": "select", "section": "Logos",
+             "options": ["auto", "scoreboard", "primary"],
+             "option_labels": {"auto": "Automatic (small-size logos for MLB, full logos elsewhere)",
+                               "scoreboard": "Small-size logos (ESPN's scoreboard versions, e.g. the STL cap logo)",
+                               "primary": "Full team logos"},
+             "help": "Teams without a small-size logo always use their full logo."},
+            {"key": "logo_detail", "label": "Logo detail", "type": "select", "section": "Logos",
+             "options": ["full", "clean"],
+             "option_labels": {"full": "Full detail", "clean": "Clean (4 main colors, no stray pixels)"},
+             "help": "Clean makes busy logos (scripts, thin outlines) read better on the LEDs."},
             {"key": "use_dark_logos", "label": "Prefer logos designed for dark backgrounds", "type": "bool", "section": "Logos",
              "help": "When a team's dark-background logo is plain white (e.g. Rams, Jets), the colored logo is used instead."},
             {"key": "final_style", "label": "Final style", "type": "select", "section": "Final scores",
@@ -967,13 +985,32 @@ class LeagueBoard(Board):
             return duration(slide, self.app.width)
         return self.duration
 
+    def _logo_version(self):
+        v = self.cfg.get("logo_version", "auto")
+        if v == "auto":
+            return "scoreboard" if self.league in SCOREBOARD_LOGO_LEAGUES else "primary"
+        return v
+
     def _load_logo(self, team):
         url = team.get("logo_url")
+        sig = (self._logo_version(), bool(self.cfg.get("use_dark_logos", True)))
+        if sig != getattr(self, "_logo_sig", sig):           # logo settings changed: load them all again
+            self.logos, self.logo_src = {}, {}
+        self._logo_sig = sig
         if not url or url in self.logos:
             return
         size = self.app.height * 6          # ~192 px: room to find the logo's true colors
         img = None
-        if self.cfg.get("use_dark_logos", True) and "/500/" in url and not _prefers_color_logo(url):
+        if self._logo_version() == "scoreboard" and "/500/" in url:
+            # ESPN's simplified 'scoreboard' logos (e.g. the Cardinals' STL cap logo instead of the
+            # birds-on-a-bat wordmark) are made for small sizes; not every team / league has one
+            tries = ([url.replace("/500/", "/500-dark/scoreboard/")] if self.cfg.get("use_dark_logos", True) else []) \
+                + [url.replace("/500/", "/500/scoreboard/")]
+            for u in tries:
+                img = fetch_image(u, size, size, trim=True)
+                if img is not None:
+                    break
+        if img is None and self.cfg.get("use_dark_logos", True) and "/500/" in url and not _prefers_color_logo(url):
             img = fetch_image(url.replace("/500/", "/500-dark/"), size, size, trim=True)
             if img is not None and colorfulness(img) < 0.12:
                 # some "dark background" logos are plain white (e.g. Rams, Jets): use the team-color
@@ -1210,6 +1247,12 @@ class LeagueBoard(Board):
             side = goal_side(self, g)
             if side:
                 render_goal(self, c, g, side, team_color)
+                return
+        if g["state"] == "pre" and self.cfg.get("upcoming_layout", "classic") != "classic":
+            from .pregame_layouts import RENDERERS as PRE
+            fn = PRE.get(self.cfg.get("upcoming_layout"))
+            if fn:
+                fn(self, c, g, t, team_color)
                 return
         if g["state"] == "in" and live_layouts(self.sport):
             fn = live_renderers(self.sport).get(self.cfg.get("live_layout", "classic"))
@@ -1698,7 +1741,8 @@ def _make(key):
     cls = type(f"{key.upper()}Board", (LeagueBoard,), {
         "name": key, "league": key, "title": title,
         "description": f"{title} scores from ESPN: live, upcoming and final games.",
-        "DEFAULTS": dict(LeagueBoard.COMMON, enabled=key in DEFAULT_ON),
+        "DEFAULTS": dict(LeagueBoard.COMMON, enabled=key in DEFAULT_ON,
+                         **({"logo_detail": "clean"} if key in SCOREBOARD_LOGO_LEAGUES else {})),
     })
     cls.FIELDS = cls.build_fields()
     return cls

@@ -149,6 +149,37 @@ def _soft_enhance(img):
     return out
 
 
+def _despeckle(img):
+    """Remove lone pixels left over from shrinking busy logos (thin outlines, script lettering, tiny
+    details): an opaque pixel whose color none of its 4 neighbours share takes the most common color
+    around it (or goes transparent if it's mostly surrounded by nothing)."""
+    w, h = img.size
+    src = img.load()
+    out = img.copy()
+    dst = out.load()
+    for y in range(h):
+        for x in range(w):
+            p = src[x, y]
+            if p[3] == 0:
+                continue
+            n4 = [src[x + dx, y + dy] for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)) if 0 <= x + dx < w and 0 <= y + dy < h]
+            if any(q[:3] == p[:3] and q[3] for q in n4):
+                continue
+            n8 = [src[x + dx, y + dy] for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+                  if (dx or dy) and 0 <= x + dx < w and 0 <= y + dy < h]
+            clear = sum(1 for q in n8 if q[3] == 0)
+            if clear >= 5:
+                dst[x, y] = (0, 0, 0, 0)
+                continue
+            counts = {}
+            for q in n8:
+                if q[3]:
+                    counts[q] = counts.get(q, 0) + 1
+            if counts:
+                dst[x, y] = max(counts, key=counts.get)
+    return out
+
+
 def logo_image(board, team, w, h=None, partner=None):
     """`team`'s logo inside a w x h box (centered, transparent padding).
 
@@ -165,7 +196,8 @@ def logo_image(board, team, w, h=None, partner=None):
     cfg = getattr(board, "cfg", {})
     enhance = bool(cfg.get("logo_enhance", True))
     edges = cfg.get("logo_edges", "auto")
-    key = (team.get("logo_url"), (partner or {}).get("logo_url"), w, h, enhance, edges)
+    clean = cfg.get("logo_detail", "full") == "clean"
+    key = (team.get("logo_url"), (partner or {}).get("logo_url"), w, h, enhance, edges, clean)
     hit = _cache.get(key)
     if hit is not None and hit[0]() is src and hit[1]() is psrc:
         return hit[2]
@@ -183,7 +215,10 @@ def logo_image(board, team, w, h=None, partner=None):
     size = (max(1, round(fw)), max(1, round(fh)))
     img = t.resize(size, Image.LANCZOS)
     crisp = edges == "crisp" or (edges == "auto" and min(w, h) >= CRISP_MIN)
-    if crisp:
+    if clean:
+        # simplified: the logo's 4 main colors, hard edges, and no stray pixels
+        img = _despeckle(_enhance(img, palette(t)[:4], led=enhance))
+    elif crisp:
         img = _enhance(img, palette(t), led=enhance)   # hard edges in the logo's exact colors
     elif enhance:
         img = _soft_enhance(img)                       # smooth (anti-aliased) edges, brighter colors
