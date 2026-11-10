@@ -28,6 +28,17 @@ KICKOFF = {"football": "KICKOFF", "baseball": "FIRST PITCH", "basketball": "TIP-
 
 
 # ---------------------------------------------------------------- helpers
+def secondary_color(team):
+    """The team's second color (e.g. Packers gold), brightened for the LEDs; if that's white / black /
+    gray, a different shade of the main color instead."""
+    from .sports import _neutral, accent_color
+    from ..gfx import readable
+    alt = team.get("alt")
+    if alt and not _neutral(alt):
+        return readable(alt, min_value=0.6)
+    return accent_color(team)
+
+
 def primary_color(team):
     """The team's main color as it is (e.g. Packers green, not the brighter gold), lifted just enough to
     show on the LEDs; falls back to the most visible team color if the main color is white / black / gray."""
@@ -154,7 +165,7 @@ def render_ticket(board, c, g, fav, t, team_color):
     W, H = c.width, c.height
     side, other = _sides(g, fav)
     me, opp = g[side], g[other]
-    col = primary_color(me)                       # the ticket is printed in the team's own main color
+    col = secondary_color(me)                     # outline + perforation: the team's second color (Packers gold)
     stub = 88
     c.draw.rounded_rectangle((0, 0, W - 1, H - 1), radius=3, outline=col)
     for y in (0, H - 1):                                   # notches where the stub tears off
@@ -164,9 +175,9 @@ def render_ticket(board, c, g, fav, t, team_color):
     # main part: logos, matchup, date / time / network
     c.paste(small_logo(board, me, 12, opp), 4, 3)
     x = 18
-    x += c.text(x, 4, me["abbr"], "6x10", col) + 3
+    x += c.text(x, 4, me["abbr"], "6x10", primary_color(me)) + 3       # abbreviations: each team's main color
     x += c.text(x, 6, "@" if side == "away" else "VS", "4x6", GRAY) + 3
-    x += c.text(x, 4, opp["abbr"], "6x10", team_color(opp)) + 3
+    x += c.text(x, 4, opp["abbr"], "6x10", primary_color(opp)) + 3
     c.paste(small_logo(board, opp, 12, me), min(x, stub - 15), 3)
     if g.get("start"):
         local = g["start"].astimezone()

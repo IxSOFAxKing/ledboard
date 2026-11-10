@@ -151,6 +151,7 @@ function renderStatus() {
         info += ` · next ${fav}: ${when === "TBD" ? "TBD" : new Date(when).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`;
       for (const [fav, why] of Object.entries(b.next_game_problems || {})) info += ` · next ${fav}: ${why}`;
       for (const [fav, why] of Object.entries(b.next_game_hidden || {})) info += ` (${fav}: ${why})`;
+      if (b.logo_note) info += ` · ${b.logo_note}`;
     }
     return h("div", { class: "status-row" },
       h("span", { class: "dot " + (!b.enabled ? "idle" : b.last_error ? "err" : "ok") }),

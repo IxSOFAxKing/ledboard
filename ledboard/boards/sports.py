@@ -778,6 +778,8 @@ class LeagueBoard(Board):
         self.games: list[dict] = []
         self.logos: dict[str, object] = {}       # url -> logo fitted to the display height
         self.logo_src: dict[str, object] = {}    # url -> trimmed hi-res copy for other sizes
+        self.logo_fallback: dict = {}             # url -> retry time, for logos showing a fallback version
+        self.logo_sources: dict = {}              # url -> "preferred" / "fallback" (for the Status tab)
         self.flash: dict[str, float] = {}     # "gameid|side" -> until (monotonic)
         self._scores: dict[str, str] = {}
         self.pending = []                     # queued Celebration slides
@@ -1122,17 +1124,27 @@ class LeagueBoard(Board):
         url = team.get("logo_url")
         sig = (self._logo_version(), bool(self.cfg.get("use_dark_logos", True)), tuple(sorted(self._custom_logos().items())))
         if sig != getattr(self, "_logo_sig", sig):           # logo settings changed: load them all again
-            self.logos, self.logo_src = {}, {}
+            self.logos, self.logo_src, self.logo_fallback = {}, {}, {}
         self._logo_sig = sig
-        if not url or url in self.logos:
+        if not url:
+            return
+        fallback = getattr(self, "logo_fallback", None)
+        if fallback is None:
+            fallback = self.logo_fallback = {}            # url -> when to try the preferred source again
+        if url in self.logos and not (url in fallback and time.time() >= fallback[url]):
             return
         size = self.app.height * 6          # ~192 px: room to find the logo's true colors
         abbr = (team.get("abbr") or _abbr_from_logo_url(url) or "").upper()
         custom = self._custom_logos().get(abbr)
-        img = self._fetch_logo(custom, size) if custom else None
+        cands = self.logo_candidates(url, abbr, self._logo_version())
+        preferred = custom or cands[0][1]
+        retrying = url in self.logos
+        img, used = (self._fetch_logo(custom, size), custom) if custom else (None, None)
         if img is None:
-            for label, u in self.logo_candidates(url, abbr, self._logo_version()):
-                img = self._fetch_logo(u, size)
+            for label, u in cands:
+                if retrying and u != preferred:
+                    break                     # retry only the preferred source; keep what we have otherwise
+                img, used = self._fetch_logo(u, size), u
                 if img is None:
                     continue
                 if label == "ESPN full (dark)" and colorfulness(img) < 0.12:
@@ -1142,6 +1154,18 @@ class LeagueBoard(Board):
                     if color_img is not None and colorfulness(color_img) > colorfulness(img) + 0.15:
                         img = color_img
                 break
+        if img is not None and used == preferred:
+            fallback.pop(url, None)
+            self.logo_sources[url] = "preferred"
+        else:
+            # the logo we wanted couldn't be downloaded (e.g. network not ready at boot): use the fallback
+            # for now and try the preferred one again in 5 minutes
+            tries = self.__dict__.setdefault("_logo_tries", {})
+            tries[url] = tries.get(url, 0) + 1
+            fallback[url] = time.time() + 300 * min(12, 2 ** (tries[url] - 1))   # 5 min, 10, 20 ... up to 1 h
+            if retrying:
+                return
+            self.logo_sources[url] = "fallback"
         self.set_logo(url, img)
 
     def set_logo(self, url, img):
@@ -1267,6 +1291,8 @@ class LeagueBoard(Board):
         if kind == "countdown":
             return self._preview_countdown(sport, path, teams, away, home)
         if kind == "logos":
+            for u in list(getattr(self, "logo_fallback", {})):
+                self.logo_fallback[u] = 0          # retry fallbacks on the next update
             return self._preview_logos(teams)
         states = {"live": ["in"], "pre": ["pre"], "post": ["post"], "all": ["in", "pre", "post"]}[kind]
         games = []
@@ -1368,6 +1394,10 @@ class LeagueBoard(Board):
         s = super().status()
         s["games"] = len(self.games)
         s["live"] = sum(1 for g in self.games if g["state"] == "in")
+        if self.logo_sources:
+            fb = sum(1 for v in self.logo_sources.values() if v == "fallback")
+            if fb:
+                s["logo_note"] = f"{fb} logo(s) using a fallback version (retrying)"
         s["next_games"] = {fav: (g["start"].isoformat() if g.get("start") else "TBD")
                            for fav, g in self.next_games.items()}
         hidden = {}
