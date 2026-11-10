@@ -461,6 +461,7 @@ UPCOMING_STYLES = {
     "plain": "Plain (no accents)",
     "badge": "Matchup badge ('@' in a two-team color badge, records in team colors)",
     "splitbar": "Team split bar (half-and-half bar under the start time, records in team colors)",
+    "splitborder": "Team split bar + border (plus a thin border: each half in that team's accent color)",
     "tint": "Tinted halves (each side washed in its team color)",
     "banner": "Info banner (bottom line on a two-team color banner)",
     "trim": "Team trim lines (team-color lines above and below)",
@@ -1520,7 +1521,7 @@ class LeagueBoard(Board):
         if g["state"] == "pre":
             if self.cfg.get("show_records", True):
                 rc = (self._tc("text_info"),) * 2
-                if pre in ("badge", "splitbar", "trim"):
+                if pre in ("badge", "splitbar", "splitborder", "trim"):
                     rc = (scale(team_color(away), 0.85), scale(team_color(home), 0.85))
                 c.text(x0 + 1, 2, away["record"], "4x6", rc[0])
                 c.text_right(x1 - 1, 2, home["record"], "4x6", rc[1])
@@ -1748,10 +1749,20 @@ class LeagueBoard(Board):
         def recolor(col):
             return [(txt, col) for txt, _ in items]
 
-        if style == "splitbar":
+        if style in ("splitbar", "splitborder"):
             bx0, bx1 = x0 + 2, x1 - 3
             c.rect(bx0, 21, mid - 1, 21, team_color(away))
             c.rect(mid, 21, bx1, 21, team_color(home))
+            if style == "splitborder":
+                from .countdown_layouts import secondary_color
+                W = c.width
+                ca, ch = secondary_color(away), secondary_color(home)      # each team's accent (Packers gold)
+                c.rect(0, 0, mid - 1, 0, ca)                                 # top
+                c.rect(mid, 0, W - 1, 0, ch)
+                c.rect(0, H - 1, mid - 1, H - 1, ca)                         # bottom
+                c.rect(mid, H - 1, W - 1, H - 1, ch)
+                c.rect(0, 0, 0, H - 1, ca)                                   # sides
+                c.rect(W - 1, 0, W - 1, H - 1, ch)
         elif style == "tint":
             items = recolor(WHITE)
         elif style == "banner":
