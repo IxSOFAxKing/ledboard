@@ -271,13 +271,14 @@ How it works:
   - **Plain**: no accents (the original look).
   - **Winner color**: the winning score, an underline and FINAL in the winner's color, with the loser dimmed.
   - **Team split bar**: a bar under the score split by points in both teams' colors, and records in team colors.
+  - **Team split bar + border**: the same, plus a thin rounded border around the panel, each half in that team's main color (logos are inset so they never touch it).
   - **Tinted halves**: each side of the panel washed in its team color, brighter for the winner.
   - **Winner banner**: a team-colored "GB WINS" banner on the bottom line and an arrow at the winning score.
   - **Team trim lines**: team-color lines above and below the score, records in team colors and FINAL in the winner's color.
 
   With "hide favorite's score" on, the accents never give away who won. Use **Preview → Final** to try each one.
 - **Upcoming game design** (per league, under **Upcoming games → Design**), all in one list:
-  - **Classic**: the standard view, plain or with one of the team color accents below (**Classic + Matchup badge / Team split bar / Team split bar + border / Tinted halves / Info banner / Team trim lines**). "Split bar + border" adds a thin border with rounded corners around the whole panel (logos are inset so they never touch it), the away half in the away team's accent color and the home half in the home team's.
+  - **Classic**: the standard view, plain or with one of the team color accents below (**Classic + Matchup badge / Team split bar / Team split bar + border / Tinted halves / Info banner / Team trim lines**). "Split bar + border" adds a thin border with rounded corners around the whole panel (logos are inset so they never touch it), the away half in the away team's main color (e.g. Packers green) and the home half in the home team's.
   - **Versus**: logos on a diagonal split in both teams' colors, a pulsing "VS" badge, and the start time.
   - **Tale of the tape**: logos and abbreviations at the top, then records, rankings, betting line, series and TV side by side.
   - **Marquee**: a chasing light-bulb border like a theater sign, "TONIGHT" / "TODAY", the matchup and the time.

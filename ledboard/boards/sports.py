@@ -452,6 +452,7 @@ FINAL_STYLES = {
     "plain": "Plain (no accents)",
     "winner": "Winner color (winning score, underline and FINAL in the winner's color)",
     "splitbar": "Team split bar (bar under the score split by points, records in team colors)",
+    "splitborder": "Team split bar + border (plus a rounded border: each half in that team's main color)",
     "tint": "Tinted halves (each side washed in its team color)",
     "banner": "Winner banner (team-colored 'GB WINS' banner + arrow)",
     "trim": "Team trim lines (team-color lines above and below the score)",
@@ -461,7 +462,7 @@ UPCOMING_STYLES = {
     "plain": "Plain (no accents)",
     "badge": "Matchup badge ('@' in a two-team color badge, records in team colors)",
     "splitbar": "Team split bar (half-and-half bar under the start time, records in team colors)",
-    "splitborder": "Team split bar + border (plus a thin border: each half in that team's accent color)",
+    "splitborder": "Team split bar + border (plus a rounded border: each half in that team's main color)",
     "tint": "Tinted halves (each side washed in its team color)",
     "banner": "Info banner (bottom line on a two-team color banner)",
     "trim": "Team trim lines (team-color lines above and below)",
@@ -1517,7 +1518,7 @@ class LeagueBoard(Board):
             winner = self._final_winner(g, live=True)             # the team that's ahead (None when tied)
         if final == "tint" or pre == "tint" or live == "tint":
             self._final_tint(c, g, mid, winner)
-        self._team_columns(c, g, col, detailed, inset=2 if pre == "splitborder" else 0)
+        self._team_columns(c, g, col, detailed, inset=2 if "splitborder" in (pre, final) else 0)
         if g["state"] == "pre":
             if self.cfg.get("show_records", True):
                 rc = (self._tc("text_info"),) * 2
@@ -1546,7 +1547,7 @@ class LeagueBoard(Board):
             if g["state"] == "post" and self.cfg.get("show_final_records", True):
                 # updated records under each team's side of the score
                 rc = (self._tc("text_info"),) * 2
-                if final in ("splitbar", "trim"):
+                if final in ("splitbar", "splitborder", "trim"):
                     rc = (scale(team_color(away), 0.85), scale(team_color(home), 0.85))
                 c.text(x0 + 1, 17, away["record"], "4x6", rc[0])
                 c.text_right(x1 - 1, 17, home["record"], "4x6", rc[1])
@@ -1698,7 +1699,9 @@ class LeagueBoard(Board):
                 for side, xa, xb in (("away", ax1 - aw, ax1 - 1), ("home", hx0, hx0 + hw - 1)):
                     c.rect(xa, 15, xb, 15, scale(team_color(g[side]), 1 if side == winner else 0.45))
                 items = recolor(win_col)
-        elif style == "splitbar":
+        elif style in ("splitbar", "splitborder"):
+            if style == "splitborder":
+                self._split_border(c, g, mid)
             sa, sh = (1, 1) if hidden else (max(0, _num(away["score"])), max(0, _num(home["score"])))
             tot = (sa + sh) or 2
             sa = sa if sa + sh else 1
@@ -1743,6 +1746,18 @@ class LeagueBoard(Board):
         c.draw.rounded_rectangle((mid, 0, x1, 10), radius=3, fill=panel_color(g["home"]))
         c.rect(mid, 0, mid + 1, 10, panel_color(g["home"]))      # square off the seam
 
+    def _split_border(self, c, g, mid):
+        """Rounded border (same radius as the ticket countdown): the away half in the away team's main
+        color, the home half in the home team's (e.g. Packers green)."""
+        from PIL import Image, ImageDraw
+        from .countdown_layouts import primary_color
+        W, H = c.width, c.height
+        for team, x0_, x1_ in ((g["away"], 0, mid), (g["home"], mid, W)):
+            layer = Image.new("RGBA", (W, H))
+            ImageDraw.Draw(layer).rounded_rectangle((0, 0, W - 1, H - 1), radius=3, outline=primary_color(team) + (255,))
+            part = layer.crop((x0_, 0, x1_, H))
+            c.image.paste(part, (x0_, 0), part)
+
     def _upcoming_accents(self, c, g, style, x0, x1, mid, items):
         from .football_layouts import panel_color
         H = c.height
@@ -1756,16 +1771,7 @@ class LeagueBoard(Board):
             c.rect(bx0, 21, mid - 1, 21, team_color(away))
             c.rect(mid, 21, bx1, 21, team_color(home))
             if style == "splitborder":
-                from .countdown_layouts import secondary_color
-                W = c.width
-                from PIL import Image, ImageDraw
-                ca, ch = secondary_color(away), secondary_color(home)      # each team's accent (Packers gold)
-                # rounded border (same radius as the ticket countdown): away half, then home half
-                for col_, x0_, x1_ in ((ca, 0, mid), (ch, mid, W)):
-                    layer = Image.new("RGBA", (W, H))
-                    ImageDraw.Draw(layer).rounded_rectangle((0, 0, W - 1, H - 1), radius=3, outline=col_ + (255,))
-                    part = layer.crop((x0_, 0, x1_, H))
-                    c.image.paste(part, (x0_, 0), part)
+                self._split_border(c, g, mid)
         elif style == "tint":
             items = recolor(WHITE)
         elif style == "banner":
