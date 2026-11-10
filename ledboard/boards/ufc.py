@@ -39,7 +39,7 @@ FIGHT_LAYOUTS = {
     "tape": "Tale of the tape (names, records and flags side by side)",
 }
 LIVE_LAYOUTS = {
-    "same": "Same as the Design above",
+    "same": "Same as the fight card design",
     "scorebug": "TV scorebug (red / blue name bars, round and clock box)",
     "clock": "Big clock (round clock in the middle, round dots, fighters at the edges)",
     "octagon": "Octagon (round number inside the cage, clock underneath)",
@@ -433,6 +433,7 @@ class UFCBoard(Board):
     name = "ufc"
     title = "UFC"
     group = "Sports"
+    category = "Sports"
     description = ("UFC events: countdown to the next card, the bouts with fighter pictures and records, "
                    "live round and clock, results by KO / submission / decision, and the upcoming schedule.")
     refresh = 900
@@ -492,16 +493,27 @@ class UFCBoard(Board):
         {"key": "live_refresh", "label": "Refresh while fights are live (s)", "type": "number"},
     ]
     FIELDS = organize(FIELDS, [
-        ("Fighters", ["favorites", "favorites_only", "bouts"]),
-        ("Preview", ["preview"]),
-        ("Fight screens", ["layout", "live_layout", "pictures", "show_network"]),
-        ("Before the event", ["show_countdown", "countdown_days", "countdown_to", "countdown_layout", "event_logo_url",
-                              "card_days"]),
-        ("After the event", ["final_hours"]),
-        ("Schedule", ["show_schedule", "schedule_count", "schedule_when"]),
-        ("Live", ["takeover", "celebrate", "live_refresh"]),
-        ("Timing", ["duration", "refresh"]),
-    ])
+        ("Basics", "Fighters & bouts", ["favorites", "favorites_only", "bouts"]),
+        ("Basics", "Preview", ["preview"]),
+        ("Screens", "Countdown", ["show_countdown", "countdown_layout", "countdown_to", "countdown_days",
+                                  "event_logo_url"]),
+        ("Screens", "Fight card", ["layout", "card_days"]),
+        ("Screens", "Live fights", ["live_layout", "takeover", "celebrate"]),
+        ("Screens", "Results", ["final_hours"]),
+        ("Screens", "Upcoming events list", ["show_schedule", "schedule_count", "schedule_when"]),
+        ("Look", "Pictures & info", ["pictures", "show_network"]),
+        ("Advanced", "Timing", ["duration", "refresh", "live_refresh"]),
+    ], {
+        "show_countdown": "Show a countdown to the next event",
+        "countdown_layout": "Design",
+        "layout": "Design (also used for results)",
+        "card_days": "Show the bouts this many days before the event",
+        "live_layout": "Live design",
+        "final_hours": "Show results for this many hours after the event",
+        "show_schedule": "Show the list of upcoming events",
+        "schedule_when": "When to show it",
+        "celebrate": "Winner celebration when a favorite fighter wins",
+    })
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)

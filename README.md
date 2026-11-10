@@ -91,6 +91,17 @@ The app always loads the latest UI from the Pi, so updating LEDBoard updates the
 
 All of this is done in the web UI under **Boards → ⚙**. Enabled boards are listed first, in rotation order. Disabled boards sit below them and are hidden until you click **Show disabled boards**. Turning a board on adds it to the end of the rotation.
 
+### How the settings are organized
+
+Every board's settings follow the same order, under four headings:
+
+- **Basics**: what the board is about (teams, fighters, server address, location…) and the **Preview** buttons. Only these sections start open.
+- **Screens**: one section per kind of screen, in the order you'd see them. Each holds that screen's on/off switch, design and options.
+- **Look**: pictures, logos and text colors.
+- **Advanced**: refresh intervals, seconds per screen and scroll mode.
+
+Each section remembers whether you left it open or closed. On the **Boards** tab, the chips above the list filter it by category (Sports, Media, Home & status, Display). The rotation order is the same whichever filter is on.
+
 ### Scroll mode (every board)
 Every board has a **Scroll mode** switch. When it's on, the board's slides scroll across the display one after another, like a ticker, instead of showing one at a time.
 

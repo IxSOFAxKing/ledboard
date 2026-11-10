@@ -50,6 +50,7 @@ def parse_status_url(text):
 class UptimeBoard(Board):
     name = "uptime"
     title = "Server Status"
+    category = "Home & status"
     description = "Your Uptime Kuma monitors: up/down dots and response times, with an optional alert when one goes down."
     refresh = 60
     DEFAULTS = {"enabled": False, "duration": 10, "refresh": 60, "status_url": "", "slug": "", "monitors": [],
@@ -68,8 +69,10 @@ class UptimeBoard(Board):
         {"key": "duration", "label": "Seconds per page", "type": "number"},
         {"key": "refresh", "label": "Check every (seconds)", "type": "number"},
     ]
-    FIELDS = organize(FIELDS, [('Status page', ['status_url', 'monitors']), ('Design', ['layout']),
-                               ('When to show', ['only_when_down']), ('Alerts', ['alert_on_down', 'alert_hold']), ('Timing', ['duration', 'refresh'])], {})
+    FIELDS = organize(FIELDS, [("Basics", "Status page", ["status_url", "monitors"]),
+                               ("Screens", "Display", ["layout", "only_when_down"]),
+                               ("Screens", "Alerts", ["alert_on_down", "alert_hold"]),
+                               ("Advanced", "Timing", ["duration", "refresh"])], {})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)

@@ -55,6 +55,7 @@ def format_value(st, ent):
 class HomeAssistantBoard(Board):
     name = "homeassistant"
     title = "Home Assistant"
+    category = "Home & status"
     description = "Shows the state of any Home Assistant entities (sensors, lights, locks, thermostats...)."
     refresh = 15
     DEFAULTS = {
@@ -74,7 +75,11 @@ class HomeAssistantBoard(Board):
         {"key": "verify_ssl", "label": "Verify HTTPS certificate", "type": "bool"},
         {"key": "refresh", "label": "Refresh interval (s)", "type": "number"},
     ]
-    FIELDS = organize(FIELDS, [('Connection', ['url', 'token', 'verify_ssl']), ('Entities', ['entities', 'per_page', 'label_color']), ('Timing', ['duration', 'refresh'])], {})
+    FIELDS = organize(FIELDS, [
+        ("Basics", "Connection", ["url", "token", "verify_ssl"]),
+        ("Screens", "Entities", ["entities", "per_page"]),
+        ("Look", "Style", ["label_color"]),
+        ("Advanced", "Timing", ["duration", "refresh"])], {})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)

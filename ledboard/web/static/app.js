@@ -302,15 +302,21 @@ function renderForm(obj, fields, rerender, formId) {
     if (!g) groups.push(g = { name, fields: [] });
     g.fields.push(f);
   }
-  return groups.map((g, i) => {
+  // sections sit under headings (Basics / Screens / Look / Advanced); only Basics starts open
+  const hasGroups = groups.some((g) => g.fields[0].group);
+  const out = [];
+  let heading = null;
+  groups.forEach((g, i) => {
+    const grp = g.fields[0].group || null;
+    if (hasGroups && grp && grp !== heading) { heading = grp; out.push(h("div", { class: "fgroup" }, grp)); }
     const key = formId + "|" + g.name;
-    const open = openSections[key] ?? i === 0;
-    const det = h("details", { class: "fsec", open: open || null,
+    const open = openSections[key] ?? (hasGroups ? grp === "Basics" : i === 0);
+    out.push(h("details", { class: "fsec", open: open || null,
       ontoggle: (e) => { openSections[key] = e.currentTarget.open; localStorageSet("openSections", JSON.stringify(openSections)); } },
       h("summary", {}, g.name, h("span", { class: "fsec-count" }, String(g.fields.length))),
-      h("div", { class: "fsec-body" }, g.fields.map(fieldEl)));
-    return det;
+      h("div", { class: "fsec-body" }, g.fields.map(fieldEl))));
   });
+  return out;
 }
 
 function renderField(obj, f, onDepChange) {
@@ -479,6 +485,8 @@ function spotifyAuthField(obj) {
 
 // ---------------------------------------------------------------- boards tab
 let showDisabled = localStorageGet("showDisabled") === "1";
+const CATEGORIES = ["All", "Sports", "Media", "Home & status", "Display"];
+let boardFilter = localStorageGet("boardFilter") || "All";
 
 // Enabled boards first (in their rotation order), then disabled ones. Disabled boards are
 // never shown, so this doesn't change what appears on the display.
@@ -495,7 +503,14 @@ const TRANSITIONS = {
 
 function renderBoards() {
   const root = $("#boards");
-  const visible = (n) => SCHEMA[n] && (showDisabled || draft.boards[n].enabled || openBoards.has(n));
+  if (!CATEGORIES.includes(boardFilter)) boardFilter = "All";
+  const inFilter = (n) => boardFilter === "All" || SCHEMA[n].category === boardFilter;
+  const visible = (n) => SCHEMA[n] && inFilter(n) && (showDisabled || draft.boards[n].enabled || openBoards.has(n));
+  const counts = Object.fromEntries(CATEGORIES.map((c) => [c, draft.rotation.filter((n) => SCHEMA[n] &&
+    (c === "All" || SCHEMA[n].category === c) && (showDisabled || draft.boards[n].enabled)).length]));
+  $("#board-filter").replaceChildren(...CATEGORIES.map((c) => h("button", {
+    class: "chip" + (c === boardFilter ? " on" : ""),
+    onclick: () => { boardFilter = c; localStorageSet("boardFilter", c); renderBoards(); } }, c, h("span", { class: "chip-n" }, String(counts[c])))));
   const nDisabled = draft.rotation.filter((n) => SCHEMA[n] && !draft.boards[n].enabled).length;
   $("#toggle-disabled").textContent = showDisabled ? "Hide disabled boards" : `Show ${nDisabled} disabled board${nDisabled === 1 ? "" : "s"}`;
   root.replaceChildren(...draft.rotation.map((name, idx) => {
@@ -523,7 +538,9 @@ function renderBoards() {
       h("div", { class: "board-head" },
         h("div", { class: "order" }, h("button", { title: "Move up", onclick: () => move(-1) }, "▲"), h("button", { title: "Move down", onclick: () => move(1) }, "▼")),
         h("span", { class: "dot", "data-dot": name }),
-        h("div", { class: "board-title", onclick: toggleOpen }, sch.title, h("span", { class: "sub" }, summary(name, bc))),
+        h("div", { class: "board-title", onclick: toggleOpen }, sch.title,
+          boardFilter === "All" && sch.category ? h("span", { class: "cat-tag" }, sch.category) : null,
+          h("span", { class: "sub" }, summary(name, bc))),
         h("button", { class: "small", title: "Show this board now", onclick: () => api("/api/control", { action: "jump", board: name }).catch((e) => toast(e.message, true)) }, "Show"),
         h("label", { class: "switch", title: "Enabled" }, h("input", { type: "checkbox", checked: !!bc.enabled, onchange: (e) => {
           bc.enabled = e.target.checked;

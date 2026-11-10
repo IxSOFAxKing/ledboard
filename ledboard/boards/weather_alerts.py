@@ -44,6 +44,7 @@ def _local_time(iso):
 class WeatherAlertsBoard(Board):
     name = "weather_alerts"
     title = "Severe Weather Alerts (US)"
+    category = "Home & status"
     description = ("Warnings from the National Weather Service for your location interrupt the display, repeat while "
                    "in effect, and extreme ones (e.g. tornado warnings) wake the display until dismissed. US only.")
     refresh = 120
@@ -61,7 +62,10 @@ class WeatherAlertsBoard(Board):
          "help": "Leave blank to use the Weather board's location."},
         {"key": "refresh", "label": "Check every (seconds)", "type": "number"},
     ]
-    FIELDS = organize(FIELDS, [('Alerts', ['min_severity', 'warnings_only', 'repeat_minutes']), ('Location', ['latitude', 'longitude']), ('Timing', ['refresh'])], {})
+    FIELDS = organize(FIELDS, [
+        ("Basics", "Location", ["latitude", "longitude"]),
+        ("Screens", "Alerts", ["min_severity", "warnings_only", "repeat_minutes"]),
+        ("Advanced", "Timing", ["refresh"])], {})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)

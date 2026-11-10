@@ -163,3 +163,13 @@ a.button:hover, label.button:hover { border-color: #3a4350; }
 .update-log { background: #0f1216; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 12px/1.5 ui-monospace, monospace;
   white-space: pre-wrap; max-height: 220px; overflow: auto; margin-top: 10px; }
 .changes { margin: 6px 0 10px; padding-left: 20px; color: var(--muted); font-size: 13px; }
+
+/* settings: Basics / Screens / Look / Advanced headings above the collapsible sections */
+.fgroup { margin: 10px 2px 0; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted, #888); }
+.form > .fgroup:first-child { margin-top: 0; }
+/* boards list: category filter */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.chip { border-radius: 999px; padding: 4px 10px; font-size: 13px; background: rgba(127,127,127,.12); border: 1px solid transparent; }
+.chip.on { background: var(--accent, #3b82f6); color: #fff; }
+.chip-n { margin-left: 6px; opacity: .7; font-size: 11px; }
+.cat-tag { margin-left: 8px; font-size: 10px; font-weight: 500; padding: 1px 6px; border-radius: 999px; background: rgba(127,127,127,.15); color: var(--muted, #888); vertical-align: middle; }

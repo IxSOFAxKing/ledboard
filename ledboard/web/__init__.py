@@ -78,7 +78,8 @@ def create_app(engine):
     @app.get("/api/config")
     def get_config():
         schema = {name: {"title": cls.title, "description": cls.description, "fields": board_fields(cls),
-                         "group": getattr(cls, "group", None) or ("Sports" if issubclass(cls, LeagueBoard) else "Other")}
+                         "group": getattr(cls, "group", None) or ("Sports" if issubclass(cls, LeagueBoard) else "Other"),
+                         "category": "Sports" if issubclass(cls, LeagueBoard) else cls.category}
                   for name, cls in BOARD_CLASSES.items()}
         return jsonify({"config": config.public(), "schema": schema, "fonts": fonts.available(),
                         "hardware_mappings": HARDWARE_MAPPINGS})

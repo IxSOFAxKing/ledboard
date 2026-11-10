@@ -247,6 +247,7 @@ CLASSES = {"fire": Fire, "matrix": Matrix, "starfield": Starfield, "plasma": Pla
 class AmbientBoard(Board):
     name = "ambient"
     title = "Ambient"
+    category = "Display"
     description = ("Relaxing animations: fireplace, Matrix rain, starfield, plasma, lava lamp and Game of Life. "
                    "Use it in the rotation, as the 'nothing to show' screen (Settings), or during quiet hours.")
     DEFAULTS = {"enabled": False, "duration": 30, "animation": "cycle", "cycle_minutes": 5}
@@ -257,7 +258,8 @@ class AmbientBoard(Board):
          "show_if": {"animation": "cycle"}},
         {"key": "duration", "label": "Seconds on screen (in rotation)", "type": "number"},
     ]
-    FIELDS = organize(FIELDS, [('Animation', ['animation', 'cycle_minutes']), ('Timing', ['duration'])], {})
+    FIELDS = organize(FIELDS, [("Basics", "Animation", ["animation", "cycle_minutes"]),
+                               ("Advanced", "Timing", ["duration"])], {})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)

@@ -20,6 +20,7 @@ PLEX_ORANGE = (229, 160, 13)
 class PlexBoard(Board):
     name = "plex"
     title = "Plex"
+    category = "Media"
     description = "Shows active Plex streams, and what was recently added to your server."
     refresh = 10
     DEFAULTS = {
@@ -51,7 +52,11 @@ class PlexBoard(Board):
         {"key": "recent_music", "label": "Include new music albums", "type": "bool", "section": "Recently added",
          "show_if": {"show_recent": True}},
     ]
-    FIELDS = organize(FIELDS, [('Connection', ['url', 'token', 'verify_ssl']), ('Now playing', ['users', 'show_user', 'show_paused', 'takeover', 'progress_style']), ('Recently added', ['show_recent', 'recent_hours', 'recent_max', 'recent_music']), ('Timing', ['duration', 'refresh'])], {'duration': 'Seconds per screen'})
+    FIELDS = organize(FIELDS, [
+        ("Basics", "Connection", ["url", "token", "verify_ssl"]),
+        ("Screens", "Now playing", ["takeover", "users", "show_user", "show_paused", "progress_style"]),
+        ("Screens", "Recently added", ["show_recent", "recent_hours", "recent_max", "recent_music"]),
+        ("Advanced", "Timing", ["duration", "refresh"])], {"duration": "Seconds per screen"})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)

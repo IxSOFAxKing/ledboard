@@ -177,6 +177,7 @@ def screen_order(cfg):
 class WeatherBoard(Board):
     name = "weather"
     title = "Weather"
+    category = "Home & status"
     description = ("Current conditions, forecast and a 24-hour graph with animated icons, plus optional screens: sun arc, "
                    "rain soon, wind, week, living scene, UV + air quality, moon phase, day parts and vs. yesterday.")
     refresh = 600
@@ -225,7 +226,12 @@ class WeatherBoard(Board):
         {"key": "duration", "label": "Seconds per screen", "type": "number", "section": "Display"},
         {"key": "refresh", "label": "Refresh interval (s)", "type": "number", "section": "Display"},
     ]
-    FIELDS = organize(FIELDS, [('Source', ['source', 'location_name', 'latitude', 'longitude', 'ha_entity', 'units']), ('Screens', ['screen_order', 'aqi_scale', 'yesterday_threshold']), ('Timing', ['duration', 'refresh'])], {})
+    FIELDS = organize(FIELDS, [
+        ("Basics", "Location & units", ["source", "location_name", "latitude", "longitude", "ha_entity", "units"]),
+        ("Screens", "Screens", ["screen_order"]),
+        ("Screens", "Screen options", ["aqi_scale", "yesterday_threshold", "hourly_rain", "hourly_rain_min",
+                                       "hourly_rain_legend"]),
+        ("Advanced", "Timing", ["duration", "refresh"])], {})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)

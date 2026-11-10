@@ -33,6 +33,7 @@ GREEN = (30, 215, 96)
 class SpotifyBoard(Board):
     name = "spotify"
     title = "Now Playing (Spotify)"
+    category = "Media"
     description = ("Shows what's playing. Get it from Home Assistant (e.g. its Spotify integration, "
                    "Sonos, or any media player) or straight from Spotify. Skipped when nothing is playing.")
     refresh = 5
@@ -66,7 +67,11 @@ class SpotifyBoard(Board):
         {"key": "artist_color", "label": "Artist color", "type": "color"},
         {"key": "refresh", "label": "Poll interval (s)", "type": "number"},
     ]
-    FIELDS = organize(FIELDS, [('Source', ['source', 'ha_entities', 'spotify_auth', 'client_id', 'client_secret', 'redirect_uri']), ('Display', ['takeover', 'show_paused', 'progress_style', 'title_color', 'artist_color']), ('Timing', ['duration', 'refresh'])], {})
+    FIELDS = organize(FIELDS, [
+        ("Basics", "Source", ["source", "ha_entities", "spotify_auth", "client_id", "client_secret", "redirect_uri"]),
+        ("Screens", "Now playing", ["takeover", "show_paused"]),
+        ("Look", "Style", ["progress_style", "title_color", "artist_color"]),
+        ("Advanced", "Timing", ["duration", "refresh"])], {})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)

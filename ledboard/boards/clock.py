@@ -40,6 +40,7 @@ DATE_FORMATS = {
 class ClockBoard(Board):
     name = "clock"
     title = "Clock"
+    category = "Display"
     description = "Time and date, with every piece of text adjustable. Also used as the fallback when nothing else has content."
     DEFAULTS = {
         "enabled": True, "duration": 10,
@@ -102,12 +103,14 @@ class ClockBoard(Board):
         {"key": "duration", "label": "Seconds on screen", "type": "number", "section": "Layout"},
     ]
     FIELDS = organize(FIELDS, [
-        ("Time", ["time_font", "time_size", "color", "format_24h", "show_seconds", "leading_zero", "blink_colon"]),
-        ("AM / PM", ["show_ampm", "ampm_font", "ampm_size", "ampm_color", "ampm_lowercase"]),
-        ("Date", ["show_date", "date_format", "date_custom", "date_uppercase", "date_font", "date_size", "date_color"]),
-        ("Extra line", ["extra_text", "extra_font", "extra_size", "extra_color"]),
-        ("Layout", ["smooth", "align", "line_gap"]),
-        ("Timing", ["duration"]),
+        ("Basics", "Time", ["time_font", "time_size", "color", "format_24h", "show_seconds", "leading_zero",
+                            "blink_colon"]),
+        ("Look", "AM / PM", ["show_ampm", "ampm_font", "ampm_size", "ampm_color", "ampm_lowercase"]),
+        ("Look", "Date", ["show_date", "date_format", "date_custom", "date_uppercase", "date_font", "date_size",
+                          "date_color"]),
+        ("Look", "Extra line", ["extra_text", "extra_font", "extra_size", "extra_color"]),
+        ("Look", "Layout", ["smooth", "align", "line_gap"]),
+        ("Advanced", "Timing", ["duration"]),
     ])
 
     def _font(self, name, size, ref, default_size):

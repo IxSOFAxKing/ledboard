@@ -19,35 +19,53 @@ log = logging.getLogger(__name__)
 #: Settings every board gets (merged into DEFAULTS / FIELDS automatically).
 COMMON_DEFAULTS = {"scroll_mode": False, "scroll_speed": "", "scroll_gap": ""}   # "" = use global
 COMMON_FIELDS = [
-    {"key": "scroll_mode", "label": "Scroll mode (slides scroll across like a ticker)", "type": "bool", "section": "Scroll mode"},
+    {"key": "scroll_mode", "label": "Scroll mode (slides scroll across like a ticker)", "type": "bool", "section": "Scroll mode",
+     "group": "Advanced"},
     {"key": "scroll_speed", "label": "Scroll speed (pixels per second)", "type": "number", "section": "Scroll mode",
+     "group": "Advanced",
      "show_if": {"scroll_mode": True}, "placeholder": "global default",
      "help": "Leave blank to use the global default (Settings tab)."},
     {"key": "scroll_gap", "label": "Gap between slides (pixels)", "type": "number", "section": "Scroll mode",
+     "group": "Advanced",
      "show_if": {"scroll_mode": True}, "placeholder": "global default"},
 ]
 
 
-def organize(fields, layout, labels=None):
-    """Re-order `fields` into sections: layout = [(section, [keys...]), ...].
+#: The headings settings sections are grouped under, in this order (the web UI opens "Basics").
+GROUPS = ("Basics", "Screens", "Look", "Advanced")
+_SECTION_GROUP = {"Timing": "Advanced", "Scroll mode": "Advanced", "Preview": "Basics"}
 
-    Fields not named in the layout keep their own section and go after the named ones.
-    `labels` optionally renames fields {key: label}. Returns a new list (originals untouched).
+
+def organize(fields, layout, labels=None):
+    """Re-order `fields` into sections: layout = [(group, section, [keys...]), ...] (or (section, [keys])).
+
+    `group` is one of GROUPS. Fields not named in the layout keep their own section and go after the
+    named ones. `labels` optionally renames fields {key: label}. Returns a new list (originals untouched).
     """
     labels = labels or {}
     by_key = {f["key"]: f for f in fields}
     out, used = [], set()
-    for section, keys in layout:
+    for entry in layout:
+        group, section, keys = entry if len(entry) == 3 else (None, *entry)
+        group = group or _SECTION_GROUP.get(section)
         for k in keys:
             f = by_key.get(k)
             if f is None or k in used:
                 continue
             f = dict(f, section=section)
+            if group:
+                f["group"] = group
             if k in labels:
                 f["label"] = labels[k]
             out.append(f)
             used.add(k)
-    out += [dict(f, label=labels.get(f["key"], f["label"])) for f in fields if f["key"] not in used]
+    for f in fields:
+        if f["key"] not in used:
+            f = dict(f, label=labels.get(f["key"], f["label"]))
+            g = f.get("group") or _SECTION_GROUP.get(f.get("section"))
+            if g:
+                f["group"] = g
+            out.append(f)
     return out
 
 
@@ -68,6 +86,8 @@ class Board:
     name = "base"
     title = "Base"
     description = ""
+    #: Where the board is listed in the web UI: Sports, Media, Home & status or Display.
+    category = "Display"
     #: Seconds between update() calls. 0 = no background updates.
     refresh = 0
     #: Default config for this board (merged into config["boards"][name]).

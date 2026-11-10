@@ -494,19 +494,20 @@ def upcoming_design(cfg):
 
 # How a league board's settings are grouped in the web UI (top to bottom).
 LEAGUE_LAYOUT = [
-    ("Teams", ["favorites", "favorites_only", "takeover", "hide_favorite_score"]),
-    ("Preview", ["preview"]),
-    ("Which games", ["live_only", "show_final", "final_hours", "show_pregame", "upcoming_hours", "max_games"]),
-    ("Between games", ["next_game", "next_game_style", "offseason_countdown", "opener_days", "show_standings",
-                       "show_playoffs"]),
-    ("Upcoming games", ["upcoming_layout", "show_records", "show_network", "network_logos", "show_odds"]),
-    ("Live games", ["live_layout", "live_style", "detailed_live", "show_win_probability", "show_last_play",
-                    "score_flash", "goal_animation"]),
-    ("Final scores", ["final_style", "show_final_records"]),
-    ("Celebrations", ["celebrations", "celebrate_field_goals", "celebrate_runs", "recap", "simulate"]),
-    ("Logos", ["show_abbreviations", "logo_version", "logo_overrides", "logo_detail", "logo_enhance", "logo_edges", "use_dark_logos"]),
-    ("Text colors", ["text_score", "text_status", "text_info", "text_loser", "abbr_color_mode", "abbr_color"]),
-    ("Timing", ["duration", "refresh", "live_refresh"]),
+    ("Basics", "Teams", ["favorites", "favorites_only", "live_only", "takeover", "hide_favorite_score"]),
+    ("Basics", "Preview", ["preview"]),
+    ("Screens", "Between games", ["next_game", "next_game_style", "offseason_countdown", "opener_days",
+                                  "show_standings", "show_playoffs"]),
+    ("Screens", "Upcoming games", ["show_pregame", "upcoming_hours", "upcoming_layout", "show_records", "show_rankings", "show_network",
+                                   "network_logos", "show_odds"]),
+    ("Screens", "Live games", ["live_layout", "live_style", "detailed_live", "show_win_probability", "show_last_play",
+                               "score_flash", "goal_animation"]),
+    ("Screens", "Final scores", ["show_final", "final_hours", "final_style", "show_final_records"]),
+    ("Screens", "Celebrations", ["celebrations", "celebrate_field_goals", "celebrate_runs", "recap", "simulate"]),
+    ("Look", "Logos", ["show_abbreviations", "logo_version", "logo_overrides", "logo_detail", "logo_enhance",
+                       "logo_edges", "use_dark_logos"]),
+    ("Look", "Text colors", ["text_score", "text_status", "text_info", "text_loser", "abbr_color_mode", "abbr_color"]),
+    ("Advanced", "Timing", ["duration", "refresh", "live_refresh", "max_games"]),
 ]
 LEAGUE_LABELS = {
     "upcoming_style": "Team color accents",
@@ -516,6 +517,7 @@ LEAGUE_LABELS = {
     "show_records": "Show team records",
     "show_network": "Show the TV network",
     "max_games": "Most games per rotation",
+    "live_only": "Only show live games (hides upcoming games and final scores)",
     "duration": "Seconds per screen",
     "preview": "Show sample games",
 }

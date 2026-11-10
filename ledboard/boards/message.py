@@ -5,6 +5,7 @@ from ..gfx import hex_to_rgb
 class MessageBoard(Board):
     name = "message"
     title = "Custom Message"
+    category = "Display"
     description = "A custom line of text in the rotation."
     DEFAULTS = {"enabled": False, "duration": 10, "text": "Hello from LEDBoard!",
                 "color": "#ff9900", "font": "7x13B", "speed": 25}
@@ -16,7 +17,8 @@ class MessageBoard(Board):
          "options": ["4x6", "5x7", "5x8", "6x10", "7x13B", "tom-thumb"]},
         {"key": "speed", "label": "Scroll speed (px/s)", "type": "number"},
     ]
-    FIELDS = organize(FIELDS, [('Message', ['text', 'color', 'font', 'speed']), ('Timing', ['duration'])], {})
+    FIELDS = organize(FIELDS, [("Basics", "Message", ["text", "color", "font", "speed"]),
+                               ("Advanced", "Timing", ["duration"])], {})
 
     def slides(self):
         return [None] if self.cfg.get("text") else []

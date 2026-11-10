@@ -37,6 +37,7 @@ def fmt_dur(seconds):
 class KlipperBoard(Board):
     name = "klipper"
     title = "3D Printer (Klipper)"
+    category = "Home & status"
     description = ("Print progress from Klipper via Moonraker: model thumbnail, progress, time left, layer "
                    "and temperatures. Skipped when the printer is idle unless you choose otherwise.")
     refresh = 5
@@ -73,7 +74,11 @@ class KlipperBoard(Board):
         {"key": "duration", "label": "Seconds on screen", "type": "number", "section": "Display"},
         {"key": "refresh", "label": "Poll interval (s)", "type": "number", "section": "Display"},
     ]
-    FIELDS = organize(FIELDS, [('Connection', ['url', 'api_key', 'printer_name']), ('When to show', ['takeover', 'show_when_idle', 'show_finished_minutes']), ('Picture', ['show_thumbnail', 'picture_source', 'camera_url']), ('Display', ['eta_style']), ('Timing', ['duration', 'refresh'])], {})
+    FIELDS = organize(FIELDS, [
+        ("Basics", "Connection", ["url", "api_key", "printer_name"]),
+        ("Screens", "Printing", ["takeover", "show_when_idle", "show_finished_minutes", "eta_style"]),
+        ("Look", "Picture", ["show_thumbnail", "picture_source", "camera_url"]),
+        ("Advanced", "Timing", ["duration", "refresh"])], {})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)

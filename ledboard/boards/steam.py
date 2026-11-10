@@ -52,6 +52,7 @@ def fmt_minutes(mins):
 class SteamBoard(Board):
     name = "steam"
     title = "Steam"
+    category = "Media"
     description = ("What you're playing on Steam: game icon, name, how long you've been playing and total hours. "
                    "Skipped when you're not in a game (unless 'show when online' is on).")
     refresh = 60
@@ -80,7 +81,11 @@ class SteamBoard(Board):
         {"key": "event_minutes", "label": "Show these screens for (minutes)", "type": "number",
          "section": "Friends & achievements"},
     ]
-    FIELDS = organize(FIELDS, [('Account', ['api_key', 'steam_ids']), ('Now playing', ['art', 'takeover', 'show_online']), ('Friends & achievements', ['show_achievements', 'show_friends', 'friend_filter', 'event_minutes']), ('Timing', ['duration', 'refresh'])], {'duration': 'Seconds per screen'})
+    FIELDS = organize(FIELDS, [
+        ("Basics", "Account", ["api_key", "steam_ids"]),
+        ("Screens", "Now playing", ["takeover", "show_online", "art"]),
+        ("Screens", "Friends & achievements", ["show_achievements", "show_friends", "friend_filter", "event_minutes"]),
+        ("Advanced", "Timing", ["duration", "refresh"])], {"duration": "Seconds per screen"})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)
