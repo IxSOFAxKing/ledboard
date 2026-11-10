@@ -34,6 +34,20 @@ SCALABLE = {
     "silkscreen": ("Silkscreen - tiny pixel", "Silkscreen-Regular.ttf", None),
     "sharetech": ("Share Tech Mono - tech", "ShareTechMono-Regular.ttf", None),
     "righteous": ("Righteous - rounded retro", "Righteous-Regular.ttf", None),
+    "russo": ("Russo One - bold sporty", "RussoOne-Regular.ttf", None),
+    "blackops": ("Black Ops One - stencil", "BlackOpsOne-Regular.ttf", None),
+    "audiowide": ("Audiowide - wide futuristic", "Audiowide-Regular.ttf", None),
+    "bungee": ("Bungee - signage", "Bungee-Regular.ttf", None),
+    "archivoblack": ("Archivo Black - extra heavy", "ArchivoBlack-Regular.ttf", None),
+    "fjalla": ("Fjalla One - narrow headline", "FjallaOne-Regular.ttf", None),
+    "michroma": ("Michroma - extra wide", "Michroma-Regular.ttf", None),
+    "rajdhani": ("Rajdhani - squared tech", "Rajdhani-Bold.ttf", None),
+    "chakrapetch": ("Chakra Petch - angular", "ChakraPetch-Bold.ttf", None),
+    "quantico": ("Quantico - techno", "Quantico-Bold.ttf", None),
+    "spacemono": ("Space Mono - geometric mono", "SpaceMono-Bold.ttf", None),
+    "comfortaa": ("Comfortaa - soft rounded", "Comfortaa[wght].ttf", "Bold"),
+    "majormono": ("Major Mono - thin mono", "MajorMonoDisplay-Regular.ttf", None),
+    "wallpoet": ("Wallpoet - digital stencil", "Wallpoet-Regular.ttf", None),
 }
 
 

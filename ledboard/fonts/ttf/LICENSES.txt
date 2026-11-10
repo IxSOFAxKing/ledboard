@@ -76,6 +76,78 @@ http://scripts.sil.org/OFL
 
 
 -----------------------------------------------------------
+
+===== russoone =====
+Copyright (c) 2011-2012, Jovanny Lemonad (jovanny.ru), with Reserved Font Name "Russo"
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== blackopsone =====
+Copyright 2022 The Black-Ops Project Authors (https://github.com/googlefonts/googlefonts-project-template)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== audiowide =====
+Copyright (c) 2012, Brian J. Bonislawsky DBA Astigmatic (AOETI) (astigma@astigmatic.com), with Reserved Font Names "Audiowide"
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== bungee =====
+Copyright 2023 The Bungee Project Authors (https://github.com/djrrb/Bungee)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== archivoblack =====
+Copyright 2017 The Archivo Black Project Authors (https://github.com/Omnibus-Type/ArchivoBlack)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== fjallaone =====
+Copyright 2012 The Fjalla One Project Authors (https://github.com/SorkinType/FjallaOne)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== michroma =====
+Copyright 2011 The Michroma Project Authors (https://github.com/googlefonts/Michroma-font)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== rajdhani =====
+Copyright (c) 2014, Indian Type Foundry (info@indiantypefoundry.com).
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== chakrapetch =====
+Copyright 2018 The Chakra Petch Project Authors (https://github.com/m4rc1e/Chakra-Petch.git)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== quantico =====
+Copyright (c) 2011, Matthew Desmond (http://www.madtype.com | mattdesmond@gmail.com),with Reserved Font Name Quantico.
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== spacemono =====
+Copyright 2016 The Space Mono Project Authors (https://github.com/googlefonts/spacemono)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== comfortaa =====
+Copyright 2011 The Comfortaa Project Authors (https://github.com/alexeiva/comfortaa), with Reserved Font Name "Comfortaa".
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== majormonodisplay =====
+Copyright 2018 The Major Mono Project Authors (https://github.com/googlefonts/majormono)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== wallpoet =====
+Copyright (c) 6 April 2011, Lars Berggren (lars@punktlars.se),
+with Reserved Font Name Wallpoet.
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
 SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
 -----------------------------------------------------------
 

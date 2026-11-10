@@ -414,6 +414,11 @@ There are two kinds of font:
   - Doto (dot matrix)
   - Pixelify Sans, Press Start 2P, VT323 and Silkscreen (pixel and retro)
   - Share Tech Mono and Righteous
+  - Russo One, Archivo Black and Bungee (bold and heavy)
+  - Black Ops One and Wallpoet (stencil)
+  - Audiowide, Michroma, Rajdhani, Chakra Petch and Quantico (techy and futuristic)
+  - Fjalla One (narrow headline)
+  - Space Mono, Major Mono and Comfortaa (mono, thin and rounded)
 - **Fixed-size pixel fonts**, from 4×6 up to 10×20.
 
 Leave the time's size blank and it grows as large as fits around the other lines. **Smooth edges** turns on anti-aliasing for scalable fonts. Scalable fonts look best at about 10 px and up, so the fixed pixel fonts are better for small dates. Font licenses are in `ledboard/fonts/ttf/LICENSES.txt`. You can also set:
