@@ -274,6 +274,7 @@ How it works:
   - **Team split bar + border**: the same, plus a thin rounded border around the panel, each half in that team's main color (logos are inset so they never touch it).
   - **Tinted halves**: each side of the panel washed in its team color, brighter for the winner.
   - **Winner banner**: a team-colored "GB WINS" banner on the bottom line and an arrow at the winning score.
+  - **Winner banner + border**: the same, plus the thin rounded border in both teams' main colors.
   - **Team trim lines**: team-color lines above and below the score, records in team colors and FINAL in the winner's color.
 
   With "hide favorite's score" on, the accents never give away who won. Use **Preview → Final** to try each one.

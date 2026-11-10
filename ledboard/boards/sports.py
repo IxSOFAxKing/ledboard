@@ -455,8 +455,11 @@ FINAL_STYLES = {
     "splitborder": "Team split bar + border (plus a rounded border: each half in that team's main color)",
     "tint": "Tinted halves (each side washed in its team color)",
     "banner": "Winner banner (team-colored 'GB WINS' banner + arrow)",
+    "bannerborder": "Winner banner + border (plus a rounded border: each half in that team's main color)",
     "trim": "Team trim lines (team-color lines above and below the score)",
 }
+
+BORDER_STYLES = {"splitborder", "bannerborder"}     # designs with the two-team border (logos kept clear)
 
 UPCOMING_STYLES = {
     "plain": "Plain (no accents)",
@@ -1518,7 +1521,8 @@ class LeagueBoard(Board):
             winner = self._final_winner(g, live=True)             # the team that's ahead (None when tied)
         if final == "tint" or pre == "tint" or live == "tint":
             self._final_tint(c, g, mid, winner)
-        self._team_columns(c, g, col, detailed, inset=2 if "splitborder" in (pre, final) else 0)
+        bordered = bool({pre, final} & BORDER_STYLES)
+        self._team_columns(c, g, col, detailed, inset=2 if bordered else 0)
         if g["state"] == "pre":
             if self.cfg.get("show_records", True):
                 rc = (self._tc("text_info"),) * 2
@@ -1562,11 +1566,12 @@ class LeagueBoard(Board):
         if not items:
             return
         text, color, local_t = _cycle(c, items, t, x1 - x0)
+        iy = H - 8 if final == "bannerborder" else H - 7          # one row up when the banner sits above a border
         logo = self._network_logo(g, text)
         if logo is not None:
-            c.paste(logo, x0 + (x1 - x0 - logo.width) // 2, H - 7)
+            c.paste(logo, x0 + (x1 - x0 - logo.width) // 2, iy)
             return
-        c.scroll_text(x0, x1, H - 7, text, "5x7", color, local_t, speed=INFO_SPEED, align="center", pause=0.6, gap=200)
+        c.scroll_text(x0, x1, iy, text, "5x7", color, local_t, speed=INFO_SPEED, align="center", pause=0.6, gap=200)
 
     def _network_logo(self, g, text):
         """The network's pixel logo when `text` is the network line and logos are turned on."""
@@ -1713,7 +1718,10 @@ class LeagueBoard(Board):
                 c.rect(split, 15, bx1, 15, team_color(home))
         elif style == "tint":
             items = recolor(WHITE)
-        elif style == "banner":
+        elif style in ("banner", "bannerborder"):
+            if style == "bannerborder":
+                self._split_border(c, g, mid)
+                H = H - 1                     # sit the banner one row up, clear of the border
             if winner:
                 tm = g[winner]
                 c.rect(x0 + 1, H - 8, x1 - 2, H - 1, panel_color(tm))
