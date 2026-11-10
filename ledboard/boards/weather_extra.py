@@ -53,7 +53,7 @@ def render_sun(c, w, t, cfg):
     W, H = c.width, c.height
     rise, sett = w["sunrise"], w["sunset"]
     now = datetime.now()
-    cx, cy, r = 32, 27, 24
+    cx, cy, r = 32, 23, 21                     # horizon at y=23: two clear rows above the times
     day = rise <= now <= sett
     frac = (now - rise).total_seconds() / max(1, (sett - rise).total_seconds()) if day else None
     c.line(2, cy, 62, cy, (60, 45, 20))                                   # horizon
@@ -66,13 +66,18 @@ def render_sun(c, w, t, cfg):
         ang = math.radians(frac * 180)
         sx, sy = cx - r * math.cos(ang), cy - r * 0.95 * math.sin(ang)
         glow = 0.75 + 0.25 * math.sin(t * 3)
+        from PIL import Image, ImageDraw
+        layer = Image.new("RGBA", c.image.size)
+        d = ImageDraw.Draw(layer)
         for rr, col in ((4, (90, 50, 0)), (3, (200, 120, 0)), (2, (255, 200, 40))):
-            c.draw.ellipse((sx - rr, sy - rr, sx + rr, sy + rr), fill=scale(col, glow if rr == 4 else 1))
+            d.ellipse((sx - rr, sy - rr, sx + rr, sy + rr), fill=scale(col, glow if rr == 4 else 1) + (255,))
+        part = layer.crop((0, 0, c.width, cy))                # the sun sets behind the horizon line
+        c.image.paste(part, (0, 0), part)
     else:                                                                 # night: a sliver of moon over the horizon
         c.draw.ellipse((cx - 4, cy - 12, cx + 4, cy - 4), fill=(220, 220, 200))
         c.draw.ellipse((cx - 2, cy - 13, cx + 6, cy - 5), fill=(0, 0, 0))
-    c.text(1, H - 5, _hm(rise, False), "4x6", (255, 170, 60))
-    c.text_right(63, H - 5, _hm(sett, False), "4x6", (255, 120, 60))
+    c.text(1, H - 6, _hm(rise, False), "4x6", (255, 170, 60))
+    c.text_right(63, H - 6, _hm(sett, False), "4x6", (255, 120, 60))
     x0 = 68
     if day:
         left = (sett - now).total_seconds()
