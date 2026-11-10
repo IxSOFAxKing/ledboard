@@ -187,6 +187,7 @@ class WeatherBoard(Board):
         "show_current": True, "show_daily": True, "show_hourly": True,
         "show_sun": False, "show_rain_soon": False, "show_wind": False, "show_week": False, "show_scene": False,
         "show_air": False, "show_moon": False, "show_parts": False, "show_yesterday": False,
+        "show_countryside": False, "show_lake": False, "show_mountains": False, "show_window": False,
         "aqi_scale": "us", "yesterday_threshold": 8,
         "hourly_rain": True, "hourly_rain_min": 20, "hourly_rain_legend": True,
         "screen_order": [],          # slide ids in the order to show them ([] = default order)

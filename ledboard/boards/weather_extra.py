@@ -275,82 +275,107 @@ def has_scene(w, cfg):
     return w.get("temp") is not None
 
 
-def render_scene(c, w, t, cfg):
+def scene_sky(c, w, t, horizon=24):
+    """Sky for the scene screens: gradient by time of day, stars, the sun / moon on its path (setting
+    at `horizon`), drifting clouds and fog. Returns a dict with kind, cond, sky colors and sun spot."""
     W, H = c.width, c.height
     now = datetime.now()
     kind = _sky_kind(w, now)
     top, bot = SKIES[kind]
     for y in range(H):
-        k = min(1.0, y / 24)
+        k = min(1.0, y / max(1, horizon))
         c.line(0, y, W - 1, y, tuple(round(a + (b - a) * k) for a, b in zip(top, bot)))
     cond = w.get("condition") or "cloudy"
-    bld, stars = _skyline()
-    if kind == "night":
+    _bld, stars = _skyline()
+    clear = cond in ("sunny", "clear-night", "partlycloudy", "windy")
+    if kind == "night" and clear:
         for x, y, b in stars:
-            if x < W and cond in ("sunny", "clear-night", "partlycloudy"):
-                tw = b * (0.7 + 0.3 * math.sin(t * 2 + x))
-                c.pixel(x, y, scale(WHITE, tw))
-    # sun / moon along the sky by time of day
+            if x < W and y < horizon - 2:
+                c.pixel(x, y, scale(WHITE, b * (0.7 + 0.3 * math.sin(t * 2 + x))))
     rise, sett = w.get("sunrise"), w.get("sunset")
     if rise and sett and kind != "night":
         f = min(1.0, max(0.0, (now - rise).total_seconds() / max(1, (sett - rise).total_seconds())))
-        sx, sy = 8 + f * (W - 16), 24 - math.sin(f * math.pi) * 20
+        sx, sy = 8 + f * (W - 16), horizon - math.sin(f * math.pi) * (horizon - 4)
     else:
         sx, sy = W - 22, 7
+    shown = False
     if kind == "night":
-        if cond in ("sunny", "clear-night", "partlycloudy", "windy"):
+        if clear:
             c.draw.ellipse((sx - 4, sy - 4, sx + 4, sy + 4), fill=(235, 235, 205))
             c.draw.ellipse((sx - 1, sy - 5, sx + 7, sy + 3), fill=top)
+            shown = True
     elif kind in ("dusk", "dawn"):
         c.draw.ellipse((sx - 8, sy - 8, sx + 8, sy + 8), fill=(255, 170, 70))
         c.draw.ellipse((sx - 6, sy - 6, sx + 6, sy + 6), fill=(255, 200, 100))
+        shown = True
     elif kind == "day":
         c.draw.ellipse((sx - 5, sy - 5, sx + 5, sy + 5), fill=(255, 225, 70))
-    # clouds drifting
+        shown = True
     if cond not in ("sunny", "clear-night"):
         ccol = (245, 245, 252) if kind == "day" else ((125, 128, 140) if kind != "night" else (50, 55, 75))
-        n = 2 if cond == "partlycloudy" else 4
-        for i in range(n):
+        for i in range(2 if cond == "partlycloudy" else 4):
             cx = (i * 47 + t * (2 + i)) % (W + 30) - 20
             cy = 3 + (i * 7) % 10
             c.draw.ellipse((cx, cy, cx + 16, cy + 6), fill=ccol)
             c.draw.ellipse((cx + 4, cy - 3, cx + 12, cy + 4), fill=ccol)
     if cond == "fog":
-        for y in range(8, 26, 4):
+        for y in range(8, min(H, horizon + 4), 4):
             off = int(t * 4 + y) % 12
             for x in range(-12 + off, W, 12):
                 c.line(x, y, x + 7, y, (110, 110, 120))
-    # the city (windows lit at night / dusk)
-    lit = kind in ("night", "dusk", "dawn", "cloudy")
-    for x, wdt, btop, wins in bld:
-        if x >= W:
-            break
-        c.rect(x, btop, min(W - 1, x + wdt - 1), H - 1, (6, 6, 10))
-        if lit:
-            for wx, wy in wins:
-                if wx < W:
-                    c.pixel(wx, wy, (150, 120, 50))
-    # precipitation
+    return {"kind": kind, "cond": cond, "top": top, "bot": bot, "sun": (sx, sy), "sun_shown": shown,
+            "lit": kind in ("night", "dusk", "dawn", "cloudy"),
+            "snowy": cond in ("snowy", "snowy-rainy") or (w.get("temp") is not None and
+                                                         w["temp"] <= (32 if w.get("unit") != "celsius" else 0)
+                                                         and cond not in ("sunny", "clear-night"))}
+
+
+def scene_precip(c, cond, t, y1=None):
+    """Rain / snow / lightning over the scene (down to row y1)."""
+    W, H = c.width, c.height
+    y1 = H if y1 is None else y1
     if cond in ("rainy", "pouring", "lightning-rainy", "snowy-rainy", "hail"):
-        n = 110 if cond == "pouring" else 70
-        for i in range(n):
+        for i in range(110 if cond == "pouring" else 70):
             x = (i * 37 + int(t * 30)) % W
             y = (i * 11 + int(t * 70)) % H
-            c.pixel(x, y, (110, 150, 230))
-            c.pixel((x - 1) % W, (y - 1) % H, (50, 70, 130))
+            if y < y1:
+                c.pixel(x, y, (110, 150, 230))
+                if y >= 1:
+                    c.pixel((x - 1) % W, y - 1, (50, 70, 130))
     if cond in ("snowy", "snowy-rainy"):
         for i in range(45):
             x = (i * 29 + int(math.sin(t + i) * 2)) % W
             y = (i * 13 + int(t * 12)) % H
-            c.pixel(x, y, (255, 255, 255))
+            if y < y1:
+                c.pixel(x, y, (255, 255, 255))
     if cond in ("lightning", "lightning-rainy") and int(t * 10) % 37 == 0:
         c.rect(0, 0, W - 1, 20, (90, 90, 120))
+
+
+def scene_label(c, w, ctx, x=3, max_x=None):
+    cond, kind = ctx["cond"], ctx["kind"]
     label = LABELS.get(cond, cond.replace("-", " ").title()).upper()
     if kind == "dusk" and w.get("sunset"):
         label += f" · SUNSET {_hm(w['sunset'], False)}"
     deg = "--" if w.get("temp") is None else f"{round(w['temp'])}°"
-    _shadow_text(c, 3, 1, deg, "7x13B", WHITE)
-    _shadow_text(c, 3, 15, label, "4x6", (235, 235, 235))
+    _shadow_text(c, x, 1, deg, "7x13B", WHITE)
+    _shadow_text(c, x, 15, label, "4x6", (235, 235, 235))
+
+
+def render_scene(c, w, t, cfg):
+    W, H = c.width, c.height
+    ctx = scene_sky(c, w, t)
+    bld, _stars = _skyline()
+    for x, wdt, btop, wins in bld:                 # the city (windows lit at night / dusk)
+        if x >= W:
+            break
+        c.rect(x, btop, min(W - 1, x + wdt - 1), H - 1, (6, 6, 10))
+        if ctx["lit"]:
+            for wx, wy in wins:
+                if wx < W:
+                    c.pixel(wx, wy, (150, 120, 50))
+    scene_precip(c, ctx["cond"], t)
+    scene_label(c, w, ctx)
 
 
 # ---------------------------------------------------------------- 6. UV + air quality
@@ -609,3 +634,9 @@ SCREENS = {
     "yesterday": ("show_yesterday", "Compared to yesterday (only on big temperature swings)", has_yesterday,
                   render_yesterday),
 }
+
+from .weather_scenes import SCENE_SCREENS  # noqa: E402  (they use the helpers above)
+
+_items = list(SCREENS.items())
+_at = next(k for k, (slide, _v) in enumerate(_items) if slide == "scene") + 1
+SCREENS = dict(_items[:_at] + list(SCENE_SCREENS.items()) + _items[_at:])

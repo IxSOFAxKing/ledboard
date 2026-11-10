@@ -337,6 +337,7 @@ LEDBoard saves the refresh token, so you only do this once.
    - **Wind**: compass arrow, speed, gusts and a plain-English description.
    - **Week at a glance**: 7 days of high/low bars on one scale, colored by temperature.
    - **Living scene**: a city skyline under the real sky (day, sunset, night with lit windows) with the current weather animated: clouds, rain, snow, fog, lightning.
+   - **More scenes** with the same real sky and live weather: **Countryside** (rolling hills, a farmhouse lit at night, trees swaying with the real wind speed), **Lakeside** (the sky reflected in the water with a shimmering sun / moon reflection, waves, a drifting sailboat and rain ripples), **Mountains** (snowcapped peaks and a pine forest that goes white when it snows) and **Cozy window** (the weather seen through a window: raindrops running down the glass, frost in the corners when it's freezing, snow piling up on the sill).
    - **UV + air quality**: color scales with markers, today's UV peak and sunscreen hours. Air quality uses Open-Meteo's free air-quality API (US or European scale).
    - **Moon phase**: the moon drawn in its real phase, % lit, and the next full/new moon.
    - **Today in 4 parts**: morning / afternoon / evening / night, starting from now.
