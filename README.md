@@ -169,7 +169,7 @@ In more detail:
   **Countdown design** (under **Between games**):
   - **Classic**: logos at the sides, the countdown, and a rotating line (time, opponent, TV).
   - **Flip clock**: split-flap digit tiles for days / hours / minutes (hours / minutes / seconds in the last day).
-  - **Ticket**: a game ticket with the matchup, date, time and TV, and a tear-off stub with the countdown.
+  - **Ticket**: a game ticket with the matchup, date, time and TV, and a tear-off stub with the countdown. The outline is your team's main color, and the team abbreviations use each team's accent color.
   - **Matchup**: each half of the panel in its team's colors, with the countdown on a center plate.
   - **Road to kickoff**: a ball travels along a one-week road toward the opponent's logo, with the time to kickoff (first pitch, tip-off, puck drop).
   - **Game day hype**: on the day of the game, a flashing "GAME DAY" in your team's colors with the time to kickoff; before that, the flip clock.

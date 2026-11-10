@@ -165,7 +165,7 @@ def render_ticket(board, c, g, fav, t, team_color):
     W, H = c.width, c.height
     side, other = _sides(g, fav)
     me, opp = g[side], g[other]
-    col = secondary_color(me)                     # outline + perforation: the team's second color (Packers gold)
+    col = primary_color(me)                       # outline + perforation: the team's main color (Packers green)
     stub = 88
     c.draw.rounded_rectangle((0, 0, W - 1, H - 1), radius=3, outline=col)
     for y in (0, H - 1):                                   # notches where the stub tears off
@@ -175,9 +175,9 @@ def render_ticket(board, c, g, fav, t, team_color):
     # main part: logos, matchup, date / time / network
     c.paste(small_logo(board, me, 12, opp), 4, 3)
     x = 18
-    x += c.text(x, 4, me["abbr"], "6x10", primary_color(me)) + 3       # abbreviations: each team's main color
+    x += c.text(x, 4, me["abbr"], "6x10", secondary_color(me)) + 3     # abbreviations: each team's accent color
     x += c.text(x, 6, "@" if side == "away" else "VS", "4x6", GRAY) + 3
-    x += c.text(x, 4, opp["abbr"], "6x10", primary_color(opp)) + 3
+    x += c.text(x, 4, opp["abbr"], "6x10", secondary_color(opp)) + 3
     c.paste(small_logo(board, opp, 12, me), min(x, stub - 15), 3)
     if g.get("start"):
         local = g["start"].astimezone()
