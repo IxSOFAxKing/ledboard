@@ -255,8 +255,13 @@ How it works:
   - snaps the shrunken logo to them for crisp edges, with no muddy blended shades
   - brightens dark team colors (such as Packers green or navy) so they show up
   - keeps black truly black (only colors that are dark but not black get lifted)
-- **Logo version** (under **Logos**): **Automatic** uses ESPN's small-size "scoreboard" logos for MLB (for example the Cardinals' STL cap logo instead of the birds-on-the-bat wordmark) and full logos elsewhere. You can choose small-size or full logos for any league; teams without a small-size logo always use their full one.
-- **Logo detail** (under **Logos**): **Clean** keeps each logo's 4 main colors, hard edges and no stray pixels, and drops the white outline that dark-background logos add around colored parts (all-white logos are left alone), so busy logos read better. On by default for MLB.
+- **Logo version** (under **Logos**): where logos come from.
+  - **Automatic**: MLB's official cap logos (from mlbstatic.com) for MLB, ESPN's full logos for everything else.
+  - **ESPN full team logos** / **ESPN small-size logos**, and for MLB **MLB official cap logos** / **MLB official team logos**. ("Prefer logos designed for dark backgrounds" picks ESPN's dark-background versions.)
+  - Whatever is chosen, if a team doesn't have that version, its ESPN full logo is used.
+  - **Preview → Logos** shows every version of your favorite team's logo on the panel, one per screen, at 30, 16 and 10 px, with the setting that selects it.
+- **Custom logos** (under **Logos**): use your own image for any team, one per line as `ABBR=image URL` (a PNG with a transparent background works best; SVG needs the optional `cairosvg` package).
+- **Logo detail** (under **Logos**): **Clean** keeps each logo's 4 main colors, hard edges and no stray pixels, and drops the white outline that dark-background logos add around colored parts (all-white logos are left alone), so busy logos read better. Off by default.
 - **Team colors on the panel:** wherever a board uses a team's second ("accent") color (trim lines, recap stripes, celebrations), a white, black or gray alternate color is never used; the team's other real color is, or a darker shade of the main color if the team only has one.
 - **Logo edges** (under **Logos**):
   - **Automatic**: crisp hard pixel edges for big logos, smooth anti-aliased edges for small ones, where the soft edge pixels carry the detail.

@@ -141,6 +141,7 @@ def parse_event(ev, league_key):
             "score": _score(c.get("score", "")),
             "color": hex_to_rgb(t.get("color"), GRAY),
             "alt": hex_to_rgb(t.get("alternateColor"), WHITE),
+            "_has_color": bool(t.get("color")),
             "logo_url": t.get("logo") or ((t.get("logos") or [{}])[0].get("href")),
             "record": (rec[0].get("summary") or rec[0].get("displayValue") or "") if rec else "",
             "winner": bool(c.get("winner")),
@@ -480,7 +481,7 @@ LEAGUE_LAYOUT = [
                     "score_flash", "goal_animation"]),
     ("Final scores", ["final_style", "show_final_records"]),
     ("Celebrations", ["celebrations", "celebrate_field_goals", "celebrate_runs", "recap", "simulate"]),
-    ("Logos", ["show_abbreviations", "logo_version", "logo_detail", "logo_enhance", "logo_edges", "use_dark_logos"]),
+    ("Logos", ["show_abbreviations", "logo_version", "logo_overrides", "logo_detail", "logo_enhance", "logo_edges", "use_dark_logos"]),
     ("Text colors", ["text_score", "text_status", "text_info", "text_loser", "abbr_color_mode", "abbr_color"]),
     ("Timing", ["duration", "refresh", "live_refresh"]),
 ]
@@ -508,8 +509,70 @@ LIVE_STYLES = {
 
 # Teams whose ESPN "dark background" logo is an all-white version; always use their color logo.
 COLOR_LOGO_TEAMS = {"nfl": ("lar", "nyj")}
-# leagues whose primary logos are busy wordmarks / scripts: use ESPN's small-size logos by default
+# leagues whose primary logos are busy wordmarks / scripts: use simpler logos by default
 SCOREBOARD_LOGO_LEAGUES = {"mlb"}
+LOGO_VERSIONS = {
+    "auto": "Automatic (MLB: MLB's official cap logos; everything else: ESPN's full logos)",
+    "primary": "ESPN full team logos",
+    "scoreboard": "ESPN small-size logos",
+    "mlb_cap": "MLB official cap logos (MLB only)",
+    "mlb_primary": "MLB official team logos (MLB only)",
+}
+# ESPN abbreviation -> MLB's own team id (for logos from mlbstatic.com)
+MLB_IDS = {"ARI": 109, "AZ": 109, "ATL": 144, "BAL": 110, "BOS": 111, "CHC": 112, "CHW": 145, "CWS": 145, "CIN": 113,
+           "CLE": 114, "COL": 115, "DET": 116, "HOU": 117, "KC": 118, "LAA": 108, "LAD": 119, "MIA": 146,
+           "MIL": 158, "MIN": 142, "NYM": 121, "NYY": 147, "ATH": 133, "OAK": 133, "PHI": 143, "PIT": 134,
+           "SD": 135, "SF": 137, "SEA": 136, "STL": 138, "TB": 139, "TEX": 140, "TOR": 141, "WSH": 120, "WAS": 120}
+
+
+def _fill_team(team, teams):
+    """Fill colors / logo / name from ESPN's team list where the event left them out."""
+    info = teams.get((team.get("abbr") or "").upper()) or {}
+    if not info:
+        return
+    if not team.get("_has_color") and info.get("color"):
+        team["color"] = hex_to_rgb(info["color"], team.get("color") or GRAY)
+        team["alt"] = hex_to_rgb(info.get("alt"), WHITE)
+    if not team.get("logo_url") and info.get("logo"):
+        team["logo_url"] = info["logo"]
+    if not team.get("name") and info.get("name"):
+        team["name"] = info["name"]
+
+
+def _abbr_from_logo_url(url):
+    m = re.search(r"/teamlogos/[a-z]+/500(?:-dark)?/(?:scoreboard/)?([a-z0-9]+)\.png", url or "")
+    return m.group(1).upper() if m else ""
+
+
+def _fetch_svg(url, size):
+    """An SVG logo as a PIL image (needs the optional 'cairosvg' package + libcairo); None otherwise."""
+    import hashlib
+    import io
+    import os
+    from PIL import Image
+    from ..gfx import CACHE_DIR, trim_alpha, fit_image
+    key = hashlib.sha1(f"svg|{url}|{size}".encode()).hexdigest()
+    path = os.path.join(CACHE_DIR, key + ".png")
+    if os.path.exists(path):
+        try:
+            return Image.open(path).convert("RGBA")
+        except Exception:
+            pass
+    try:
+        import cairosvg
+    except Exception:
+        return None
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        png = cairosvg.svg2png(bytestring=r.content, output_width=size * 2)
+        img = fit_image(trim_alpha(Image.open(io.BytesIO(png)).convert("RGBA")), size, size)
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        img.save(path)
+        return img
+    except Exception as e:
+        log.info("svg logo %s unavailable: %s", url, e)
+        return None
 
 
 def _prefers_color_logo(url):
@@ -546,7 +609,7 @@ class LeagueBoard(Board):
         "celebrations": True, "celebrate_field_goals": False, "celebrate_runs": False,
         "next_game": "no_games", "next_game_style": "classic", "offseason_countdown": True, "opener_days": 14, "show_standings": False, "show_playoffs": False, "recap": True,
         "show_abbreviations": True, "show_final_records": True, "logo_enhance": True, "logo_edges": "auto",
-        "logo_version": "auto", "logo_detail": "full",
+        "logo_version": "auto", "logo_detail": "full", "logo_overrides": [],
         "text_score": "#ffffff", "text_status": "#ffc800", "text_info": "#787878", "text_loser": "#787878",
         "abbr_color_mode": "team", "abbr_color": "#ffffff", "final_style": "plain", "upcoming_style": "plain", "upcoming_layout": "classic", "live_style": "plain",
         "network_logos": True,
@@ -663,7 +726,7 @@ class LeagueBoard(Board):
         f += [
             {"key": "preview", "label": "Preview", "type": "actions", "section": "Preview", "action": "preview",
              "options": {"live": "Live game", "pre": "Upcoming", "post": "Final", "all": "All three",
-                         "countdown": "Next-game countdown"},
+                         "countdown": "Next-game countdown", "logos": "Logos"},
              "help": "Shows sample games with your current settings and layout for 3 minutes, even in the "
                      "off-season. Uses your favorite teams when set."},
             {"key": "duration", "label": "Seconds per game", "type": "number", "section": "Timing"},
@@ -681,11 +744,13 @@ class LeagueBoard(Board):
                                "smooth": "Smooth (anti-aliased, softer)", "crisp": "Crisp (hard pixel edges)"},
              "help": "Smooth keeps soft edges like the clock's 'Smooth edges'; crisp snaps to the logo's exact colors."},
             {"key": "logo_version", "label": "Logo version", "type": "select", "section": "Logos",
-             "options": ["auto", "scoreboard", "primary"],
-             "option_labels": {"auto": "Automatic (small-size logos for MLB, full logos elsewhere)",
-                               "scoreboard": "Small-size logos (ESPN's scoreboard versions, e.g. the STL cap logo)",
-                               "primary": "Full team logos"},
-             "help": "Teams without a small-size logo always use their full logo."},
+             "options": list(LOGO_VERSIONS), "option_labels": LOGO_VERSIONS,
+             "help": "Use Preview > Logos to see every version of your favorite team's logo on the panel. "
+                     "If a version isn't available for a team, its ESPN full logo is used."},
+            {"key": "logo_overrides", "label": "Custom logos (one per team: ABBR=image URL)", "type": "list",
+             "section": "Logos",
+             "help": "e.g. STL=https://example.com/cardinals.png. A PNG with a transparent background works best "
+                     "(SVG needs the optional cairosvg package)."},
             {"key": "logo_detail", "label": "Logo detail", "type": "select", "section": "Logos",
              "options": ["full", "clean"],
              "option_labels": {"full": "Full detail", "clean": "Clean (4 main colors, no stray pixels)"},
@@ -907,6 +972,7 @@ class LeagueBoard(Board):
                     problems[fav] = "no upcoming game on ESPN's schedule"
                 if g:
                     for side in ("home", "away"):
+                        _fill_team(g[side], teams)       # team schedules carry no colors (or sometimes logos)
                         self._load_logo(g[side])
                     found[fav] = g
             self.next_games = found
@@ -1015,38 +1081,67 @@ class LeagueBoard(Board):
     def _logo_version(self):
         v = self.cfg.get("logo_version", "auto")
         if v == "auto":
-            return "scoreboard" if self.league in SCOREBOARD_LOGO_LEAGUES else "primary"
+            return "mlb_cap" if self.league in SCOREBOARD_LOGO_LEAGUES else "primary"
         return v
+
+    def _custom_logos(self):
+        """{ABBR: url} from the 'Custom logos' setting (lines like 'STL=https://...png')."""
+        out = {}
+        for item in self.cfg.get("logo_overrides") or []:
+            if "=" in str(item):
+                k, v = str(item).split("=", 1)
+                if k.strip() and v.strip().startswith("http"):
+                    out[k.strip().upper()] = v.strip()
+        return out
+
+    def logo_candidates(self, url, abbr, version, dark=None):
+        """[(label, url)] to try, best first, for one logo version."""
+        dark = self.cfg.get("use_dark_logos", True) if dark is None else dark
+        out = []
+        if version == "scoreboard" and "/500/" in url:
+            if dark:
+                out.append(("ESPN small-size (dark)", url.replace("/500/", "/500-dark/scoreboard/")))
+            out.append(("ESPN small-size", url.replace("/500/", "/500/scoreboard/")))
+        elif version in ("mlb_cap", "mlb_primary") and self.league == "mlb" and MLB_IDS.get(abbr):
+            tid = MLB_IDS[abbr]
+            if version == "mlb_cap":
+                out.append(("MLB cap logo", f"https://midfield.mlbstatic.com/v1/team/{tid}/spots/128"))
+                out.append(("MLB cap logo (svg)", f"https://www.mlbstatic.com/team-logos/team-cap-on-dark/{tid}.svg"))
+            else:
+                out.append(("MLB team logo (svg)", f"https://www.mlbstatic.com/team-logos/team-primary-on-dark/{tid}.svg"))
+                out.append(("MLB team logo (svg)", f"https://www.mlbstatic.com/team-logos/{tid}.svg"))
+        if dark and "/500/" in url and not _prefers_color_logo(url):
+            out.append(("ESPN full (dark)", url.replace("/500/", "/500-dark/")))
+        out.append(("ESPN full", url))
+        return out
+
+    def _fetch_logo(self, u, size):
+        return _fetch_svg(u, size) if u.split("?")[0].endswith(".svg") else fetch_image(u, size, size, trim=True)
 
     def _load_logo(self, team):
         url = team.get("logo_url")
-        sig = (self._logo_version(), bool(self.cfg.get("use_dark_logos", True)))
+        sig = (self._logo_version(), bool(self.cfg.get("use_dark_logos", True)), tuple(sorted(self._custom_logos().items())))
         if sig != getattr(self, "_logo_sig", sig):           # logo settings changed: load them all again
             self.logos, self.logo_src = {}, {}
         self._logo_sig = sig
         if not url or url in self.logos:
             return
         size = self.app.height * 6          # ~192 px: room to find the logo's true colors
-        img = None
-        if self._logo_version() == "scoreboard" and "/500/" in url:
-            # ESPN's simplified 'scoreboard' logos (e.g. the Cardinals' STL cap logo instead of the
-            # birds-on-a-bat wordmark) are made for small sizes; not every team / league has one
-            tries = ([url.replace("/500/", "/500-dark/scoreboard/")] if self.cfg.get("use_dark_logos", True) else []) \
-                + [url.replace("/500/", "/500/scoreboard/")]
-            for u in tries:
-                img = fetch_image(u, size, size, trim=True)
-                if img is not None:
-                    break
-        if img is None and self.cfg.get("use_dark_logos", True) and "/500/" in url and not _prefers_color_logo(url):
-            img = fetch_image(url.replace("/500/", "/500-dark/"), size, size, trim=True)
-            if img is not None and colorfulness(img) < 0.12:
-                # some "dark background" logos are plain white (e.g. Rams, Jets): use the team-color
-                # logo instead when it actually has color
-                color_img = fetch_image(url, size, size, trim=True)
-                if color_img is not None and colorfulness(color_img) > colorfulness(img) + 0.15:
-                    img = color_img
+        abbr = (team.get("abbr") or _abbr_from_logo_url(url) or "").upper()
+        custom = self._custom_logos().get(abbr)
+        img = self._fetch_logo(custom, size) if custom else None
         if img is None:
-            img = fetch_image(url, size, size, trim=True)
+            for label, u in self.logo_candidates(url, abbr, self._logo_version()):
+                img = self._fetch_logo(u, size)
+                if img is None:
+                    continue
+                if label == "ESPN full (dark)" and colorfulness(img) < 0.12:
+                    # some "dark background" logos are plain white (e.g. Rams, Jets): use the team-color
+                    # logo instead when it actually has color
+                    color_img = fetch_image(url, size, size, trim=True)
+                    if color_img is not None and colorfulness(color_img) > colorfulness(img) + 0.15:
+                        img = color_img
+                break
         self.set_logo(url, img)
 
     def set_logo(self, url, img):
@@ -1110,7 +1205,8 @@ class LeagueBoard(Board):
     def slides(self):
         visible = self.visible_games()
         games = [g["id"] for g in visible]
-        out = [sid for sid, _fav, _g in self._preview_countdowns()] + list(games)
+        out = [g["key"] for g in self._gallery()] + \
+            [sid for sid, _fav, _g in self._preview_countdowns()] + list(games)
         mode = self.cfg.get("next_game", "no_games")
         now_utc = datetime.now(timezone.utc)
         for fav, g in self.next_games.items():
@@ -1170,6 +1266,8 @@ class LeagueBoard(Board):
         away, home = pick_teams(self.league, [f.upper() for f in self.cfg.get("favorites", [])], teams)
         if kind == "countdown":
             return self._preview_countdown(sport, path, teams, away, home)
+        if kind == "logos":
+            return self._preview_logos(teams)
         states = {"live": ["in"], "pre": ["pre"], "post": ["post"], "all": ["in", "pre", "post"]}[kind]
         games = []
         for st in states:
@@ -1180,6 +1278,70 @@ class LeagueBoard(Board):
             games.append(g)
         self.preview_state = (games, time.time() + self.PREVIEW_SECONDS)
         return [g["id"] for g in games]
+
+    def _preview_logos(self, teams):
+        """Every logo version of the first favorite team (or a sample team), one per screen, labelled
+        with the setting that picks it."""
+        favs = [f.upper() for f in self.cfg.get("favorites", [])]
+        abbr = next((f for f in favs if f in teams), None) or next(iter(teams), "")
+        info = teams.get(abbr) or {}
+        url = info.get("logo") or ""
+        if not url:
+            raise RuntimeError("couldn't get the team list from ESPN")
+        size = self.app.height * 6
+        seen, gallery = set(), []
+        custom = self._custom_logos().get(abbr)
+        options = ([("CUSTOM", "custom logo", custom)] if custom else [])
+        for version in ("mlb_cap", "mlb_primary", "scoreboard", "primary"):
+            if version.startswith("mlb") and self.league != "mlb":
+                continue
+            for dark in (True, False):
+                for label, u in self.logo_candidates(url, abbr, version, dark=dark):
+                    if label.startswith("ESPN full") and version != "primary":
+                        continue                 # the fallback, listed under 'primary'
+                    options.append((LOGO_VERSIONS[version].split(" (")[0], label + ("" if dark else ""), u))
+        for setting, label, u in options:
+            if u in seen:
+                continue
+            seen.add(u)
+            img = self._fetch_logo(u, size)
+            if img is None:
+                continue
+            key = f"gallery:{len(gallery)}"
+            self.logo_src[key] = img
+            self.logos[key] = fit_image(img, self.app.height, self.app.height)
+            gallery.append({"key": key, "setting": setting, "label": label, "abbr": abbr})
+        if not gallery:
+            raise RuntimeError("no logos could be downloaded")
+        self.logo_gallery = (gallery, time.time() + self.PREVIEW_SECONDS)
+        return [g["key"] for g in gallery]
+
+    def _gallery(self):
+        gal = getattr(self, "logo_gallery", None)
+        if gal and time.time() < gal[1]:
+            return gal[0]
+        return []
+
+    def _render_gallery(self, c, item, t):
+        from .logos import logo_image
+        W, H = c.width, c.height
+        team = {"logo_url": item["key"]}
+        big = logo_image(self, team, 30, 30)
+        if big is not None:
+            c.paste(big, 0, 1)
+        x = 33
+        for sz in (16, 10):
+            im = logo_image(self, team, sz, sz)
+            if im is not None:
+                c.paste(im, x, (H - sz) // 2 if sz == 16 else H - sz - 1)
+            x += sz + 2
+        x0 = 64
+        c.scroll_text(x0, W, 1, item["label"].upper(), "4x6", WHITE, t)
+        c.text(x0, 9, "LOGO VERSION:", "4x6", GRAY)
+        c.scroll_text(x0, W, 16, item["setting"].upper(), "5x7", YELLOW, t)
+        n = len(self._gallery())
+        i = next((k for k, g in enumerate(self._gallery()) if g["key"] == item["key"]), 0)
+        c.text(x0, H - 6, f"{item['abbr']}  {i + 1}/{n}", "4x6", DIM)
 
     def _preview_countdown(self, sport, path, teams, away, home):
         """Two sample countdowns: a few days out, and later today (game day)."""
@@ -1231,6 +1393,11 @@ class LeagueBoard(Board):
         if isinstance(slide, Recap):
             from . import recap
             recap.render(self, c, slide, t, team_color, self._clock_text)
+            return
+        if isinstance(slide, str) and slide.startswith("gallery:"):
+            item = next((g for g in self._gallery() if g["key"] == slide), None)
+            if item:
+                self._render_gallery(c, item, t)
             return
         if isinstance(slide, str) and slide.startswith("pnext:"):
             hit = next(((fav, g) for sid, fav, g in self._preview_countdowns() if sid == slide), None)
@@ -1766,8 +1933,7 @@ def _make(key):
     cls = type(f"{key.upper()}Board", (LeagueBoard,), {
         "name": key, "league": key, "title": title,
         "description": f"{title} scores from ESPN: live, upcoming and final games.",
-        "DEFAULTS": dict(LeagueBoard.COMMON, enabled=key in DEFAULT_ON,
-                         **({"logo_detail": "clean"} if key in SCOREBOARD_LOGO_LEAGUES else {})),
+        "DEFAULTS": dict(LeagueBoard.COMMON, enabled=key in DEFAULT_ON),
     })
     cls.FIELDS = cls.build_fields()
     return cls

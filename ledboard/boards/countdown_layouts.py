@@ -28,6 +28,22 @@ KICKOFF = {"football": "KICKOFF", "baseball": "FIRST PITCH", "basketball": "TIP-
 
 
 # ---------------------------------------------------------------- helpers
+def primary_color(team):
+    """The team's main color as it is (e.g. Packers green, not the brighter gold), lifted just enough to
+    show on the LEDs; falls back to the most visible team color if the main color is white / black / gray."""
+    from .sports import _neutral, team_color
+    from .logos import led_color
+    col = team.get("color")
+    if col and not _neutral(col):
+        r, g, b = led_color(col)
+        if max(r, g, b) < 110:                        # very dark: lift a bit more so the outline shows
+            k = 110 / max(1, max(r, g, b))
+            r, g, b = (min(255, round(v * k)) for v in (r, g, b))
+        return (r, g, b)
+    return team_color(team)
+
+
+
 def _secs(g):
     if not g.get("start"):
         return None
@@ -138,7 +154,7 @@ def render_ticket(board, c, g, fav, t, team_color):
     W, H = c.width, c.height
     side, other = _sides(g, fav)
     me, opp = g[side], g[other]
-    col = team_color(me)
+    col = primary_color(me)                       # the ticket is printed in the team's own main color
     stub = 88
     c.draw.rounded_rectangle((0, 0, W - 1, H - 1), radius=3, outline=col)
     for y in (0, H - 1):                                   # notches where the stub tears off
