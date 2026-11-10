@@ -147,7 +147,11 @@ In more detail:
 
   The countdown appears per team: with the default setting it shows whenever *your team* has no game on the board, even if other teams' games are showing.
 
-  **Playoffs:** postseason games show like any other game (as upcoming cards and in the countdown). The info line adds the round and series, shortened to fit (for example "WEST RD1 G4" and "STL LEADS 2-1"). The next-game lookup checks the playoff schedule as well as the regular season, for soccer also the upcoming fixtures, and the league's scoreboard for the next three weeks (which catches newly scheduled playoff games). In the offseason it looks at next season's schedule, so you get a countdown to spring training / preseason (labelled as such) or opening day, as soon as ESPN has published it.
+  **Playoffs:** postseason games show like any other game (as upcoming cards and in the countdown). The info line adds the round and series, shortened to fit (for example "WEST RD1 G4" and "STL LEADS 2-1"). The next-game lookup checks the playoff schedule as well as the regular season, for soccer also the upcoming fixtures, and the league's scoreboard for the next three weeks (which catches newly scheduled playoff games). In the offseason it looks at next season's schedule, as soon as ESPN has published it.
+
+  **Count down through the offseason** (per league, under **Between games**, on by default):
+  - **On**: between seasons the countdown shows your team's next game, including spring training / preseason (labelled as such).
+  - **Off**: preseason games are skipped, and the countdown to the **season opener** only appears in the last days before it, set with "...otherwise start counting down this many days before the opener" (14 by default). In-season and playoff countdowns are not affected. The Status tab shows when a hidden opener countdown will start.
 
   **Countdown design** (under **Between games**):
   - **Classic**: logos at the sides, the countdown, and a rotating line (time, opponent, TV).

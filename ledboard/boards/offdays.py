@@ -64,10 +64,9 @@ def _next_season_events(sport, league_path, team_id):
     return events
 
 
-def _soonest(events, league_key, parse_event, team_abbr=None):
-    now = datetime.now(timezone.utc)
-    best = None
-    bad = 0
+def _parse_all(events, league_key, parse_event):
+    """Parse schedule / scoreboard events, skipping (and logging once) any that can't be read."""
+    out, bad = [], 0
     for ev in events:
         try:
             g = parse_event(ev, league_key)
@@ -77,34 +76,67 @@ def _soonest(events, league_key, parse_event, team_abbr=None):
                 log.info("skipping unreadable schedule event %s: %r", (ev or {}).get("id") if isinstance(ev, dict) else "?", e,
                          exc_info=True)
             continue
-        if not g or g["state"] == "post":
+        if g:
+            out.append(g)
+    return out
+
+
+def _upcoming(games, team_abbr=None, preseason=True):
+    now = datetime.now(timezone.utc)
+    out = []
+    for g in games:
+        if g["state"] == "post":
             continue
         if team_abbr and team_abbr not in (g["home"]["abbr"].upper(), g["away"]["abbr"].upper()):
             continue
         if g["start"] and g["start"] < now and g["state"] == "pre":
             continue           # stale "pre" from the past (postponed etc.)
-        if best is None or (g["start"] or now) < (best["start"] or now):
-            best = g
-    return best
+        if not preseason and g.get("preseason"):
+            continue
+        out.append(g)
+    return out
 
 
-def next_game(sport, league_path, league_key, team_id, parse_event, scoreboard_scan=None, team_abbr=None):
+OFFSEASON_GAP_DAYS = 30
+
+
+def next_game(sport, league_path, league_key, team_id, parse_event, scoreboard_scan=None, team_abbr=None,
+              preseason=True):
     """The team's next not-yet-finished game: regular season, playoffs, or (in the offseason) next
-    season's first game, parsed like a scoreboard game.
+    season's first game, parsed like a scoreboard game. The result has "offseason": True when it's
+    next season's game (a new season year, or a long break on both sides of today).
 
     `scoreboard_scan` (optional) returns the league scoreboard's events for the coming weeks; it catches
-    games that a team's schedule doesn't list (e.g. newly set playoff matchups)."""
-    best = _soonest(_schedule_events(sport, league_path, team_id), league_key, parse_event)
+    games that a team's schedule doesn't list (e.g. newly set playoff matchups).
+    `preseason=False` skips preseason / spring training games (counts down to the real opener)."""
+    now = datetime.now(timezone.utc)
+    games = _parse_all(_schedule_events(sport, league_path, team_id), league_key, parse_event)
+    cands = _upcoming(games, preseason=preseason)
     if scoreboard_scan is not None and team_abbr:
         try:
-            alt = _soonest(scoreboard_scan(), league_key, parse_event, team_abbr)
+            cands += _upcoming(_parse_all(scoreboard_scan(), league_key, parse_event), team_abbr, preseason)
         except Exception as e:
             log.debug("scoreboard scan unavailable: %s", e)
-            alt = None
-        if alt and (best is None or (alt["start"] and best["start"] and alt["start"] < best["start"])):
-            best = alt
-    if best is None:
-        best = _soonest(_next_season_events(sport, league_path, team_id), league_key, parse_event)
+    from_next = False
+    if not cands:
+        cands = _upcoming(_parse_all(_next_season_events(sport, league_path, team_id), league_key, parse_event),
+                          preseason=preseason)
+        from_next = bool(cands)
+    if not cands:
+        return None
+    best = min(cands, key=lambda g: g["start"] or now)
+    past = [g for g in games if g["state"] == "post" and g["start"]]
+    last_end = max((g["start"] for g in past), default=None)
+    last_year = max((g.get("season_year") or 0 for g in past), default=0)
+    gap_ahead = (best["start"] - now).days if best["start"] else 0
+    gap_behind = (now - last_end).days if last_end else 999
+    best["offseason"] = bool(
+        from_next
+        or (best.get("season_year") and last_year and best["season_year"] > last_year)
+        or (gap_ahead > OFFSEASON_GAP_DAYS and gap_behind > OFFSEASON_GAP_DAYS)
+        or (best.get("preseason") and gap_ahead > 0))
+    if best["offseason"] and not best.get("preseason") and not best.get("note"):
+        best["note"] = "SEASON OPENER"
     return best
 
 

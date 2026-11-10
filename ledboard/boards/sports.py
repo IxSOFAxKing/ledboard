@@ -223,6 +223,8 @@ def parse_event(ev, league_key):
         "note": _note(comp) or ({"baseball": "SPRING TRAINING"}.get(LEAGUES[league_key][0], "PRESEASON")
                                 if _season_type(ev) == "1" else ""),
         "postseason": _postseason(ev, comp),
+        "preseason": _season_type(ev) == "1",
+        "season_year": _season_year(ev),
     }
     poss = str(sit.get("possession", "") or "")
     if poss:
@@ -291,6 +293,14 @@ def short_note(text):
     for pat, rep in _NOTE_SUBS:
         out = re.sub(pat, rep, out, flags=re.I)
     return out.strip(" -·").upper()
+
+
+def _season_year(ev):
+    season = ev.get("season") if isinstance(ev.get("season"), dict) else {}
+    try:
+        return int(season.get("year"))
+    except (TypeError, ValueError):
+        return None
 
 
 def _season_type(ev):
@@ -435,7 +445,8 @@ LEAGUE_LAYOUT = [
     ("Teams", ["favorites", "favorites_only", "takeover", "hide_favorite_score"]),
     ("Preview", ["preview"]),
     ("Which games", ["live_only", "show_final", "final_hours", "show_pregame", "upcoming_hours", "max_games"]),
-    ("Between games", ["next_game", "next_game_style", "show_standings", "show_playoffs"]),
+    ("Between games", ["next_game", "next_game_style", "offseason_countdown", "opener_days", "show_standings",
+                       "show_playoffs"]),
     ("Upcoming games", ["upcoming_style", "show_records", "show_network", "network_logos", "show_odds"]),
     ("Live games", ["live_layout", "live_style", "detailed_live", "show_win_probability", "show_last_play",
                     "score_flash", "goal_animation"]),
@@ -503,7 +514,7 @@ class LeagueBoard(Board):
         "hide_favorite_score": False, "detailed_live": True, "show_last_play": True, "score_flash": True,
         "use_dark_logos": True, "live_layout": "classic", "show_win_probability": True, "goal_animation": True,
         "celebrations": True, "celebrate_field_goals": False, "celebrate_runs": False,
-        "next_game": "no_games", "next_game_style": "classic", "show_standings": False, "show_playoffs": False, "recap": True,
+        "next_game": "no_games", "next_game_style": "classic", "offseason_countdown": True, "opener_days": 14, "show_standings": False, "show_playoffs": False, "recap": True,
         "show_abbreviations": True, "show_final_records": True, "logo_enhance": True, "logo_edges": "auto",
         "text_score": "#ffffff", "text_status": "#ffc800", "text_info": "#787878", "text_loser": "#787878",
         "abbr_color_mode": "team", "abbr_color": "#ffffff", "final_style": "plain", "upcoming_style": "plain", "live_style": "plain",
@@ -541,6 +552,13 @@ class LeagueBoard(Board):
                      "then this countdown until the game is close enough to show as a game card again."},
             {"key": "next_game_style", "label": "Countdown design", "type": "select", "section": "Which games",
              "options": list(COUNTDOWN_STYLES), "option_labels": COUNTDOWN_STYLES},
+            {"key": "offseason_countdown", "label": "Count down through the offseason", "type": "bool",
+             "section": "Which games",
+             "help": "On: between seasons the countdown shows your team's next game, including spring training / "
+                     "preseason. Off: preseason games are skipped and the countdown to the season opener only "
+                     "appears in the days set below."},
+            {"key": "opener_days", "label": "...otherwise start counting down this many days before the opener",
+             "type": "number", "section": "Which games", "show_if": {"offseason_countdown": False}},
             {"key": "max_games", "label": "Max games per rotation", "type": "number", "section": "Which games"},
             {"key": "show_records", "label": "Show team records before the game", "type": "bool", "section": "Upcoming games"},
             {"key": "show_network", "label": "Show TV network", "type": "bool", "section": "Upcoming games"},
@@ -809,7 +827,8 @@ class LeagueBoard(Board):
         want_next = c.get("next_game", "no_games") != "off" and self.favorites()
         want_table = c.get("show_standings")
         want_po = c.get("show_playoffs") and self.league in PLAYOFF_LEAGUES
-        key = (bool(want_next), bool(want_table), bool(want_po), tuple(sorted(self.favorites())))
+        key = (bool(want_next), bool(want_table), bool(want_po), tuple(sorted(self.favorites())),
+               bool(c.get("offseason_countdown", True)))
         if not (want_next or want_table or want_po):
             return
         if key == getattr(self, "_offday_key", None) and time.time() - self._offday_at < self.OFFDAY_REFRESH:
@@ -834,7 +853,7 @@ class LeagueBoard(Board):
                 try:
                     g = offdays.next_game(sport, path, self.league, tid, parse_event,
                                           scoreboard_scan=self._scan_ahead if sport != "football" else None,
-                                          team_abbr=fav)
+                                          team_abbr=fav, preseason=bool(c.get("offseason_countdown", True)))
                 except Exception as e:
                     log.info("[%s] schedule for %s unavailable: %s", self.name, fav, e)
                     problems[fav] = f"schedule unavailable ({e.__class__.__name__}: {str(e)[:80]})"
@@ -999,6 +1018,19 @@ class LeagueBoard(Board):
         out = out[: int(c.get("max_games", 20) or 20)]
         return self._preview_games() + out
 
+    def _opener_days(self):
+        try:
+            return max(0.0, float(self.cfg.get("opener_days", 14) or 0))
+        except (TypeError, ValueError):
+            return 14.0
+
+    def _offseason_hidden(self, g, now_utc=None):
+        """Offseason countdown turned off and the opener is further away than 'opener_days'."""
+        if self.cfg.get("offseason_countdown", True) or not g.get("offseason") or not g.get("start"):
+            return False
+        now_utc = now_utc or datetime.now(timezone.utc)
+        return g["start"] - now_utc > timedelta(days=self._opener_days())
+
     # typical game length, to estimate when a game that was already over when we started really ended
     GAME_HOURS = {"football": 3.25, "baseball": 3.0, "basketball": 2.25, "hockey": 2.5, "soccer": 2.0}
 
@@ -1019,6 +1051,8 @@ class LeagueBoard(Board):
         now_utc = datetime.now(timezone.utc)
         for fav, g in self.next_games.items():
             if g["id"] in games or not (g["start"] is None or g["start"] > now_utc):
+                continue
+            if self._offseason_hidden(g, now_utc):
                 continue
             # per team: the countdown shows when this team has nothing on the board
             fav_on_board = any(v[s]["abbr"].upper() == fav for v in visible for s in ("home", "away")
@@ -1110,6 +1144,13 @@ class LeagueBoard(Board):
         s["live"] = sum(1 for g in self.games if g["state"] == "in")
         s["next_games"] = {fav: (g["start"].isoformat() if g.get("start") else "TBD")
                            for fav, g in self.next_games.items()}
+        hidden = {}
+        for fav, g in self.next_games.items():
+            if self._offseason_hidden(g):
+                shows = (g["start"] - timedelta(days=self._opener_days())).astimezone()
+                hidden[fav] = f"season opener; countdown starts {shows:%b %-d}"
+        if hidden:
+            s["next_game_hidden"] = hidden
         problems = getattr(self, "next_game_problems", {})
         if problems:
             s["next_game_problems"] = problems
