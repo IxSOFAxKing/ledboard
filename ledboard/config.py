@@ -46,7 +46,7 @@ DEFAULTS = {
         "mode": "dim",          # "dim", "off" or "ambient"
         "brightness": 15,
     },
-    "scroll": {"speed": 20, "gap": 16},
+    "scroll": {"speed": 20, "gap": 16, "chain": False},
     "transitions": {"style": "slide", "seconds": 0.6, "scope": "boards"},   # between boards (or every slide)
     "combined": {"enabled": False, "speed": "", "gap": "", "pause": 0},   # all boards in one ticker
     "auto_brightness": {"follow_sun": False, "night": 15, "latitude": "", "longitude": ""},   # used by boards whose own scroll settings are blank

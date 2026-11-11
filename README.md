@@ -107,6 +107,12 @@ Every board has a **Scroll mode** switch. When it's on, the board's slides scrol
 
 The speed (20 px/s by default) and the gap between slides are set once for all boards under **Settings → Defaults for all boards**. If you fill in a board's own speed or gap, that board uses its own value.
 
+**Run neighboring scroll-mode boards back to back** (also under **Defaults for all boards**, off by default): when boards next to each other in the rotation are all in scroll mode, they become one continuous ticker. The next board follows right behind the last slide instead of after a blank screen.
+- Boards with nothing to show are skipped, so they don't break the run.
+- Each board keeps its own gap between its own slides, and boards are joined by the global gap.
+- If the boards' speeds differ, the whole run uses the global speed.
+- **Show** on a board in the middle of a run starts the ticker from that board.
+
 ### Global settings (Settings tab)
 - **Defaults for all boards**: scroll mode speed and gap.
 - **Transitions**: how the display changes from one board to the next: slide, push up, wipe, fade (through black), dissolve, random, or off. Set the length (0.4–0.8 s looks smooth) and whether to use it between boards only or between every screen. Alerts and takeovers always cut in instantly.

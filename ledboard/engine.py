@@ -34,6 +34,29 @@ class ScrollSlide:
         return hash(("scroll", self.board))
 
 
+class ChainSlide:
+    """Neighboring scroll-mode boards run back to back as one ticker (no black gap between them).
+
+    `parts` is [(board name, ScrollSlide)]. Compares equal to any chain that starts with the same
+    board, so content refreshes mid-scroll don't cut it short.
+    """
+    __slots__ = ("parts",)
+    intro = False
+
+    def __init__(self, parts):
+        self.parts = list(parts)
+
+    @property
+    def first(self):
+        return self.parts[0][0]
+
+    def __eq__(self, other):
+        return isinstance(other, ChainSlide) and other.first == self.first
+
+    def __hash__(self):
+        return hash(("chain", self.first))
+
+
 COMBINED = "__combined__"
 
 
@@ -112,7 +135,7 @@ class Engine:
             b = self.boards.get(board_name)
             if not b:
                 raise KeyError(board_name)
-            slides = self._with_intro(b, b.slides() or [None])
+            slides = self._with_intro(b, self._jump_slides(board_name, b))
             self.cur = (board_name, slides, 0, time.monotonic())
             self.overlay = None
 
@@ -130,6 +153,46 @@ class Engine:
     def show_message(self, text, seconds=10, color="#ffffff", font="7x13B"):
         self.overlay = {"text": str(text), "color": hex_to_rgb(color), "font": font,
                         "until": time.monotonic() + float(seconds), "started": time.monotonic()}
+
+    def _jump_slides(self, name, b):
+        """What "show now" plays: the board as the rotation would show it (scrolling, and with a chain
+        of scroll boards, the rest of the chain after it)."""
+        own = b.slides()
+        if not own:
+            return [None]
+        if not b.cfg.get("scroll_mode") or self.cfg.get("combined", {}).get("enabled"):
+            return own
+        try:
+            cands, _ = self._candidates()
+        except Exception:
+            cands = []
+        for _n, sl in cands:
+            if sl and isinstance(sl[0], ChainSlide):
+                names = [n for n, _ in sl[0].parts]
+                if name in names:
+                    return [ChainSlide(sl[0].parts[names.index(name):])]
+        return [ScrollSlide(name, own)]
+
+    def _chain(self, normal):
+        """Join runs of neighboring scroll-mode boards into one ChainSlide (setting: scroll.chain)."""
+        if not self.cfg.get("scroll", {}).get("chain"):
+            return normal
+        out, run = [], []
+
+        def flush():
+            if len(run) >= 2:
+                out.append((run[0][0], [ChainSlide([(n, sl[0]) for n, sl in run])]))
+            else:
+                out.extend(run)
+            run.clear()
+        for name, sl in normal:
+            if len(sl) == 1 and isinstance(sl[0], ScrollSlide):
+                run.append((name, sl))
+            else:
+                flush()
+                out.append((name, sl))
+        flush()
+        return out
 
     # -- rotation ---------------------------------------------------------------
     def _candidates(self):
@@ -156,7 +219,7 @@ class Engine:
         if combined and normal:
             items = [(name, sl) for name, sls in normal for sl in sls]
             return [(COMBINED, [ComboSlide(items)])], False
-        return normal, False
+        return self._chain(normal), False
 
     def _advance(self, force_next_board=False):
         cands, takeover = self._candidates()
@@ -251,7 +314,33 @@ class Engine:
             n = len(slide.slides)
             strip = n * self.width + (n - 1) * gap
             return (strip + self.width) / speed  # enter from the right, exit left
+        if isinstance(slide, ChainSlide):
+            _items, strip, speed = self._chain_layout(slide)
+            return (strip + self.width) / speed
         return board.slide_duration(slide)
+
+    def _chain_layout(self, chain):
+        """([(board, slide, x position on the strip)], strip length, speed) for a chain of scroll boards.
+
+        Each board keeps its own gap between its own slides; boards are joined with the global gap.
+        The chain moves at the boards' speed when they agree, otherwise at the global default speed."""
+        g = self.cfg.get("scroll", {})
+        try:
+            g_speed, g_gap = max(5.0, float(g.get("speed", 20))), max(0, int(float(g.get("gap", 16))))
+        except (TypeError, ValueError):
+            g_speed, g_gap = 20.0, 16
+        items, pos, speeds = [], 0, set()
+        for k, (name, scroll) in enumerate(chain.parts):
+            b = self.boards.get(name)
+            if b is None:
+                continue
+            speed, gap = self._scroll_params(b)
+            speeds.add(speed)
+            for i, sl in enumerate(scroll.slides):
+                items.append((b, sl, pos))
+                pos += self.width + (gap if i < len(scroll.slides) - 1 else g_gap)
+        strip = max(self.width, pos - g_gap) if items else self.width
+        return items, strip, (speeds.pop() if len(speeds) == 1 else g_speed)
 
     def _render_scroll(self, board, scroll, c, t):
         speed, gap = self._scroll_params(board)
@@ -266,6 +355,19 @@ class Engine:
             self._scratch.clear()
             # t=0: text inside each slide stays still while the whole slide moves
             board.render(self._scratch, slide, 0.0)
+            c.image.paste(self._scratch.image, (x, 0))
+
+    def _render_chain(self, chain, c, t):
+        items, _strip, speed = self._chain_layout(chain)
+        offset = int(t * speed)
+        if not hasattr(self, "_scratch"):
+            self._scratch = Canvas(self.width, self.height)
+        for b, slide, pos in items:
+            x = self.width - offset + pos
+            if x >= self.width or x + self.width <= 0:
+                continue
+            self._scratch.clear()
+            b.render(self._scratch, slide, 0.0)
             c.image.paste(self._scratch.image, (x, 0))
 
     def _render_combo(self, combo, c, t):
@@ -299,6 +401,13 @@ class Engine:
             return
         if _is_intro(slides[idx]):
             return                      # an intro (celebration) plays to the end regardless
+        if isinstance(slides[idx], (ScrollSlide, ChainSlide)) and not takeover:
+            # a ticker runs to its end (its boards may be part of a chain, so they're not always listed
+            # under their own name); only cut it when its first board has nothing left to show
+            first = slides[idx].first if isinstance(slides[idx], ChainSlide) else slides[idx].board
+            b = self.boards.get(first)
+            if b is not None and b.enabled and b.slides():
+                return
         if name in names and slides[idx] not in names[name] and slides[idx] is not None:
             self._advance()
         elif name not in names and name != self.cfg.get("fallback_board") and not self.paused:
@@ -408,6 +517,8 @@ class Engine:
                 self._render_combo(slides[idx], c, now - started)
             elif isinstance(slides[idx], ScrollSlide):
                 self._render_scroll(board, slides[idx], c, now - started)
+            elif isinstance(slides[idx], ChainSlide):
+                self._render_chain(slides[idx], c, now - started)
             else:
                 board.render(c, slides[idx], now - started)
         except Exception as e:
@@ -426,7 +537,7 @@ class Engine:
         if key != prev_key:
             self._last_key = key
             board_changed = prev_key is None or prev_key[0] != key[0]
-            continuous = isinstance(slide, (ComboSlide, ScrollSlide))
+            continuous = isinstance(slide, (ComboSlide, ScrollSlide, ChainSlide))
             if (style != "off" and prev_frame is not None and not continuous
                     and (board_changed or tcfg.get("scope") == "all")):
                 from .transitions import Transition
@@ -520,7 +631,9 @@ class Engine:
             "sun": getattr(self, "sun_info", None),
             "paused": self.paused, "takeover": self.takeover_active,
             "current": {"board": cur[0], "slide": cur[2] + 1,
-                        "slides": len(cur[1][0].items) if cur and isinstance(cur[1][0], ComboSlide) else len(cur[1])}
+                        "slides": len(cur[1][0].items) if cur and isinstance(cur[1][0], ComboSlide) else len(cur[1]),
+                        "chain": [n for n, _ in cur[1][cur[2]].parts]
+                        if cur and isinstance(cur[1][cur[2]], ChainSlide) else None}
             if cur else None,
             "overlay": self.overlay["text"] if self.overlay else None,
             "alert": self.alerts.current.title if self.alerts.current else None,

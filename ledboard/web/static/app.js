@@ -111,7 +111,8 @@ async function pollState() {
   $("#pill-fps").textContent = `${st.fps} fps`;
   const cur = st.current;
   $("#now-board").textContent = st.alert ? "Alert: " + st.alert : st.overlay ? "Message" :
-    cur ? (cur.board === "__combined__" ? "Combined ticker" : SCHEMA?.[cur.board]?.title || cur.board) : "—";
+    cur ? (cur.board === "__combined__" ? "Combined ticker" :
+      cur.chain ? cur.chain.map((n) => SCHEMA?.[n]?.title || n).join(" → ") : SCHEMA?.[cur.board]?.title || cur.board) : "—";
   $("#now-slide").textContent = !st.overlay && cur && cur.slides > 1 ? `${cur.slide} / ${cur.slides}` : "";
   $("#mini-board").textContent = $("#now-board").textContent;
   $("#mini-slide").textContent = $("#now-slide").textContent;
@@ -642,7 +643,11 @@ function renderOtherTabs() {
   $("#defaults-form").replaceChildren(
     renderField(draft.scroll, { key: "speed", label: "Scroll mode speed (pixels per second)", type: "number",
       help: "Used by every board in scroll mode unless that board sets its own speed." }),
-    renderField(draft.scroll, { key: "gap", label: "Scroll mode gap between slides (pixels)", type: "number" }));
+    renderField(draft.scroll, { key: "gap", label: "Scroll mode gap between slides (pixels)", type: "number" }),
+    renderField(draft.scroll, { key: "chain", label: "Run neighboring scroll-mode boards back to back", type: "bool",
+      help: "When boards next to each other in the rotation are both in scroll mode, the next one follows right " +
+            "behind instead of after a blank screen. Boards with nothing to show are skipped, so they don't break " +
+            "the run. If the boards' scroll speeds differ, the run uses the speed above." }));
   draft.transitions = draft.transitions || { style: "slide", seconds: 0.6, scope: "boards" };
   $("#transitions-form").replaceChildren(
     renderField(draft.transitions, { key: "style", label: "Style", type: "select", options: Object.keys(TRANSITIONS),
