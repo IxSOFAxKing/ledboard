@@ -322,13 +322,19 @@ class Engine:
     def _chain_layout(self, chain):
         """([(board, slide, x position on the strip)], strip length, speed) for a chain of scroll boards.
 
-        Each board keeps its own gap between its own slides; boards are joined with the global gap.
+        Each board keeps its own gap between its own slides; boards are joined with the chain gap
+        (scroll.chain_gap, or the global gap when that's blank).
         The chain moves at the boards' speed when they agree, otherwise at the global default speed."""
         g = self.cfg.get("scroll", {})
         try:
             g_speed, g_gap = max(5.0, float(g.get("speed", 20))), max(0, int(float(g.get("gap", 16))))
         except (TypeError, ValueError):
             g_speed, g_gap = 20.0, 16
+        try:                                    # gap between boards in a run; blank = the global gap
+            if g.get("chain_gap") not in (None, ""):
+                g_gap = max(0, int(float(g["chain_gap"])))
+        except (TypeError, ValueError):
+            pass
         items, pos, speeds = [], 0, set()
         for k, (name, scroll) in enumerate(chain.parts):
             b = self.boards.get(name)

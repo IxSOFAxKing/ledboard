@@ -647,7 +647,11 @@ function renderOtherTabs() {
     renderField(draft.scroll, { key: "chain", label: "Run neighboring scroll-mode boards back to back", type: "bool",
       help: "When boards next to each other in the rotation are both in scroll mode, the next one follows right " +
             "behind instead of after a blank screen. Boards with nothing to show are skipped, so they don't break " +
-            "the run. If the boards' scroll speeds differ, the run uses the speed above." }));
+            "the run. If the boards' scroll speeds differ, the run uses the speed above." }, renderOtherTabs),
+    ...(draft.scroll.chain ? [renderField(draft.scroll, { key: "chain_gap", label: "Gap between boards in a run (pixels)",
+      type: "number", placeholder: "same as the gap above",
+      help: "Space between one board's last slide and the next board. Leave blank to use the gap above. " +
+            "Each board's own gap between its own slides doesn't change." })] : []));
   draft.transitions = draft.transitions || { style: "slide", seconds: 0.6, scope: "boards" };
   $("#transitions-form").replaceChildren(
     renderField(draft.transitions, { key: "style", label: "Style", type: "select", options: Object.keys(TRANSITIONS),
