@@ -324,7 +324,8 @@ class Engine:
 
         Each board keeps its own gap between its own slides; boards are joined with the chain gap
         (scroll.chain_gap, or the global gap when that's blank).
-        The chain moves at the boards' speed when they agree, otherwise at the global default speed."""
+        The chain moves at scroll.chain_speed when set; otherwise at the boards' speed when they agree,
+        else at the global default speed."""
         g = self.cfg.get("scroll", {})
         try:
             g_speed, g_gap = max(5.0, float(g.get("speed", 20))), max(0, int(float(g.get("gap", 16))))
@@ -346,7 +347,13 @@ class Engine:
                 items.append((b, sl, pos))
                 pos += self.width + (gap if i < len(scroll.slides) - 1 else g_gap)
         strip = max(self.width, pos - g_gap) if items else self.width
-        return items, strip, (speeds.pop() if len(speeds) == 1 else g_speed)
+        speed = speeds.pop() if len(speeds) == 1 else g_speed
+        try:                                    # the run's own speed, when set
+            if g.get("chain_speed") not in (None, ""):
+                speed = max(5.0, float(g["chain_speed"]))
+        except (TypeError, ValueError):
+            pass
+        return items, strip, speed
 
     def _render_scroll(self, board, scroll, c, t):
         speed, gap = self._scroll_params(board)

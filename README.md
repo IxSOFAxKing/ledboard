@@ -110,7 +110,7 @@ The speed (20 px/s by default) and the gap between slides are set once for all b
 **Run neighboring scroll-mode boards back to back** (also under **Defaults for all boards**, off by default): when boards next to each other in the rotation are all in scroll mode, they become one continuous ticker. The next board follows right behind the last slide instead of after a blank screen.
 - Boards with nothing to show are skipped, so they don't break the run.
 - Each board keeps its own gap between its own slides. The space between one board and the next is **Gap between boards in a run**, which appears once the switch is on. Leave it blank to use the global gap; 0 butts the boards right up against each other.
-- If the boards' speeds differ, the whole run uses the global speed.
+- **Speed of a run** (appears once the switch is on) gives every run one speed. Left blank, a run uses its boards' own speed, or the global speed if their speeds differ.
 - **Show** on a board in the middle of a run starts the ticker from that board.
 
 ### Global settings (Settings tab)

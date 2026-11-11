@@ -648,7 +648,11 @@ function renderOtherTabs() {
       help: "When boards next to each other in the rotation are both in scroll mode, the next one follows right " +
             "behind instead of after a blank screen. Boards with nothing to show are skipped, so they don't break " +
             "the run. If the boards' scroll speeds differ, the run uses the speed above." }, renderOtherTabs),
-    ...(draft.scroll.chain ? [renderField(draft.scroll, { key: "chain_gap", label: "Gap between boards in a run (pixels)",
+    ...(draft.scroll.chain ? [renderField(draft.scroll, { key: "chain_speed", label: "Speed of a run (pixels per second)",
+      type: "number", placeholder: "automatic",
+      help: "Leave blank to use the boards' own speed (or the speed above if they differ). Set it to give every run " +
+            "one speed, whatever the boards are set to." }),
+      renderField(draft.scroll, { key: "chain_gap", label: "Gap between boards in a run (pixels)",
       type: "number", placeholder: "same as the gap above",
       help: "Space between one board's last slide and the next board. Leave blank to use the gap above. " +
             "Each board's own gap between its own slides doesn't change." })] : []));
