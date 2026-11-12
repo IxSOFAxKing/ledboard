@@ -6,8 +6,8 @@ from .. import fonts
 from ..gfx import GRAY, hex_to_rgb
 
 _FONT_NAMES = {
-    "4x6": "Tiny (4x6)", "tom-thumb": "Tiny alt (tom-thumb)", "5x7": "Small (5x7)", "5x8": "Small (5x8)",
-    "6x10": "Medium (6x10)", "6x13B": "Medium bold (6x13B)", "7x13B": "Large bold (7x13B)",
+    "4x6": "Tiny (4x6) - weather scene labels", "tom-thumb": "Tiny alt (tom-thumb)", "5x7": "Small (5x7)", "5x8": "Small (5x8)",
+    "6x10": "Medium (6x10)", "6x13B": "Medium bold (6x13B)", "7x13B": "Large bold (7x13B) - weather scene temperature",
     "8x13B": "Large wide (8x13B)", "9x15B": "X-large (9x15B)", "9x18B": "XX-large (9x18B)", "10x20": "Huge (10x20)",
 }
 
