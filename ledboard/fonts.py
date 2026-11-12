@@ -6,11 +6,16 @@ as RGBA images, so drawing text every frame is cheap.
 """
 from __future__ import annotations
 
+import logging
 import math
 import os
 from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFont
+
+log = logging.getLogger(__name__)
+#: font file -> first damaged line (shown on the Status tab)
+DAMAGED: dict = {}
 
 FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
 TTF_DIR = os.path.join(FONT_DIR, "ttf")
@@ -130,6 +135,7 @@ class BDFFont:
         self.glyphs: dict[int, Glyph] = {}
         self.ascent = 0
         self.descent = 0
+        self._path = path
         self._parse(path)
         self.height = self.ascent + self.descent
         self._fallback = self.glyphs.get(ord("?"))
@@ -146,32 +152,62 @@ class BDFFont:
             i += 1
             if not parts:
                 continue
-            key = parts[0]
-            if key == "FONT_ASCENT":
-                self.ascent = int(parts[1])
-            elif key == "FONT_DESCENT":
-                self.descent = int(parts[1])
-            elif key == "FONTBOUNDINGBOX":
-                font_bbx = tuple(int(p) for p in parts[1:5])
-            elif key == "STARTCHAR":
-                enc, adv, bbx = None, None, font_bbx
-            elif key == "ENCODING":
-                enc = int(parts[1])
-            elif key == "DWIDTH":
-                adv = int(parts[1])
-            elif key == "BBX":
-                bbx = tuple(int(p) for p in parts[1:5])
-            elif key == "BITMAP":
-                rows = []
-                while i < n and lines[i].strip() != "ENDCHAR":
-                    rows.append(int(lines[i].strip() or "0", 16))
-                    i += 1
-                if enc is not None and enc >= 0:
-                    w, h, xo, yo = bbx
-                    self.glyphs[enc] = Glyph(w, h, xo, yo, adv if adv is not None else w, rows)
+            try:
+                i, enc, adv, bbx, font_bbx = self._line(parts, lines, i, n, enc, adv, bbx, font_bbx)
+            except (ValueError, IndexError):
+                # a damaged line (e.g. a bit flipped on the SD card): skip it rather than lose the font
+                self._damaged(path, i, lines[i - 1])
         if not self.ascent:
             self.ascent = font_bbx[1] + font_bbx[3]
             self.descent = -font_bbx[3]
+
+    def _damaged(self, path, line_no, text):
+        DAMAGED.setdefault(os.path.basename(path), line_no)
+        log.warning("font file %s is damaged at line %d (%r); skipping it. Restore it with: "
+                    "cd /opt/ledboard && sudo git checkout -- ledboard/fonts", path, line_no, text[:30])
+
+    def _line(self, parts, lines, i, n, enc, adv, bbx, font_bbx):
+        """Handle one BDF line (and a whole BITMAP block). Returns the updated parser state."""
+        key = parts[0]
+        if key == "FONT_ASCENT":
+            self.ascent = int(parts[1])
+        elif key == "FONT_DESCENT":
+            self.descent = int(parts[1])
+        elif key == "FONTBOUNDINGBOX":
+            font_bbx = tuple(int(p) for p in parts[1:5])
+        elif key == "STARTCHAR":
+            enc, adv, bbx = None, None, font_bbx
+        elif key == "ENCODING":
+            enc = int(parts[1])
+        elif key == "DWIDTH":
+            adv = int(parts[1])
+        elif key == "BBX":
+            bbx = tuple(int(p) for p in parts[1:5])
+        elif key == "BITMAP":
+            rows, ok = [], True
+            while i < n:
+                row = lines[i].strip()
+                if row == "ENDCHAR" or row.startswith(("END", "STARTCHAR")):
+                    if row != "ENDCHAR":
+                        ok = False               # a damaged end marker: keep the glyph, note the file
+                    break
+                try:
+                    rows.append(int(row or "0", 16))
+                except ValueError:
+                    ok = False                   # a damaged bitmap row: this one character is lost
+                    rows = None
+                    break
+                i += 1
+            if not ok:
+                self._damaged(self._path, i + 1, lines[i] if i < n else "")
+                while i < n and not lines[i].strip().startswith(("END", "STARTCHAR")):
+                    i += 1
+            if rows is not None and enc is not None and enc >= 0:
+                w, h, xo, yo = bbx
+                self.glyphs[enc] = Glyph(w, h, xo, yo, adv if adv is not None else w, rows)
+            if i < n and lines[i].strip().startswith("END") and lines[i].strip() != "ENDFONT":
+                i += 1
+        return i, enc, adv, bbx, font_bbx
 
     def glyph(self, ch: str) -> Glyph | None:
         g = self.glyphs.get(ord(ch))

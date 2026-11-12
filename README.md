@@ -630,6 +630,15 @@ Open <http://localhost:8080> to see the live LED preview. If the `rgbmatrix` mod
 
 ## Troubleshooting
 
+**"invalid literal for int() with base 16" on boards, or a "Damaged font file" line on the Status tab**: a font file on the Pi's SD card got damaged (usually a power cut or an aging card). The board keeps working and skips the damaged character, but restore the file with:
+
+```bash
+cd /opt/ledboard && sudo git checkout -- ledboard/fonts && sudo systemctl restart ledboard
+```
+
+If files keep getting damaged, check the SD card (or replace it) and make sure the Pi has a solid power supply.
+
+
 | Symptom | Fix |
 |---|---|
 | Flicker | See [Reducing flicker](#reducing-flicker) below. |

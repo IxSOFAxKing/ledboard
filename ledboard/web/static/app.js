@@ -159,6 +159,11 @@ function renderStatus() {
       h("span", { class: "nm" }, SCHEMA?.[n]?.title || n),
       h("span", { class: "info" }, info, b.last_error ? h("div", { class: "err-line" }, b.last_error) : null));
   });
+  const bad = Object.keys(STATE.damaged_fonts || {});
+  if (bad.length) rows.unshift(h("div", { class: "status-row" }, h("span", { class: "dot err" }), h("span", { class: "nm" }, "Fonts"),
+    h("span", { class: "info" }, `Damaged font file${bad.length > 1 ? "s" : ""}: ${bad.join(", ")} (probably the SD card). ` +
+      "Text still shows, but some characters may be missing.",
+      h("div", { class: "err-line" }, "Fix: cd /opt/ledboard && sudo git checkout -- ledboard/fonts && sudo systemctl restart ledboard"))));
   const pf = STATE.perf || {};
   const health = [];
   if (pf.cpu_temp_c != null) health.push(`CPU ${pf.cpu_temp_c}°C`);

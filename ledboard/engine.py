@@ -60,6 +60,11 @@ class ChainSlide:
 COMBINED = "__combined__"
 
 
+def _damaged_fonts():
+    from . import fonts
+    return dict(fonts.DAMAGED)
+
+
 class ComboSlide:
     """The combined ticker: (board, slide) items from every board, scrolling as one line."""
     __slots__ = ("items",)
@@ -649,6 +654,7 @@ class Engine:
                         if cur and isinstance(cur[1][cur[2]], ChainSlide) else None}
             if cur else None,
             "overlay": self.overlay["text"] if self.overlay else None,
+            "damaged_fonts": _damaged_fonts(),
             "alert": self.alerts.current.title if self.alerts.current else None,
             "alerts": self.alerts.active(),
             "mqtt": self.mqtt.status() if getattr(self, "mqtt", None) else {"enabled": False},
