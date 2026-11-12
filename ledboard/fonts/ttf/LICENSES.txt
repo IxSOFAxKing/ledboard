@@ -148,6 +148,61 @@ with Reserved Font Name Wallpoet.
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 
+===== inter =====
+Copyright 2020 The Inter Project Authors (https://github.com/rsms/inter)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== roboto =====
+Copyright 2011 The Roboto Project Authors (https://github.com/googlefonts/roboto-classic)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== robotocondensed =====
+Copyright 2011 The Roboto Project Authors (https://github.com/googlefonts/roboto-classic)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== opensans =====
+Copyright 2020 The Open Sans Project Authors (https://github.com/googlefonts/opensans)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== lato =====
+Copyright (c) 2010-2014 by tyPoland Lukasz Dziedzic (team@latofonts.com) with Reserved Font Name "Lato"
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== montserrat =====
+Copyright 2024 The Montserrat.Git Project Authors (https://github.com/JulietaUla/Montserrat.git)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== poppins =====
+Copyright 2020 The Poppins Project Authors (https://github.com/itfoundry/Poppins)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== worksans =====
+Copyright 2019 The Work Sans Project Authors (https://github.com/weiweihuanghuang/Work-Sans)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== dmsans =====
+Copyright 2014 The DM Sans Project Authors (https://github.com/googlefonts/dm-fonts)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== barlow =====
+Copyright 2017 The Barlow Project Authors (https://github.com/jpt/barlow)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
+===== nunito =====
+Copyright 2014 The Nunito Project Authors (https://github.com/googlefonts/nunito)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+
 SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
 -----------------------------------------------------------
 

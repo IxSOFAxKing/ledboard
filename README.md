@@ -412,8 +412,8 @@ LEDBoard saves the refresh token, so you only do this once.
 ### Clock
 The time, AM/PM, date and an optional extra line each have their own font, size and color.
 
-There are two kinds of font:
-- **Scalable fonts**, which take any pixel size:
+Every clock font is scalable (any size):
+- **Basic bold**: Inter (the default), Roboto, Roboto Condensed, Open Sans, Lato, Montserrat, Poppins, Work Sans, DM Sans, Barlow and Nunito (rounded)
   - Bebas Neue, Anton, Oswald, Big Shoulders and Teko (tall and condensed styles)
   - Orbitron (futuristic)
   - DSEG7 and DSEG14 (7- and 14-segment "digital clock" displays)
@@ -425,9 +425,8 @@ There are two kinds of font:
   - Audiowide, Michroma, Rajdhani, Chakra Petch and Quantico (techy and futuristic)
   - Fjalla One (narrow headline)
   - Space Mono, Major Mono and Comfortaa (mono, thin and rounded)
-- **Fixed-size pixel fonts**, from 4×6 up to 10×20.
 
-Leave the time's size blank and it grows as large as fits around the other lines. **Smooth edges** turns on anti-aliasing for scalable fonts. Scalable fonts look best at about 10 px and up, so the fixed pixel fonts are better for small dates. Font licenses are in `ledboard/fonts/ttf/LICENSES.txt`. You can also set:
+Leave the time's size blank and it grows as large as fits around the other lines. The date defaults to size 10 and the extra line to 9, the smallest sizes that stay crisp. **Smooth edges** turns on anti-aliasing. Clocks set up with the old pixel fonts switch to Inter Bold at a matching size. Font licenses are in `ledboard/fonts/ttf/LICENSES.txt`. You can also set:
 - the date format, from presets or a custom `strftime` pattern
 - 24-hour time, seconds, a leading zero and a blinking colon
 - uppercase or lowercase

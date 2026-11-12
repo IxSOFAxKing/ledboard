@@ -5,21 +5,16 @@ from .base import Board, organize
 from .. import fonts
 from ..gfx import GRAY, hex_to_rgb
 
-_FONT_NAMES = {
-    "4x6": "Tiny (4x6) - weather scene labels", "tom-thumb": "Tiny alt (tom-thumb)", "5x7": "Small (5x7)", "5x8": "Small (5x8)",
-    "6x10": "Medium (6x10)", "6x13B": "Medium bold (6x13B)", "7x13B": "Large bold (7x13B) - weather scene temperature",
-    "8x13B": "Large wide (8x13B)", "9x15B": "X-large (9x15B)", "9x18B": "XX-large (9x18B)", "10x20": "Huge (10x20)",
-}
+DEFAULT_FONT = "ttf:inter"
+#: pixel fonts the clock used to offer -> the scalable size that matches their height (for old settings)
+PIXEL_FONT_SIZES = {"4x6": 7, "tom-thumb": 7, "5x7": 8, "5x8": 9, "6x10": 10, "6x13B": 12, "7x13B": 13,
+                    "8x13B": 13, "9x15B": 15, "9x18B": 17, "10x20": 19}
 
 
 def font_options():
-    """Scalable fonts first (sized by the Size setting), then the fixed-size pixel fonts."""
-    avail = fonts.available()
-    bdf = [f for f in _FONT_NAMES if f in avail] + [f for f in avail if f not in _FONT_NAMES]
-    ttf = [f"ttf:{k}" for k in fonts.SCALABLE]
-    labels = {f"ttf:{k}": f"{v[0]} (scalable)" for k, v in fonts.SCALABLE.items()}
-    labels.update({f: f"{_FONT_NAMES.get(f, f)} (fixed size)" for f in bdf})
-    return ttf + bdf, labels
+    """Scalable fonts only (any size): the basic bold ones first, then the display fonts."""
+    keys = list(fonts.SCALABLE)
+    return [f"ttf:{k}" for k in keys], {f"ttf:{k}": fonts.SCALABLE[k][0] for k in keys}
 
 
 FONTS, FONT_LABELS = font_options()
@@ -46,32 +41,32 @@ class ClockBoard(Board):
         "enabled": True, "duration": 10,
         # time
         "format_24h": False, "show_seconds": False, "leading_zero": False, "blink_colon": True,
-        "time_font": "7x13B", "time_size": "", "color": "#00a0ff", "smooth": False,
+        "time_font": DEFAULT_FONT, "time_size": "", "color": "#00a0ff", "smooth": False,
         # am/pm
-        "show_ampm": True, "ampm_font": "5x8", "ampm_size": "", "ampm_color": "", "ampm_lowercase": False,
+        "show_ampm": True, "ampm_font": DEFAULT_FONT, "ampm_size": "", "ampm_color": "", "ampm_lowercase": False,
         # date
         "show_date": True, "date_format": "%a %b %-d", "date_custom": "%a %-d %b", "date_uppercase": True,
-        "date_font": "6x10", "date_size": "", "date_color": "#888888",
+        "date_font": DEFAULT_FONT, "date_size": "", "date_color": "#888888",
         # extra line
-        "extra_text": "", "extra_font": "4x6", "extra_size": "", "extra_color": "#ff9900",
+        "extra_text": "", "extra_font": DEFAULT_FONT, "extra_size": "", "extra_color": "#ff9900",
         # layout
         "align": "center", "line_gap": 2,
     }
     FIELDS = [
-        {"key": "time_font", "label": "Time font / size", "type": "select", "section": "Time",
+        {"key": "time_font", "label": "Time font", "type": "select", "section": "Time",
          "options": FONTS, "option_labels": FONT_LABELS},
         {"key": "time_size", "label": "Time size (pixels)", "type": "number", "section": "Time", "placeholder": "auto",
-         "help": "For scalable fonts. Blank = as big as fits with the other lines."},
+         "help": "Blank = as big as fits with the other lines."},
         {"key": "color", "label": "Time color", "type": "color", "section": "Time"},
         {"key": "format_24h", "label": "24-hour time", "type": "bool", "section": "Time"},
         {"key": "show_seconds", "label": "Show seconds", "type": "bool", "section": "Time"},
         {"key": "leading_zero", "label": "Leading zero (09:05 instead of 9:05)", "type": "bool", "section": "Time"},
         {"key": "blink_colon", "label": "Blink the colon", "type": "bool", "section": "Time"},
         {"key": "show_ampm", "label": "Show AM/PM", "type": "bool", "section": "AM / PM", "show_if": {"format_24h": False}},
-        {"key": "ampm_font", "label": "AM/PM font / size", "type": "select", "section": "AM / PM",
+        {"key": "ampm_font", "label": "AM/PM font", "type": "select", "section": "AM / PM",
          "options": FONTS, "option_labels": FONT_LABELS, "show_if": {"format_24h": False, "show_ampm": True}},
         {"key": "ampm_size", "label": "AM/PM size (pixels)", "type": "number", "section": "AM / PM", "placeholder": "auto",
-         "show_if": {"format_24h": False, "show_ampm": True}, "help": "Pixels tall, for scalable fonts only. Blank = automatic."},
+         "show_if": {"format_24h": False, "show_ampm": True}, "help": "Blank = automatic (in proportion to the time)."},
         {"key": "ampm_color", "label": "AM/PM color (blank = same as time)", "type": "text", "section": "AM / PM",
          "show_if": {"format_24h": False, "show_ampm": True}, "help": "e.g. #ffffff"},
         {"key": "ampm_lowercase", "label": "Lowercase (am/pm)", "type": "bool", "section": "AM / PM",
@@ -83,19 +78,19 @@ class ClockBoard(Board):
          "show_if": {"show_date": True, "date_format": "custom"},
          "help": "strftime codes: %a Sun, %A Sunday, %b Nov, %B November, %-d 8, %-m 11, %Y 2026, %j day of year"},
         {"key": "date_uppercase", "label": "Uppercase date", "type": "bool", "section": "Date", "show_if": {"show_date": True}},
-        {"key": "date_font", "label": "Date font / size", "type": "select", "section": "Date",
+        {"key": "date_font", "label": "Date font", "type": "select", "section": "Date",
          "options": FONTS, "option_labels": FONT_LABELS, "show_if": {"show_date": True}},
         {"key": "date_size", "label": "Date size (pixels)", "type": "number", "section": "Date", "placeholder": "auto",
-         "show_if": {"show_date": True}, "help": "Pixels tall, for scalable fonts only. Blank = automatic."},
+         "show_if": {"show_date": True}, "help": "Blank = 10."},
         {"key": "date_color", "label": "Date color", "type": "color", "section": "Date", "show_if": {"show_date": True}},
         {"key": "extra_text", "label": "Extra line (optional)", "type": "text", "section": "Extra line",
          "help": "Any text under the date, e.g. 'Go Bills!'. Can include date codes like %A."},
-        {"key": "extra_font", "label": "Extra line font / size", "type": "select", "section": "Extra line",
+        {"key": "extra_font", "label": "Extra line font", "type": "select", "section": "Extra line",
          "options": FONTS, "option_labels": FONT_LABELS},
         {"key": "extra_size", "label": "Extra line size (pixels)", "type": "number", "section": "Extra line",
-         "placeholder": "auto", "help": "Pixels tall, for scalable fonts only. Blank = automatic."},
+         "placeholder": "auto", "help": "Blank = 9."},
         {"key": "extra_color", "label": "Extra line color", "type": "color", "section": "Extra line"},
-        {"key": "smooth", "label": "Smooth edges on scalable fonts (anti-aliasing)", "type": "bool", "section": "Layout",
+        {"key": "smooth", "label": "Smooth edges (anti-aliasing)", "type": "bool", "section": "Layout",
          "help": "Off = crisp on/off pixels. On = softer curves using dimmer edge pixels."},
         {"key": "align", "label": "Alignment", "type": "select", "section": "Layout",
          "options": ["center", "left", "right"]},
@@ -114,13 +109,9 @@ class ClockBoard(Board):
     ])
 
     def _font(self, name, size, ref, default_size):
-        """Font object for a setting: fixed-size BDF names pass through; 'ttf:<key>' gets a size."""
-        name = name or "7x13B"
-        if not name.startswith("ttf:"):
-            return fonts.get(name)
+        """Font object for a setting ('ttf:<key>') at a size; anything else falls back to the default font."""
+        name = name if (name or "").startswith("ttf:") and name[4:] in fonts.SCALABLE else DEFAULT_FONT
         key = name[4:]
-        if key not in fonts.SCALABLE:
-            return fonts.get("7x13B")
         try:
             px = int(float(size)) if size not in (None, "") else default_size
         except (TypeError, ValueError):
@@ -154,7 +145,7 @@ class ClockBoard(Board):
         return best
 
     def _ampm_font(self, time_font):
-        return self._font(self.cfg.get("ampm_font") or "5x8", self.cfg.get("ampm_size"), "AMP",
+        return self._font(self.cfg.get("ampm_font"), self.cfg.get("ampm_size"), "AMP",
                           max(5, round(time_font.height * 0.4)))
 
     def _lines(self, now):
@@ -169,7 +160,9 @@ class ClockBoard(Board):
         # blink by skipping the colon when drawing (keeps its width, so nothing shifts)
         self._colon_off = bool(cfg.get("blink_colon", True) and not secs and int(time.time()) % 2)
         time_color = hex_to_rgb(cfg.get("color"))
-        lines = [(txt, cfg.get("time_font") or "7x13B", time_color, "time")]
+        tname = cfg.get("time_font")
+        tname = tname if (tname or "").startswith("ttf:") and tname[4:] in fonts.SCALABLE else DEFAULT_FONT
+        lines = [(txt, tname, time_color, "time")]
         self._template = ("00" if (h24 or cfg.get("leading_zero")) else "10") + ":00" + (":00" if secs else "")
         if cfg.get("show_date", True):
             pattern = cfg.get("date_custom") if cfg.get("date_format") == "custom" else cfg.get("date_format")
@@ -179,7 +172,7 @@ class ClockBoard(Board):
                 d = now.strftime("%a %b %-d")
             if cfg.get("date_uppercase", True):
                 d = d.upper()
-            lines.append((d, self._font(cfg.get("date_font") or "6x10", cfg.get("date_size"), "Ay0g", 8),
+            lines.append((d, self._font(cfg.get("date_font"), cfg.get("date_size"), "Ay0g", 10),
                           hex_to_rgb(cfg.get("date_color"), GRAY), "date"))
         extra = (cfg.get("extra_text") or "").strip()
         if extra:
@@ -187,7 +180,7 @@ class ClockBoard(Board):
                 extra = now.strftime(extra)
             except ValueError:
                 pass
-            lines.append((extra, self._font(cfg.get("extra_font") or "4x6", cfg.get("extra_size"), "Ay0g", 7),
+            lines.append((extra, self._font(cfg.get("extra_font"), cfg.get("extra_size"), "Ay0g", 9),
                           hex_to_rgb(cfg.get("extra_color"), GRAY), "extra"))
         return lines
 

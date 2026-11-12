@@ -24,6 +24,19 @@ TTF_DIR = os.path.join(FONT_DIR, "ttf")
 # key: (label, file, variable-font weight to use or None). True pixel fonts are listed in
 # PIXEL_GRID: they only look clean at multiples of their design size.
 SCALABLE = {
+    # basic bold
+    "inter": ("Inter Bold", "Inter[opsz,wght].ttf", "Bold"),
+    "roboto": ("Roboto Bold", "Roboto[wdth,wght].ttf", "Bold"),
+    "robotocondensed": ("Roboto Condensed Bold", "RobotoCondensed[wght].ttf", "Bold"),
+    "opensans": ("Open Sans Bold", "OpenSans[wdth,wght].ttf", "Bold"),
+    "lato": ("Lato Bold", "Lato-Bold.ttf", None),
+    "montserrat": ("Montserrat Bold", "Montserrat[wght].ttf", "Bold"),
+    "poppins": ("Poppins Bold", "Poppins-Bold.ttf", None),
+    "worksans": ("Work Sans Bold", "WorkSans[wght].ttf", "Bold"),
+    "dmsans": ("DM Sans Bold", "DMSans[opsz,wght].ttf", "Bold"),
+    "barlow": ("Barlow Bold", "Barlow-Bold.ttf", None),
+    "nunito": ("Nunito Bold - rounded", "Nunito[wght].ttf", "Bold"),
+    # display and novelty
     "bebas": ("Bebas Neue - tall condensed", "BebasNeue-Regular.ttf", None),
     "anton": ("Anton - heavy condensed", "Anton-Regular.ttf", None),
     "oswald": ("Oswald - condensed", "Oswald[wght].ttf", "SemiBold"),

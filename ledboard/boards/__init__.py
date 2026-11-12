@@ -88,4 +88,18 @@ def migrate(data: dict) -> bool:
                 and b.get("upcoming_layout", "classic") == "classic":
             b["upcoming_layout"], b["upcoming_style"] = b["upcoming_style"], "plain"
             changed = True
+    # v5 -> v6: the clock only offers scalable fonts; old pixel-font picks become Inter Bold at a matching size
+    clock = boards.get("clock")
+    if isinstance(clock, dict):
+        from .clock import DEFAULT_FONT, PIXEL_FONT_SIZES
+        for part, default_size in (("time", None), ("ampm", None), ("date", 10), ("extra", 9)):
+            name = clock.get(f"{part}_font")
+            if name is None or str(name).startswith("ttf:"):
+                continue
+            clock[f"{part}_font"] = DEFAULT_FONT
+            size = PIXEL_FONT_SIZES.get(str(name))
+            # the time and AM/PM size themselves; the date / extra line keep the old font's height
+            if default_size and clock.get(f"{part}_size") in (None, "") and size and size != default_size:
+                clock[f"{part}_size"] = size
+            changed = True
     return changed
