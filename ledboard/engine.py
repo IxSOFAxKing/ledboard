@@ -698,8 +698,11 @@ def _system_health():
         info["load"] = round(os.getloadavg()[0], 2)
         info["cpus_used"] = sorted(os.sched_getaffinity(0))
         info["cpu_count"] = os.cpu_count()
-        with open("/sys/devices/system/cpu/isolated") as f:
-            info["isolated_cpus"] = f.read().strip()
+        from .display import AFFINITY_NOTE, cpu_list, isolated_cpus
+        info["isolated_cpus"] = isolated_cpus()
+        info["isolated_list"] = sorted(cpu_list(info["isolated_cpus"]))
+        if AFFINITY_NOTE.get("error"):
+            info["cpu_note"] = AFFINITY_NOTE["error"]
     except (OSError, AttributeError):
         pass
     return info

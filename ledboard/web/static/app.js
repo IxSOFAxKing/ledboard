@@ -174,11 +174,14 @@ function renderStatus() {
   if (pf.cpu_temp_c != null) health.push(`CPU ${pf.cpu_temp_c}°C`);
   if (pf.load != null) health.push(`load ${pf.load}`);
   if (pf.cpus_used) {
+    // the LED refresh core: the one reserved at boot, otherwise the core LEDBoard keeps free itself
     const all = [...Array(pf.cpu_count || 0).keys()];
-    const free = all.filter((c) => !pf.cpus_used.includes(c));
-    health.push(`LEDBoard uses CPU core${pf.cpus_used.length > 1 ? "s" : ""} ${pf.cpus_used.join(", ")} of ${pf.cpu_count}` +
-      (free.length ? ` · core ${free.join(", ")} kept free for the LED refresh` : "") +
-      (pf.isolated_cpus ? ` (reserved at boot: ${pf.isolated_cpus})` : ""));
+    const refresh = (pf.isolated_list || []).length ? pf.isolated_list : all.filter((c) => !pf.cpus_used.includes(c)).slice(-1);
+    let line = `LEDBoard uses CPU core${pf.cpus_used.length > 1 ? "s" : ""} ${pf.cpus_used.join(", ")} of ${pf.cpu_count}`;
+    if (refresh.length) line += ` · core ${refresh.join(", ")} runs the LED refresh` + ((pf.isolated_list || []).length ? " (reserved at boot)" : "");
+    const idle = all.filter((c) => !pf.cpus_used.includes(c) && !refresh.includes(c));
+    if (idle.length) line += ` · core${idle.length > 1 ? "s" : ""} ${idle.join(", ")} unused` + (pf.cpu_note ? ` (${pf.cpu_note})` : "");
+    health.push(line);
   }
   const warn = [];
   if ((pf.throttled_now || []).length) warn.push("Now: " + pf.throttled_now.join(", "));

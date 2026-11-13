@@ -153,13 +153,39 @@ class MatrixDisplay:
             pass
 
 
-def isolated_cpus():
-    """The kernel's isolated CPUs (from isolcpus=...), e.g. '3', or '' if none."""
+#: what reserve_refresh_core() found / changed (shown on the Status tab)
+AFFINITY_NOTE: dict = {}
+
+
+def _read(path):
     try:
-        with open("/sys/devices/system/cpu/isolated") as f:
+        with open(path) as f:
             return f.read().strip()
     except OSError:
         return ""
+
+
+def cpu_list(text):
+    """{0, 1, 2} from a kernel CPU list like '0-2' or '1,3'."""
+    out = set()
+    for part in (text or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            if "-" in part:
+                a, b = part.split("-", 1)
+                out.update(range(int(a), int(b) + 1))
+            else:
+                out.add(int(part))
+        except ValueError:
+            continue
+    return out
+
+
+def isolated_cpus():
+    """The kernel's isolated CPUs (from isolcpus=...), e.g. '3', or '' if none."""
+    return _read("/sys/devices/system/cpu/isolated")
 
 
 def reserve_refresh_core(cfg):
@@ -174,9 +200,20 @@ def reserve_refresh_core(cfg):
         return
     if isolated_cpus():
         # the kernel already keeps a core free (isolcpus) and the library runs the refresh thread there:
-        # taking another core away from LEDBoard would only slow it down
-        log.info("CPU %s is isolated for the LED refresh; LEDBoard uses CPUs %s", isolated_cpus(),
-                 sorted(os.sched_getaffinity(0)))
+        # LEDBoard gets every other core. Set it explicitly: something earlier (the library, systemd)
+        # may have narrowed this process down to a single core.
+        want = cpu_list(_read("/sys/devices/system/cpu/online")) - cpu_list(isolated_cpus())
+        before = sorted(os.sched_getaffinity(0))
+        if want and set(before) != want:
+            try:
+                os.sched_setaffinity(0, want)
+            except OSError as e:
+                AFFINITY_NOTE["error"] = f"couldn't use cores {sorted(want)}: {e.strerror or e}"
+                log.warning("LEDBoard is limited to CPUs %s and %s", before, AFFINITY_NOTE["error"])
+            else:
+                AFFINITY_NOTE["widened_from"] = before
+        log.info("CPU %s is isolated for the LED refresh; LEDBoard uses CPUs %s (was %s)", isolated_cpus(),
+                 sorted(os.sched_getaffinity(0)), before)
         return
     try:
         cpus = sorted(os.sched_getaffinity(0))
