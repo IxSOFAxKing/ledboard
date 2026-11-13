@@ -153,6 +153,15 @@ class MatrixDisplay:
             pass
 
 
+def isolated_cpus():
+    """The kernel's isolated CPUs (from isolcpus=...), e.g. '3', or '' if none."""
+    try:
+        with open("/sys/devices/system/cpu/isolated") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
 def reserve_refresh_core(cfg):
     """Keep LEDBoard's own threads off the core the LED refresh thread should own.
 
@@ -162,6 +171,12 @@ def reserve_refresh_core(cfg):
     has isolated a core (isolcpus=3), the library pins its refresh thread there itself.
     """
     if not cfg.get("reserve_cpu_core", True) or not hasattr(os, "sched_setaffinity"):
+        return
+    if isolated_cpus():
+        # the kernel already keeps a core free (isolcpus) and the library runs the refresh thread there:
+        # taking another core away from LEDBoard would only slow it down
+        log.info("CPU %s is isolated for the LED refresh; LEDBoard uses CPUs %s", isolated_cpus(),
+                 sorted(os.sched_getaffinity(0)))
         return
     try:
         cpus = sorted(os.sched_getaffinity(0))

@@ -173,7 +173,13 @@ function renderStatus() {
   const health = [];
   if (pf.cpu_temp_c != null) health.push(`CPU ${pf.cpu_temp_c}°C`);
   if (pf.load != null) health.push(`load ${pf.load}`);
-  if (pf.cpus_used) health.push(`LEDBoard on CPUs ${pf.cpus_used.join(",")} of ${pf.cpu_count}` + (pf.isolated_cpus ? ` (isolated: ${pf.isolated_cpus})` : ""));
+  if (pf.cpus_used) {
+    const all = [...Array(pf.cpu_count || 0).keys()];
+    const free = all.filter((c) => !pf.cpus_used.includes(c));
+    health.push(`LEDBoard uses CPU core${pf.cpus_used.length > 1 ? "s" : ""} ${pf.cpus_used.join(", ")} of ${pf.cpu_count}` +
+      (free.length ? ` · core ${free.join(", ")} kept free for the LED refresh` : "") +
+      (pf.isolated_cpus ? ` (reserved at boot: ${pf.isolated_cpus})` : ""));
+  }
   const warn = [];
   if ((pf.throttled_now || []).length) warn.push("Now: " + pf.throttled_now.join(", "));
   if ((pf.throttled_since_boot || []).length) warn.push("Since boot: " + pf.throttled_since_boot.join(", "));
