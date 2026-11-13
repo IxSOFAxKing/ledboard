@@ -673,16 +673,21 @@ Work through these in order, checking the panels after each step.
 
    Under-voltage makes the refresh uneven, so fix the power supply first if it's flagged.
 2. **Set GPIO slowdown** (Display tab): 2 for a Pi Zero 2 W or Pi 3, 3–4 for a Pi 4. A value that's too high slows the refresh rate and causes flicker. A value that's too low causes sparkles. Use the lowest value that looks clean.
-3. **Reserve a CPU core for the panels.** LEDBoard already keeps its own work off the last core. For the full effect, have the kernel keep everything else off it too. `install.sh` offers this, or you can do it by hand:
+3. **Adafruit RGB Matrix Bonnet or HAT: add the PWM wire.** By default the bonnet's brightness timing is done in software, which is the biggest source of flicker. Adafruit's fix:
+   1. Solder a short wire between the **GPIO4** and **GPIO18** pads on the bonnet. Adafruit's "Reducing flicker" guide for the bonnet shows where they are.
+   2. Set **Hardware mapping** to **adafruit-hat-pwm** on the Display tab.
+
+   This needs the Pi's onboard audio off. `install.sh` already does that (the snd_bcm2835 blacklist). If the panels stay dark after switching, also add `dtparam=audio=off` to `/boot/firmware/config.txt` and reboot.
+4. **Reserve a CPU core for the panels.** LEDBoard already keeps its own work off the last core. For the full effect, have the kernel keep everything else off it too. `install.sh` offers this, or you can do it by hand:
    ```bash
    sudo sed -i '1 s/$/ isolcpus=3/' /boot/firmware/cmdline.txt && sudo reboot
    ```
-4. **Raise the refresh rate.** Turn on **Print refresh rate to log** and watch `journalctl -u ledboard -f`. Then try these, one at a time:
+5. **Raise the refresh rate.** Turn on **Print refresh rate to log** and watch `journalctl -u ledboard -f`. Then try these, one at a time:
    - **PWM bits** 8–9: this roughly doubles the refresh rate.
    - **PWM dither bits** 1.
    - **PWM LSB nanoseconds** around 100.
-5. **Make the brightness steady.** Set **Limit refresh rate** a little below the lowest rate you saw in step 4.
-6. **Lower Render FPS** to 20–25. That's plenty for scrolling at 20 px/s and frees up CPU.
+6. **Make the brightness steady.** Set **Limit refresh rate** a little below the lowest rate you saw in step 5.
+7. **Lower Render FPS** to 20–25. That's plenty for scrolling at 20 px/s and frees up CPU.
 
 LEDBoard only sends the pixels that changed to the panels, and skips frames that are identical. A scrolling line of text is typically under 10% of the screen per frame.
 
