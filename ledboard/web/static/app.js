@@ -147,6 +147,7 @@ function renderStatus() {
     let info = !b.enabled ? "disabled" : `updated ${ago(b.last_update)} · ${b.slides} slide(s)`;
     if (n === "spotify" && b.enabled) info += b.now ? ` · ${b.now.playing ? "▶" : "⏸"} ${b.now.title} — ${b.now.artist}` : " · nothing playing";
     if (n === "plex" && b.enabled) info += ` · ${b.sessions.length} stream(s)`;
+    if (n === "uptime" && b.enabled && (b.monitor_names || []).length) info += ` · monitors: ${b.monitor_names.join(", ")}`;
     if (b.enabled && b.next_games) {
       for (const [fav, when] of Object.entries(b.next_games))
         info += ` · next ${fav}: ${when === "TBD" ? "TBD" : new Date(when).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`;

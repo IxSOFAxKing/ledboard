@@ -464,9 +464,12 @@ Time left averages the file-progress estimate and the slicer's estimate, the way
 1. In Uptime Kuma, go to **Status Pages → New Status Page**, give it a slug (for example `home`) and add the monitors you want on the panel. Save.
 2. Turn on **Server Status** and paste the page's address, for example `http://192.168.1.10:3001/status/home`. No login or API key is needed.
 3. **Options:**
-   - only show certain monitors
+   - **Show these monitors on the board**: which monitors appear in the rotation (blank = all).
    - only show the board when something is down
    - **Critical alert when a monitor goes down** (on by default): the alert stays on screen until the monitor is back up (then it clears itself) or you dismiss it. If you set up the Home Assistant Plex automation earlier, you can turn that off, or you'll get two alerts.
+   - **Critical alerts for these monitors**: which monitors raise that alert (blank = all). This list is separate from the one above, so a monitor can be on the board without alerting, or alert without being on the board. For example, show Plex in the rotation but take over the display when the NAS or router goes down.
+
+   The Status tab lists your monitors' exact names. Names aren't case-sensitive.
 
 Monitors that are down are always listed first; maintenance shows in blue and pending in amber. **Design** options:
 - **Grid**: 6 per page, each with a status dot, name and response time, plus the average 24-hour uptime.

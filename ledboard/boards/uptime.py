@@ -53,17 +53,22 @@ class UptimeBoard(Board):
     category = "Home & status"
     description = "Your Uptime Kuma monitors: up/down dots and response times, with an optional alert when one goes down."
     refresh = 60
-    DEFAULTS = {"enabled": False, "duration": 10, "refresh": 60, "status_url": "", "slug": "", "monitors": [],
+    DEFAULTS = {"enabled": False, "duration": 10, "refresh": 60, "status_url": "", "slug": "", "monitors": [], "alert_monitors": [],
                 "only_when_down": False, "alert_on_down": True, "alert_hold": True, "layout": "grid"}
     FIELDS = [
         {"key": "status_url", "label": "Uptime Kuma status page address", "type": "text",
          "placeholder": "http://192.168.1.10:3001/status/home",
          "help": "In Uptime Kuma: Status Pages → New Status Page, add your monitors, then paste the page's address here."},
-        {"key": "monitors", "label": "Only these monitors (comma-separated, blank = all)", "type": "list"},
+        {"key": "monitors", "label": "Show these monitors on the board (comma-separated, blank = all)", "type": "list",
+         "help": "Names as they appear in Uptime Kuma (the Status tab lists them). Only these appear in the rotation."},
         {"key": "layout", "label": "Design", "type": "select", "options": list(LAYOUTS), "option_labels": LAYOUTS},
         {"key": "only_when_down", "label": "Only show when something is down", "type": "bool"},
         {"key": "alert_on_down", "label": "Critical alert when a monitor goes down (clears when it's back up)",
          "type": "bool"},
+        {"key": "alert_monitors", "label": "Critical alerts for these monitors (comma-separated, blank = all)",
+         "type": "list", "show_if": {"alert_on_down": True},
+         "help": "Separate from the list above: a monitor can raise an alert without being shown on the board, "
+                 "or be shown without raising alerts."},
         {"key": "alert_hold", "label": "Keep the alert on screen until it clears or is dismissed", "type": "bool",
          "show_if": {"alert_on_down": True}},
         {"key": "duration", "label": "Seconds per page", "type": "number"},
@@ -71,12 +76,13 @@ class UptimeBoard(Board):
     ]
     FIELDS = organize(FIELDS, [("Basics", "Status page", ["status_url", "monitors"]),
                                ("Screens", "Display", ["layout", "only_when_down"]),
-                               ("Screens", "Alerts", ["alert_on_down", "alert_hold"]),
+                               ("Screens", "Alerts", ["alert_on_down", "alert_monitors", "alert_hold"]),
                                ("Advanced", "Timing", ["duration", "refresh"])], {})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)
-        self.monitors = []            # [{id, name, status, ping, msg}]
+        self.monitors = []            # the ones shown on the board: [{id, name, status, ping, msg}]
+        self.all_monitors = []        # every monitor on the status page (alerts can watch any of them)
         self.uptime = None            # average 24 h uptime, 0..1
         self._alerted = set()
         self.session = requests.Session()
@@ -85,7 +91,7 @@ class UptimeBoard(Board):
         base, slug = parse_status_url(self.cfg.get("status_url"))
         slug = slug or (self.cfg.get("slug") or "").strip()
         if not (base and slug):
-            self.monitors = []
+            self.monitors = self.all_monitors = []
             return
         page = self.session.get(f"{base}/api/status-page/{slug}", timeout=10)
         if page.status_code == 404:
@@ -94,15 +100,13 @@ class UptimeBoard(Board):
         beats = self.session.get(f"{base}/api/status-page/heartbeat/{slug}", timeout=10)
         beats.raise_for_status()
         pj, bj = page.json(), beats.json()
-        wanted = {m.strip().lower() for m in self.cfg.get("monitors") or [] if m.strip()}
+        wanted = self._names("monitors")
         hb = bj.get("heartbeatList") or {}
         ups = bj.get("uptimeList") or {}
         mons, uptimes = [], []
         for group in pj.get("publicGroupList") or []:
             for m in group.get("monitorList") or []:
                 name = m.get("name") or f"#{m.get('id')}"
-                if wanted and name.lower() not in wanted:
-                    continue
                 mid = str(m.get("id"))
                 beats_list = hb.get(mid) or []
                 last = (beats_list or [{}])[-1]
@@ -111,19 +115,29 @@ class UptimeBoard(Board):
                 u = ups.get(f"{mid}_24")
                 mons.append({"id": mid, "name": name, "status": st, "ping": last.get("ping"), "msg": last.get("msg") or "",
                              "history": history, "uptime": u if isinstance(u, (int, float)) else None})
-                if isinstance(u, (int, float)):
+                if isinstance(u, (int, float)) and (not wanted or name.lower() in wanted):
                     uptimes.append(u)
-        self.monitors = mons
+        self.all_monitors = mons
+        self.monitors = [m for m in mons if not wanted or m["name"].lower() in wanted]
         self.uptime = sum(uptimes) / len(uptimes) if uptimes else None
         self._sync_alerts()
+
+    def _names(self, key):
+        return {m.strip().lower() for m in self.cfg.get(key) or [] if isinstance(m, str) and m.strip()}
 
     def _sync_alerts(self):
         alerts = getattr(self.app, "alerts", None)
         if alerts is None:
             return
         on = self.cfg.get("alert_on_down", True)
-        down_now = {m["id"] for m in self.monitors if m["status"] == "down"}
-        for m in self.monitors:
+        watch = self._names("alert_monitors")
+        watched = [m for m in self.all_monitors if not watch or m["name"].lower() in watch]
+        down_now = {m["id"] for m in watched if m["status"] == "down"}
+        for mid in list(self._alerted):                  # taken off the alert list: clear its alert
+            if mid not in {m["id"] for m in watched}:
+                alerts.dismiss(key=f"uptime:{mid}")
+                self._alerted.discard(mid)
+        for m in watched:
             key = f"uptime:{m['id']}"
             if on and m["id"] in down_now and m["id"] not in self._alerted:
                 alerts.add(f"{m['name']} DOWN", m["msg"] or "Not responding", icon="warning", color="#ff2020",
@@ -351,4 +365,5 @@ class UptimeBoard(Board):
     def status(self):
         s = super().status()
         s["monitors"] = [{k: m[k] for k in ("name", "status", "ping")} for m in self.monitors]
+        s["monitor_names"] = [m["name"] for m in self.all_monitors]
         return s

@@ -88,6 +88,11 @@ def migrate(data: dict) -> bool:
                 and b.get("upcoming_layout", "classic") == "classic":
             b["upcoming_layout"], b["upcoming_style"] = b["upcoming_style"], "plain"
             changed = True
+    # v6 -> v7: Server Status alerts got their own monitor list; keep alerting for the monitors that were shown
+    up = boards.get("uptime")
+    if isinstance(up, dict) and "alert_monitors" not in up:
+        up["alert_monitors"] = list(up.get("monitors") or [])
+        changed = True
     # v5 -> v6: the clock only offers scalable fonts; old pixel-font picks become Inter Bold at a matching size
     clock = boards.get("clock")
     if isinstance(clock, dict):
