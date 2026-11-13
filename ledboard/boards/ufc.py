@@ -444,13 +444,19 @@ class UFCBoard(Board):
                 "show_countdown": True, "countdown_days": 7, "countdown_layout": "poster", "event_logo_url": "", "countdown_to": "main",
                 "card_days": 2, "final_hours": 24,
                 "show_schedule": True, "schedule_count": 6, "schedule_when": "always",
-                "takeover": False, "celebrate": True}
+                "takeover": False, "celebrate": True, "single_screen": True, "result_minutes": 5}
     FIELDS = [
         {"key": "favorites", "label": "Favorite fighters (comma-separated names)", "type": "list",
          "help": "Last names are enough, e.g. Jones, Pereira. Favorites get a ★, a winner celebration and can take "
                  "over the display while they fight."},
         {"key": "favorites_only", "label": "Only show bouts with a favorite fighter", "type": "bool",
          "help": "The countdown and schedule still show."},
+        {"key": "single_screen", "label": "One screen at a time", "type": "bool",
+         "help": "Before the event: just the countdown. During it: just the fight that's live (between fights, the "
+                 "result that just came in, then the next bout up). After it: the main event result. Otherwise the "
+                 "board shows every bout, plus the schedule."},
+        {"key": "result_minutes", "label": "Between fights, show the last result for (minutes)", "type": "number",
+         "show_if": {"single_screen": True}, "help": "Then the next bout up shows until it starts."},
         {"key": "bouts", "label": "Which bouts", "type": "select", "options": list(BOUTS), "option_labels": BOUTS},
         {"key": "preview", "label": "Preview", "type": "actions", "action": "preview",
          "options": {"pre": "Upcoming", "live": "Live", "post": "Results", "countdown": "Countdown",
@@ -493,7 +499,7 @@ class UFCBoard(Board):
         {"key": "live_refresh", "label": "Refresh while fights are live (s)", "type": "number"},
     ]
     FIELDS = organize(FIELDS, [
-        ("Basics", "Fighters & bouts", ["favorites", "favorites_only", "bouts"]),
+        ("Basics", "Fighters & bouts", ["favorites", "favorites_only", "bouts", "single_screen", "result_minutes"]),
         ("Basics", "Preview", ["preview"]),
         ("Screens", "Countdown", ["show_countdown", "countdown_layout", "countdown_to", "countdown_days",
                                   "event_logo_url"]),
@@ -575,6 +581,11 @@ class UFCBoard(Board):
                 self._ended.setdefault(e["id"], e["end"] if e["end"] and e["end"] < now else
                                        max(now - timedelta(hours=1), (e["last_start"] or now)) if e["last_start"] else now)
         self._check_wins(events)
+        done = self.__dict__.setdefault("_fight_done", {})
+        for e in events.values():
+            for f in e["fights"]:
+                if f["state"] == "post":
+                    done.setdefault(f["id"], time.time())
         self.events, self.calendar = events, cal
         for e in self._relevant_events():
             for f in e["fights"]:
@@ -833,13 +844,62 @@ class UFCBoard(Board):
                 return self._schedule_slides("p")
             if kind == "countdown":
                 return [f"pcountdown:{evs[0]['id']}"]
-            return [f"pfight:{evs[0]['id']}:{f['id']}" for f in self._bouts(evs[0]) or evs[0]["fights"][:1]]
+            out = [f"pfight:{evs[0]['id']}:{f['id']}" for f in self._bouts(evs[0]) or evs[0]["fights"][:1]]
+            return out[:1] if self.cfg.get("single_screen", True) else out
+        if self.cfg.get("single_screen", True):
+            one = self._single_slide()
+            return [one] if one else []
         slides = []
         for e in self._relevant_events():
             slides += self._event_slides(e)
         if self.cfg.get("show_schedule", True) and (self.cfg.get("schedule_when") != "no_event" or not slides):
             slides += self._schedule_slides()
         return slides
+
+    def _single_slide(self):
+        """The one screen to show in 'one screen at a time' mode, or None."""
+        now = datetime.now(timezone.utc)
+        evs = self._relevant_events()
+        live = next((e for e in evs if e["state"] == "in"), None)
+        if live:
+            e = live
+            bouts = self._bouts(e) or e["fights"][:1]
+            playing = [f for f in bouts if f["state"] == "in"]
+            if playing:
+                return f"fight:{e['id']}:{playing[0]['id']}"
+            finished = [f for f in bouts if f["state"] == "post"]
+            upcoming = [f for f in bouts if f["state"] == "pre"]
+            if not finished:
+                # nothing from the chosen bouts has started (e.g. the prelims are on): keep counting down
+                if self.cfg.get("show_countdown", True):
+                    return f"countdown:{e['id']}"
+                return f"fight:{e['id']}:{upcoming[-1]['id']}" if upcoming else None
+            done = self.__dict__.get("_fight_done", {})
+            last = max(finished, key=lambda f: done.get(f["id"], 0))
+            fresh = time.time() - done.get(last["id"], 0) < self._num("result_minutes", 5) * 60
+            if fresh or not upcoming:
+                return f"fight:{e['id']}:{last['id']}"
+            return f"fight:{e['id']}:{upcoming[-1]['id']}"     # the card runs bottom-up: next bout is the last one
+        recent = [e for e in evs if e["state"] == "post"]
+        if recent:
+            e = recent[-1]
+            bouts = self._bouts(e) or e["fights"][:1]
+            return f"fight:{e['id']}:{bouts[0]['id']}"
+        nxt = next((e for e in evs if e["state"] == "pre"), None)
+        if nxt:
+            target = self._target(nxt)
+            secs = (target - now).total_seconds() if target else None
+            if self.cfg.get("show_countdown", True) and secs is not None and secs < self._num("countdown_days", 7) * 86400:
+                return f"countdown:{nxt['id']}"
+            start = nxt["start"]
+            if start is not None and (start.astimezone().date() - datetime.now().astimezone().date()).days \
+                    <= self._num("card_days", 2):
+                bouts = self._bouts(nxt) or nxt["fights"][:1]
+                if bouts:
+                    return f"fight:{nxt['id']}:{bouts[0]['id']}"
+        if self.cfg.get("show_schedule", True) and self._schedule():
+            return "schedule:0"
+        return None
 
     def takeover_slides(self):
         if not self.cfg.get("takeover") or self._preview_active():

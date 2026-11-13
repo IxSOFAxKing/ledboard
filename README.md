@@ -353,6 +353,14 @@ The UFC board uses ESPN's free MMA data (no key needed), like the other sports b
 - **Results**: the winner in gold and the loser dimmed, plus the method (KO/TKO, SUB, U DEC / S DEC, and so on) with the round and time. Results stay up for 24 hours after the event by default.
 - **Upcoming events list**: date, event and headline bout, three to a page. It can show always, or only when there's no fight card to show.
 
+**One screen at a time** (on by default): the board shows a single screen instead of rotating through every bout and the schedule.
+- **Before the event:** the countdown. It keeps counting down to the main card while the prelims are on, unless you chose the full card.
+- **During the event:** the bout that's live right now, changing as each fight starts. Between fights, the result that just came in shows for 5 minutes (adjustable), then the next bout up.
+- **After the event:** the main event result, for as long as results are set to show.
+- **When nothing's coming up:** the first page of the upcoming events list, if that's turned on.
+
+Turn the setting off to see every bout plus the schedule again.
+
 Bout designs:
 - **Fight card**: pictures at the edges, names and records stacked.
 - **Face-off**: red and blue corner halves with VS (or a belt for title fights).
