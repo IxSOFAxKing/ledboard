@@ -65,6 +65,11 @@ def _damaged_fonts():
     return dict(fonts.DAMAGED)
 
 
+def _repaired_fonts():
+    from . import fonts
+    return dict(fonts.REPAIRED)
+
+
 class ComboSlide:
     """The combined ticker: (board, slide) items from every board, scrolling as one line."""
     __slots__ = ("items",)
@@ -655,6 +660,7 @@ class Engine:
             if cur else None,
             "overlay": self.overlay["text"] if self.overlay else None,
             "damaged_fonts": _damaged_fonts(),
+            "repaired_fonts": _repaired_fonts(),
             "alert": self.alerts.current.title if self.alerts.current else None,
             "alerts": self.alerts.active(),
             "mqtt": self.mqtt.status() if getattr(self, "mqtt", None) else {"enabled": False},

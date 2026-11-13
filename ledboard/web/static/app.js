@@ -164,7 +164,11 @@ function renderStatus() {
   if (bad.length) rows.unshift(h("div", { class: "status-row" }, h("span", { class: "dot err" }), h("span", { class: "nm" }, "Fonts"),
     h("span", { class: "info" }, `Damaged font file${bad.length > 1 ? "s" : ""}: ${bad.join(", ")} (probably the SD card). ` +
       "Text still shows, but some characters may be missing.",
-      h("div", { class: "err-line" }, "Fix: cd /opt/ledboard && sudo git checkout -- ledboard/fonts && sudo systemctl restart ledboard"))));
+      h("div", { class: "err-line" }, "Fix: cd /opt/ledboard && sudo rm ledboard/fonts/*.bdf && sudo git checkout -- ledboard/fonts && sudo systemctl restart ledboard"))));
+  const fixed = Object.keys(STATE.repaired_fonts || {}).filter((f) => !bad.includes(f));
+  if (fixed.length) rows.unshift(h("div", { class: "status-row" }, h("span", { class: "dot ok" }), h("span", { class: "nm" }, "Fonts"),
+    h("span", { class: "info" }, `Repaired ${fixed.join(", ")} (it was damaged on the SD card; restored automatically). ` +
+      "If this keeps happening, the SD card or power supply may be failing.")));
   const pf = STATE.perf || {};
   const health = [];
   if (pf.cpu_temp_c != null) health.push(`CPU ${pf.cpu_temp_c}°C`);

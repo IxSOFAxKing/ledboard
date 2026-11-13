@@ -640,13 +640,15 @@ Open <http://localhost:8080> to see the live LED preview. If the `rgbmatrix` mod
 
 ## Troubleshooting
 
-**"invalid literal for int() with base 16" on boards, or a "Damaged font file" line on the Status tab**: a font file on the Pi's SD card got damaged (usually a power cut or an aging card). The board keeps working and skips the damaged character, but restore the file with:
+**"invalid literal for int() with base 16" on boards, or a "Fonts" line on the Status tab**: a font file on the Pi's SD card got damaged (usually a power cut or an aging card). LEDBoard restores a damaged font from its git copy automatically when it starts, and the Status tab notes the repair.
+
+If the Status tab still shows a red "Damaged font file" line, restore the fonts by hand. Delete them first: a single flipped bit changes neither a file's size nor its timestamp, so a plain `git checkout` thinks the file is fine and skips it.
 
 ```bash
-cd /opt/ledboard && sudo git checkout -- ledboard/fonts && sudo systemctl restart ledboard
+cd /opt/ledboard && sudo rm ledboard/fonts/*.bdf && sudo git checkout -- ledboard/fonts && sudo systemctl restart ledboard
 ```
 
-If files keep getting damaged, check the SD card (or replace it) and make sure the Pi has a solid power supply.
+If that fails with a "corrupt" or "bad object" error, git's own copy is damaged too. Check with `sudo git fsck`, and reinstall if it reports errors. If files keep getting damaged, check the SD card (or replace it) and make sure the Pi has a solid power supply.
 
 
 | Symptom | Fix |

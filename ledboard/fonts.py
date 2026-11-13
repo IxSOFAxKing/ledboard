@@ -9,13 +9,19 @@ from __future__ import annotations
 import logging
 import math
 import os
+import subprocess
+import time
 from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFont
 
 log = logging.getLogger(__name__)
-#: font file -> first damaged line (shown on the Status tab)
+#: font file -> first damaged line, for files that couldn't be repaired (shown on the Status tab)
 DAMAGED: dict = {}
+#: font file -> when it was found damaged and restored from git (shown on the Status tab)
+REPAIRED: dict = {}
+FIX_COMMAND = ("cd /opt/ledboard && sudo rm ledboard/fonts/*.bdf && sudo git checkout -- ledboard/fonts "
+               "&& sudo systemctl restart ledboard")
 
 FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
 TTF_DIR = os.path.join(FONT_DIR, "ttf")
@@ -142,6 +148,33 @@ def len_bits(rows, width):
     return ((width + 7) // 8) * 8
 
 
+def _restore_from_git(path):
+    """Rewrite a font file with the copy in git (HEAD). Returns True if it was restored.
+
+    `git checkout` can't be used for this: a flipped bit changes neither the file's size nor its
+    time, so git believes the file is unchanged and skips it."""
+    repo = os.path.dirname(os.path.dirname(FONT_DIR))
+    path = os.path.abspath(path)
+    if not path.startswith(os.path.abspath(FONT_DIR) + os.sep) or not os.path.isdir(os.path.join(repo, ".git")):
+        return False
+    rel = os.path.relpath(path, repo).replace(os.sep, "/")
+    try:
+        r = subprocess.run(["git", "-C", repo, "show", f"HEAD:{rel}"], capture_output=True, timeout=20)
+        if r.returncode != 0 or not r.stdout:
+            log.warning("can't restore %s from git: %s", rel, r.stderr.decode(errors="replace").strip())
+            return False
+        tmp = path + ".restore"
+        with open(tmp, "wb") as f:
+            f.write(r.stdout)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        return True
+    except Exception as e:
+        log.warning("can't restore %s from git: %s", rel, e)
+        return False
+
+
 class BDFFont:
     def __init__(self, path: str):
         self.name = os.path.splitext(os.path.basename(path))[0]
@@ -149,7 +182,18 @@ class BDFFont:
         self.ascent = 0
         self.descent = 0
         self._path = path
+        self._was_damaged = False
         self._parse(path)
+        if self._was_damaged and _restore_from_git(path):
+            # the file on disk was damaged (e.g. a bit flipped on the SD card): it's been rewritten from
+            # git's copy, so load it again
+            self.glyphs, self.ascent, self.descent = {}, 0, 0
+            DAMAGED.pop(os.path.basename(path), None)
+            self._was_damaged = False
+            self._parse(path)
+            if not self._was_damaged:
+                REPAIRED[os.path.basename(path)] = time.time()
+                log.warning("font file %s was damaged and has been restored from git", path)
         self.height = self.ascent + self.descent
         self._fallback = self.glyphs.get(ord("?"))
 
@@ -175,9 +219,9 @@ class BDFFont:
             self.descent = -font_bbx[3]
 
     def _damaged(self, path, line_no, text):
+        self._was_damaged = True
         DAMAGED.setdefault(os.path.basename(path), line_no)
-        log.warning("font file %s is damaged at line %d (%r); skipping it. Restore it with: "
-                    "cd /opt/ledboard && sudo git checkout -- ledboard/fonts", path, line_no, text[:30])
+        log.warning("font file %s is damaged at line %d (%r)", path, line_no, text[:30])
 
     def _line(self, parts, lines, i, n, enc, adv, bbx, font_bbx):
         """Handle one BDF line (and a whole BITMAP block). Returns the updated parser state."""
