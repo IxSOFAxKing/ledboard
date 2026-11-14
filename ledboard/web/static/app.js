@@ -146,6 +146,7 @@ function renderStatus() {
   const rows = Object.entries(STATE.boards).map(([n, b]) => {
     let info = !b.enabled ? "disabled" : `updated ${ago(b.last_update)} · ${b.slides} slide(s)`;
     if (n === "spotify" && b.enabled) info += b.now ? ` · ${b.now.playing ? "▶" : "⏸"} ${b.now.title} — ${b.now.artist}` : " · nothing playing";
+    if (n === "spotify" && b.enabled && b.live) info += ` · live updates ${b.live}`;
     if (n === "plex" && b.enabled) info += ` · ${b.sessions.length} stream(s)`;
     if (n === "uptime" && b.enabled && (b.monitor_names || []).length) info += ` · monitors: ${b.monitor_names.join(", ")}`;
     if (b.enabled && b.next_games) {

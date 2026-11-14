@@ -396,7 +396,9 @@ LEDBoard saves the refresh token, so you only do this once.
 
 **How quickly songs update:** the progress bar moves smoothly on its own, but the title, artist and art change when the board checks. That happens every **Check every** seconds (5 by default) and again right after the current song should end, so songs that change on their own show up almost instantly. A skip shows up at the next check: lower **Check every** to 2–3 seconds to see skips sooner.
 
-Home Assistant's Spotify integration only asks Spotify about every 30 seconds by itself. **Ask Home Assistant to refresh the player on every check** (on by default) works around that. The **Spotify Web API** source is the most direct, if you'd rather skip Home Assistant.
+**Live updates from Home Assistant** (on by default): the board keeps a live connection to Home Assistant (its WebSocket API, using the same URL and token), so a new song, skip or pause shows up the instant the player changes in Home Assistant. The regular checks keep running as a backup and take over if the connection drops; it reconnects by itself, for example after Home Assistant restarts. The Status tab shows "live updates on" when it's connected.
+
+With live updates off, Home Assistant's Spotify integration only asks Spotify about every 30 seconds by itself. **Ask Home Assistant to refresh the player on every check** works around that. The **Spotify Web API** source is the most direct, if you'd rather skip Home Assistant.
 
 Right at a song change, Spotify and Home Assistant sometimes briefly report an older song. The board only switches once it sees the same new song twice in a row (it re-checks a second later), so that brief wrong song never shows.
 
@@ -706,6 +708,7 @@ ledboard/
   fonts.py         BDF bitmap font renderer (crisp pixel text)
   gfx.py           drawing helpers, marquee text, image cache
   config.py        JSON config + sportsmatrix.conf importer
+  ha_ws.py         live state updates from Home Assistant (WebSocket, no extra packages)
   boards/          sports (one board per league) + layouts, playoffs, recap; ufc; weather (+ extra screens), spotify,
                    plex, steam, uptime, klipper, homeassistant, clock, ambient, message
   transitions.py   slide / push / wipe / fade / dissolve between boards

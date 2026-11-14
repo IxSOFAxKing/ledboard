@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import threading
 import time
 import urllib.parse
 
@@ -39,7 +40,7 @@ class SpotifyBoard(Board):
     refresh = 5
     DEFAULTS = {
         "enabled": False, "duration": 15, "refresh": 5, "takeover": True, "show_paused": False,
-        "source": "homeassistant", "ha_entities": [], "ha_force_refresh": True,
+        "source": "homeassistant", "ha_entities": [], "ha_live": True, "ha_force_refresh": True,
         "client_id": "", "client_secret": "", "refresh_token": "",
         "redirect_uri": "http://127.0.0.1:8080/spotify/callback",
         "title_color": "#ffffff", "artist_color": "#1ed760", "progress_style": "wavy",
@@ -52,8 +53,12 @@ class SpotifyBoard(Board):
          "show_if": {"source": "homeassistant"}, "datalist": "ha-media-players",
          "help": "e.g. media_player.spotify_adam. Uses the URL and token from the Home Assistant board. "
                  "If several are playing, each gets its own slide."},
-        {"key": "ha_force_refresh", "label": "Ask Home Assistant to refresh the player on every check", "type": "bool",
+        {"key": "ha_live", "label": "Live updates from Home Assistant (instant)", "type": "bool",
          "show_if": {"source": "homeassistant"},
+         "help": "Keeps a live connection to Home Assistant, so a new song, pause or skip shows the moment the "
+                 "player changes there. The regular checks keep running as a backup."},
+        {"key": "ha_force_refresh", "label": "Ask Home Assistant to refresh the player on every check", "type": "bool",
+         "show_if": {"source": "homeassistant", "ha_live": False},
          "help": "Home Assistant's Spotify integration only checks Spotify about every 30 seconds on its own, so "
                  "song changes can show up late. This asks it for the latest each time the board checks."},
         {"key": "spotify_auth", "label": "Account", "type": "spotify_auth", "show_if": {"source": "spotify"}},
@@ -74,7 +79,7 @@ class SpotifyBoard(Board):
                  "straight away."},
     ]
     FIELDS = organize(FIELDS, [
-        ("Basics", "Source", ["source", "ha_entities", "ha_force_refresh", "spotify_auth", "client_id", "client_secret", "redirect_uri"]),
+        ("Basics", "Source", ["source", "ha_entities", "ha_live", "ha_force_refresh", "spotify_auth", "client_id", "client_secret", "redirect_uri"]),
         ("Screens", "Now playing", ["takeover", "show_paused"]),
         ("Look", "Style", ["progress_style", "title_color", "artist_color"]),
         ("Advanced", "Timing", ["duration", "refresh"])], {})
@@ -86,6 +91,7 @@ class SpotifyBoard(Board):
         self.now = None      # dict describing current track (first player)
         self.fetched_at = 0
         self.players = {}    # slide key -> (now dict, fetched_at)
+        self._lock = threading.Lock()
         self._wave = Ease()
 
     # -- auth -----------------------------------------------------------------
@@ -167,7 +173,10 @@ class SpotifyBoard(Board):
             return
         headers = {"Authorization": f"Bearer {hcfg['token']}"}
         verify = bool(hcfg.get("verify_ssl", True))
-        if self.cfg.get("ha_force_refresh", True):
+        self._ha_conn = (base, headers, verify)
+        self._ensure_live(base, hcfg["token"], verify, ents)
+        live = self._live_ok()
+        if not live and self.cfg.get("ha_force_refresh", True):
             # HA's own Spotify integration only polls about every 30 s: ask it to fetch the latest now
             try:
                 requests.post(f"{base}/api/services/homeassistant/update_entity", headers=headers, timeout=10,
@@ -175,6 +184,7 @@ class SpotifyBoard(Board):
             except requests.RequestException as e:
                 log.debug("update_entity failed: %s", e)
         players = {}
+        started = time.time()
         for ent in ents:
             r = requests.get(f"{base}/api/states/{ent}", headers=headers, timeout=10, verify=verify)
             if r.status_code == 404:
@@ -183,19 +193,77 @@ class SpotifyBoard(Board):
             now = self.parse_ha(r.json(), base, headers, verify, self.app.height)
             if now:
                 players[ent] = (now, time.time())
-        self._apply(players)
+        self._apply(players, confirm=not live, started=started)
 
-    def _apply(self, players):
+    # -- live updates (Home Assistant WebSocket) ---------------------------------
+    def _live_ok(self):
+        ws = getattr(self, "_ws", None)
+        return bool(ws and ws.is_alive() and ws.connected)
+
+    def _ensure_live(self, base, token, verify, ents):
+        """Start (or restart, when the settings changed) the live connection to Home Assistant."""
+        from ..ha_ws import HAStateStream
+        want = self.cfg.get("ha_live", True)
+        sig = (base, token, verify, tuple(ents))
+        ws = getattr(self, "_ws", None)
+        if ws and (not want or ws.sig != sig or not ws.is_alive()):
+            ws.stop()
+            ws = self._ws = None
+        if want and ws is None:
+            ws = self._ws = HAStateStream(
+                base, token, verify, ents, self._on_live_state,
+                keep_running=lambda: self.enabled and self.cfg.get("source", "homeassistant") == "homeassistant"
+                and self.cfg.get("ha_live", True),
+                name="ha-live-nowplaying")
+            ws.sig = sig
+            ws.start()
+
+    def _on_live_state(self, ent, st):
+        """A player changed in Home Assistant: show it right away."""
+        conn = getattr(self, "_ha_conn", None)
+        if not conn:
+            return
+        base, headers, verify = conn
+        now = self.parse_ha(st, base, headers, verify, self.app.height)
+        with self._lock:
+            players = dict(self.players)
+            if now:
+                players[ent] = (now, time.time())
+            else:
+                players.pop(ent, None)
+            order = [e.strip() for e in self.cfg.get("ha_entities", []) if e and e.strip()]
+            self.players = {k: players[k] for k in order if k in players}
+            self.__dict__.setdefault("_pending", {}).pop(ent, None)
+            self.__dict__.setdefault("_live_at", {})[ent] = time.time()
+            self.now = next(iter(self.players.values()))[0] if self.players else None
+            self.fetched_at = time.time()
+
+    def _apply(self, players, confirm=True, started=None):
+        with self._lock:
+            if started is not None:
+                # a live update that arrived while this check was running is newer: keep it
+                live_at = self.__dict__.get("_live_at", {})
+                players = dict(players)
+                for key, when in live_at.items():
+                    if when >= started:
+                        if key in self.players:
+                            players[key] = self.players[key]
+                        else:
+                            players.pop(key, None)
+            self._apply_locked(players, confirm)
+
+    def _apply_locked(self, players, confirm):
         """Show the new readings, but only switch a player to a different song once that song has been
         reported twice in a row. Right at a song change, Spotify / Home Assistant sometimes briefly report
-        an older song; a quick second check (about a second later) filters that out."""
+        an older song; a quick second check (about a second later) filters that out. With the live connection,
+        Home Assistant's own state is used as is (confirm=False)."""
         pending = self.__dict__.setdefault("_pending", {})
         shown = dict(self.players)
         out = {}
         self._confirm_soon = False
         for key, (n, at) in players.items():
             old = shown.get(key)
-            if old is None or old[0].get("id") == n.get("id"):
+            if not confirm or old is None or old[0].get("id") == n.get("id"):
                 out[key] = (n, at)                      # nothing shown yet, or the same song: show it
                 pending.pop(key, None)
             elif pending.get(key) == n.get("id"):
@@ -274,6 +342,8 @@ class SpotifyBoard(Board):
         """The regular check interval, but also check about a second after the current song should end,
         so the next song shows up right away instead of at the next regular check."""
         base = super().interval()
+        if self.cfg.get("source", "homeassistant") == "homeassistant" and self._live_ok():
+            return base                                 # changes arrive live; the checks are just a backup
         if getattr(self, "_confirm_soon", False):
             return 1.0                                  # confirm a song change quickly
         best = base
@@ -334,4 +404,7 @@ class SpotifyBoard(Board):
         s["connected"] = self.connected
         s["source"] = self.cfg.get("source", "homeassistant")
         s["now"] = {k: v for k, v in (self.now or {}).items() if k != "art"} or None
+        ws = getattr(self, "_ws", None)
+        if s["source"] == "homeassistant" and self.cfg.get("ha_live", True):
+            s["live"] = "on" if self._live_ok() else (f"connecting ({ws.error})" if ws and ws.error else "connecting")
         return s
