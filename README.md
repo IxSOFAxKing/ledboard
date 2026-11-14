@@ -394,6 +394,10 @@ You can also show only bouts with a favorite, and have the board **take over the
 
 LEDBoard saves the refresh token, so you only do this once.
 
+**How quickly songs update:** the progress bar moves smoothly on its own, but the title, artist and art change when the board checks. That happens every **Check every** seconds (5 by default) and again right after the current song should end, so songs that change on their own show up almost instantly. A skip shows up at the next check: lower **Check every** to 2–3 seconds to see skips sooner.
+
+Home Assistant's Spotify integration only asks Spotify about every 30 seconds by itself. **Ask Home Assistant to refresh the player on every check** (on by default) works around that. The **Spotify Web API** source is the most direct, if you'd rather skip Home Assistant.
+
 ### Weather
 1. Turn on **Weather**.
 2. Choose a source:

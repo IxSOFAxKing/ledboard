@@ -39,7 +39,7 @@ class SpotifyBoard(Board):
     refresh = 5
     DEFAULTS = {
         "enabled": False, "duration": 15, "refresh": 5, "takeover": True, "show_paused": False,
-        "source": "homeassistant", "ha_entities": [],
+        "source": "homeassistant", "ha_entities": [], "ha_force_refresh": True,
         "client_id": "", "client_secret": "", "refresh_token": "",
         "redirect_uri": "http://127.0.0.1:8080/spotify/callback",
         "title_color": "#ffffff", "artist_color": "#1ed760", "progress_style": "wavy",
@@ -52,6 +52,10 @@ class SpotifyBoard(Board):
          "show_if": {"source": "homeassistant"}, "datalist": "ha-media-players",
          "help": "e.g. media_player.spotify_adam. Uses the URL and token from the Home Assistant board. "
                  "If several are playing, each gets its own slide."},
+        {"key": "ha_force_refresh", "label": "Ask Home Assistant to refresh the player on every check", "type": "bool",
+         "show_if": {"source": "homeassistant"},
+         "help": "Home Assistant's Spotify integration only checks Spotify about every 30 seconds on its own, so "
+                 "song changes can show up late. This asks it for the latest each time the board checks."},
         {"key": "spotify_auth", "label": "Account", "type": "spotify_auth", "show_if": {"source": "spotify"}},
         {"key": "client_id", "label": "Client ID", "type": "text", "show_if": {"source": "spotify"}},
         {"key": "client_secret", "label": "Client Secret", "type": "password", "show_if": {"source": "spotify"}},
@@ -65,10 +69,12 @@ class SpotifyBoard(Board):
          "option_labels": {"wavy": "Wavy (animated, Material 3 style)", "straight": "Straight"}},
         {"key": "title_color", "label": "Title color", "type": "color"},
         {"key": "artist_color", "label": "Artist color", "type": "color"},
-        {"key": "refresh", "label": "Poll interval (s)", "type": "number"},
+        {"key": "refresh", "label": "Check every (seconds)", "type": "number",
+         "help": "The board also checks right when the current song should end, so the next song shows up "
+                 "straight away."},
     ]
     FIELDS = organize(FIELDS, [
-        ("Basics", "Source", ["source", "ha_entities", "spotify_auth", "client_id", "client_secret", "redirect_uri"]),
+        ("Basics", "Source", ["source", "ha_entities", "ha_force_refresh", "spotify_auth", "client_id", "client_secret", "redirect_uri"]),
         ("Screens", "Now playing", ["takeover", "show_paused"]),
         ("Look", "Style", ["progress_style", "title_color", "artist_color"]),
         ("Advanced", "Timing", ["duration", "refresh"])], {})
@@ -163,6 +169,13 @@ class SpotifyBoard(Board):
             return
         headers = {"Authorization": f"Bearer {hcfg['token']}"}
         verify = bool(hcfg.get("verify_ssl", True))
+        if self.cfg.get("ha_force_refresh", True):
+            # HA's own Spotify integration only polls about every 30 s: ask it to fetch the latest now
+            try:
+                requests.post(f"{base}/api/services/homeassistant/update_entity", headers=headers, timeout=10,
+                              verify=verify, json={"entity_id": ents})
+            except requests.RequestException as e:
+                log.debug("update_entity failed: %s", e)
         players = {}
         for ent in ents:
             r = requests.get(f"{base}/api/states/{ent}", headers=headers, timeout=10, verify=verify)
@@ -233,6 +246,28 @@ class SpotifyBoard(Board):
             "playing": bool(j.get("is_playing")),
             "art": fetch_image(img_url, art_size, art_size) if img_url else None,
         }
+
+    def interval(self):
+        """The regular check interval, but also check about a second after the current song should end,
+        so the next song shows up right away instead of at the next regular check."""
+        base = super().interval()
+        best = base
+        now = time.time()
+        at_end = self.__dict__.setdefault("_at_end", {})
+        for key, (n, at) in list(self.players.items()):
+            if not (n.get("playing") and n.get("duration")):
+                continue
+            left = (n["duration"] - n["progress"]) / 1000 - (now - at)
+            if left <= 0.5:
+                # the song should be over; if the player keeps reporting it for 15 s (e.g. an app left open at
+                # the end of a playlist), go back to the normal pace instead of checking every second
+                first = at_end.setdefault((key, n.get("id")), now)
+                if now - first > 15:
+                    continue
+            best = min(best, max(1.0, left + 1.0))
+        if len(at_end) > 50:
+            at_end.clear()
+        return best
 
     def slides(self):
         return [k for k, (n, _) in self.players.items() if n["playing"] or self.cfg.get("show_paused")]
