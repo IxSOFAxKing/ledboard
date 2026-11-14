@@ -224,6 +224,8 @@ class SpotifyBoard(Board):
         if not conn:
             return
         base, headers, verify = conn
+        a = st.get("attributes") or {}
+        log.info("Now Playing: live from %s: %s %r", ent, st.get("state"), a.get("media_title"))
         now = self.parse_ha(st, base, headers, verify, self.app.height)
         with self._lock:
             players = dict(self.players)
@@ -232,11 +234,20 @@ class SpotifyBoard(Board):
             else:
                 players.pop(ent, None)
             order = [e.strip() for e in self.cfg.get("ha_entities", []) if e and e.strip()]
+            self._log_change(self.players, players, "live update")
             self.players = {k: players[k] for k in order if k in players}
             self.__dict__.setdefault("_pending", {}).pop(ent, None)
             self.__dict__.setdefault("_live_at", {})[ent] = time.time()
             self.now = next(iter(self.players.values()))[0] if self.players else None
             self.fetched_at = time.time()
+
+    @staticmethod
+    def _log_change(before, after, how):
+        """Log whenever the song shown for a player changes (and what caused it)."""
+        for key, (n, _at) in after.items():
+            old = before.get(key)
+            if old is None or old[0].get("id") != n.get("id"):
+                log.info("Now Playing: showing %r by %r on %s (from a %s)", n.get("title"), n.get("artist"), key, how)
 
     def _apply(self, players, confirm=True, started=None):
         with self._lock:
@@ -276,6 +287,7 @@ class SpotifyBoard(Board):
         for key in list(pending):
             if key not in players:
                 pending.pop(key)
+        self._log_change(shown, out, "regular check")
         self.players = out
         self.now = next(iter(out.values()))[0] if out else None
         self.fetched_at = time.time()
