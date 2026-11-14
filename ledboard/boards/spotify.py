@@ -137,9 +137,8 @@ class SpotifyBoard(Board):
         if self.cfg.get("source", "homeassistant") == "homeassistant":
             self._update_ha()
             return
-        self.players = {}
         if not (self.cfg.get("client_id") and self.cfg.get("refresh_token")):
-            self.now = None
+            self._apply({})
             return
         r = requests.get(f"{API}/me/player/currently-playing", timeout=10,
                          params={"additional_types": "track,episode"},
@@ -148,14 +147,13 @@ class SpotifyBoard(Board):
             self.access_token = None
             raise RuntimeError("access token rejected; will refresh")
         if r.status_code == 204 or not r.content:
-            self.now = None
+            self._apply({})
             return
         if r.status_code == 429:
             raise RuntimeError("rate limited by Spotify")
         r.raise_for_status()
-        self.now = self.parse(r.json(), self.app.height)
-        self.fetched_at = time.time()
-        self.players = {"spotify": (self.now, self.fetched_at)} if self.now else {}
+        now = self.parse(r.json(), self.app.height)
+        self._apply({"spotify": (now, time.time())} if now else {})
 
     def _update_ha(self):
         ha = self.app.boards.get("homeassistant")
@@ -163,7 +161,7 @@ class SpotifyBoard(Board):
         base = (hcfg.get("url") or "").rstrip("/")
         ents = [e.strip() for e in self.cfg.get("ha_entities", []) if e and e.strip()]
         if not (base and hcfg.get("token") and ents):
-            self.players, self.now = {}, None
+            self._apply({})
             if ents and not (base and hcfg.get("token")):
                 raise RuntimeError("Set the Home Assistant URL and token on the Home Assistant board")
             return
@@ -185,8 +183,33 @@ class SpotifyBoard(Board):
             now = self.parse_ha(r.json(), base, headers, verify, self.app.height)
             if now:
                 players[ent] = (now, time.time())
-        self.players = players
-        self.now = next(iter(players.values()))[0] if players else None
+        self._apply(players)
+
+    def _apply(self, players):
+        """Show the new readings, but only switch a player to a different song once that song has been
+        reported twice in a row. Right at a song change, Spotify / Home Assistant sometimes briefly report
+        an older song; a quick second check (about a second later) filters that out."""
+        pending = self.__dict__.setdefault("_pending", {})
+        shown = dict(self.players)
+        out = {}
+        self._confirm_soon = False
+        for key, (n, at) in players.items():
+            old = shown.get(key)
+            if old is None or old[0].get("id") == n.get("id"):
+                out[key] = (n, at)                      # nothing shown yet, or the same song: show it
+                pending.pop(key, None)
+            elif pending.get(key) == n.get("id"):
+                out[key] = (n, at)                      # the new song, reported twice: switch
+                pending.pop(key, None)
+            else:
+                pending[key] = n.get("id")              # a different song: keep the current one a moment
+                out[key] = old
+                self._confirm_soon = True
+        for key in list(pending):
+            if key not in players:
+                pending.pop(key)
+        self.players = out
+        self.now = next(iter(out.values()))[0] if out else None
         self.fetched_at = time.time()
 
     @staticmethod
@@ -251,6 +274,8 @@ class SpotifyBoard(Board):
         """The regular check interval, but also check about a second after the current song should end,
         so the next song shows up right away instead of at the next regular check."""
         base = super().interval()
+        if getattr(self, "_confirm_soon", False):
+            return 1.0                                  # confirm a song change quickly
         best = base
         now = time.time()
         at_end = self.__dict__.setdefault("_at_end", {})

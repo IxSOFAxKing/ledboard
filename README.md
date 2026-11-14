@@ -398,6 +398,8 @@ LEDBoard saves the refresh token, so you only do this once.
 
 Home Assistant's Spotify integration only asks Spotify about every 30 seconds by itself. **Ask Home Assistant to refresh the player on every check** (on by default) works around that. The **Spotify Web API** source is the most direct, if you'd rather skip Home Assistant.
 
+Right at a song change, Spotify and Home Assistant sometimes briefly report an older song. The board only switches once it sees the same new song twice in a row (it re-checks a second later), so that brief wrong song never shows.
+
 ### Weather
 1. Turn on **Weather**.
 2. Choose a source:
