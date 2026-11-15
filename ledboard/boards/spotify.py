@@ -149,6 +149,17 @@ class SpotifyBoard(Board):
         return bool(self.cfg.get("refresh_token"))
 
     # -- data -----------------------------------------------------------------
+    def _account(self):
+        """Which Spotify app + login a rate limit belongs to (limits are per app)."""
+        return (self.cfg.get("client_id") or "", self.cfg.get("refresh_token") or "")
+
+    def _blocked_left(self):
+        """Seconds Spotify asked us to wait, for the current app / login (0 after switching to a new one)."""
+        acct, until = getattr(self, "_blocked", (None, 0))
+        if acct != self._account():
+            return 0
+        return max(0.0, until - time.time())
+
     def update(self):
         if self.cfg.get("source", "homeassistant") == "homeassistant":
             self._update_ha()
@@ -156,7 +167,7 @@ class SpotifyBoard(Board):
         if not (self.cfg.get("client_id") and self.cfg.get("refresh_token")):
             self._apply({})
             return
-        wait = getattr(self, "_blocked_until", 0) - time.time()
+        wait = self._blocked_left()
         if wait > 0:                                    # Spotify said to wait: don't ask before then
             raise RuntimeError(f"Spotify asked LEDBoard to slow down; checking again in {_dur(wait)} "
                                "(the current song stays on screen)")
@@ -173,7 +184,7 @@ class SpotifyBoard(Board):
                 wait = max(5, int(float(r.headers.get("Retry-After") or 30)))
             except ValueError:
                 wait = 30
-            self._blocked_until = time.time() + wait
+            self._blocked = (self._account(), time.time() + wait)
             log.warning("Spotify rate limit: waiting %s before checking again", _dur(wait))
             raise RuntimeError(f"Spotify asked LEDBoard to slow down; checking again in {_dur(wait)} "
                                "(the current song stays on screen)")
@@ -381,7 +392,7 @@ class SpotifyBoard(Board):
             return base                                 # changes arrive live; the checks are just a backup
         direct = self.cfg.get("source", "homeassistant") == "spotify"
         if direct:
-            wait = getattr(self, "_blocked_until", 0) - time.time()
+            wait = self._blocked_left()
             if wait > 0:
                 return min(3600.0, wait + 1)            # rate limited: next check once Spotify allows it
             base = max(2.0, base)                       # Spotify limits how often an app may ask
@@ -409,7 +420,7 @@ class SpotifyBoard(Board):
 
     def slides(self):
         out = []
-        blocked = getattr(self, "_blocked_until", 0) > time.time()
+        blocked = self._blocked_left() > 0
         for k, (n, at) in self.players.items():
             if not (n["playing"] or self.cfg.get("show_paused")):
                 continue
