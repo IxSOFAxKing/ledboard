@@ -494,7 +494,8 @@ Monitors that are down are always listed first; maintenance shows in blue and pe
 3. In Steam, open **Profile → Edit Profile → Privacy Settings** and set **Game details** to **Public**. Without that, Steam doesn't report the game you're playing.
 
 **Options:**
-- game icon or cover art
+- game icon or cover art. Cover art comes from Steam's current store artwork, with fallbacks to the header image and the icon.
+- **game hero banner as the background**: the wide banner from the top of the game's Steam library page fills the board, dimmed, with the icon or cover in front and outlined text on top. Games without a hero keep the plain background.
 - take over the display while playing
 - also show your avatar and status when you're online but not in a game
 

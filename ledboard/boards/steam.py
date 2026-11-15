@@ -17,7 +17,9 @@ import time
 import requests
 
 from .base import Board, organize
-from ..gfx import GRAY, WHITE, fetch_image
+from PIL import Image, ImageEnhance
+
+from ..gfx import GRAY, WHITE, fetch_image, trim_alpha
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +66,7 @@ class SteamBoard(Board):
                    "Skipped when you're not in a game (unless 'show when online' is on).")
     refresh = 60
     DEFAULTS = {"enabled": False, "duration": 12, "refresh": 60, "api_key": "", "steam_ids": [],
-                "takeover": False, "show_online": False, "art": "icon",
+                "takeover": False, "show_online": False, "art": "icon", "hero": False,
                 "show_friends": True, "friend_filter": [], "show_achievements": True, "event_minutes": 10}
     FIELDS = [
         {"key": "api_key", "label": "Steam Web API key", "type": "password",
@@ -74,6 +76,9 @@ class SteamBoard(Board):
                  "Add more for other people in the house. Steam privacy 'Game details' must be Public."},
         {"key": "art", "label": "Game art", "type": "select", "options": ["icon", "cover"],
          "option_labels": {"icon": "Game icon (made for small sizes)", "cover": "Cover art"}},
+        {"key": "hero", "label": "Game hero banner as the background", "type": "bool",
+         "help": "The wide banner from the top of the game's Steam library page fills the board (dimmed), with "
+                 "the game art above in front of it. Games without a hero keep the plain background."},
         {"key": "takeover", "label": "Take over the display while playing", "type": "bool"},
         {"key": "show_online", "label": "Also show when online but not in a game", "type": "bool"},
         {"key": "duration", "label": "Seconds on screen", "type": "number"},
@@ -90,7 +95,7 @@ class SteamBoard(Board):
     ]
     FIELDS = organize(FIELDS, [
         ("Basics", "Account", ["api_key", "steam_ids"]),
-        ("Screens", "Now playing", ["takeover", "show_online", "art"]),
+        ("Screens", "Now playing", ["takeover", "show_online", "art", "hero"]),
         ("Screens", "Friends & achievements", ["show_achievements", "show_friends", "friend_filter", "event_minutes"]),
         ("Advanced", "Timing", ["duration", "refresh"])], {"duration": "Seconds per screen"})
 
@@ -153,6 +158,7 @@ class SteamBoard(Board):
                 info["since"] = self._sessions[sid][1]
                 info.update(self._game_stats(sid, appid))
                 info["art"] = self._game_art(appid, info.get("icon_hash"))
+                info["hero"] = self._game_hero(appid) if self.cfg.get("hero") else None
             else:
                 self._sessions.pop(sid, None)
                 if self.cfg.get("show_online") and info["state"] and info["avatar"]:
@@ -279,6 +285,7 @@ class SteamBoard(Board):
             fmt = assets.get("asset_url_format")              # e.g. "steam/apps/570/${FILENAME}?t=1700000000"
             if fmt:
                 for kind, names in (("cover", ("library_capsule_2x", "library_capsule")),
+                                    ("hero", ("library_hero", "library_hero_2x")),
                                     ("header", ("header", "main_capsule", "small_capsule"))):
                     name = next((assets[n] for n in names if assets.get(n)), None)
                     if name:
@@ -296,6 +303,33 @@ class SteamBoard(Board):
                 log.info("Steam app details lookup failed for %s: %s", appid, e)
         cache[appid] = (out, time.time())
         return out
+
+    def _game_hero(self, appid):
+        """The game's library hero banner, cut to fill the board and dimmed so text reads on top (cached)."""
+        cache = self.__dict__.setdefault("_heroes", {})
+        hit = cache.get(appid)
+        if hit and (hit[0] is not None or time.time() - hit[1] < ART_RETRY):
+            return hit[0]
+        W, H = self.app.width, self.app.height
+        assets = self._store_assets(appid)
+        urls = [assets.get("hero"), ASSET_BASE + f"steam/apps/{appid}/library_hero.jpg",
+                f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/library_hero.jpg"]
+        img = None
+        for u in dict.fromkeys(u for u in urls if u):
+            src = fetch_image(u, W * 2, W * 2, trim=False)
+            if src is None:
+                continue
+            src = trim_alpha(src)                       # fetch_image pads to a square
+            if src.width < 8 or src.height < 4:
+                continue
+            # fill the width, then keep the middle band (heroes are about 3:1, the board is 4:1)
+            h = max(H, round(src.height * W / src.width))
+            src = src.convert("RGB").resize((W, h), Image.LANCZOS)
+            top = (h - H) // 2
+            img = ImageEnhance.Brightness(src.crop((0, top, W, top + H))).enhance(0.38).convert("RGBA")
+            break
+        cache[appid] = (img, time.time())
+        return img
 
     def _game_art(self, appid, icon_hash):
         """Art for a game: its cover (portrait) or icon, falling back step by step; the Steam badge is drawn
@@ -392,24 +426,39 @@ class SteamBoard(Board):
         if not p:
             return
         H, W = c.height, c.width
+        hero = p.get("hero") if p["appid"] else None
+        if hero is not None:
+            c.paste(hero, 0, 0)
         art = p.get("art")
         if art is not None:
+            if hero is not None:                        # a dark edge so the art stands out from the banner
+                bb = art.getbbox() or (0, 0, art.width, art.height)
+                c.rect(0, 0, min(W - 1, bb[2]), H - 1, (0, 0, 0))
             c.paste(art, 0, 0)
         else:
             self._steam_badge(c, 2, 2, H - 4)
         x0 = H + 3
+        # over the hero, text gets a dark shadow so it reads on a busy picture
+        text = self._shadow_scroll if hero is not None else (lambda c_, *a, **k: c_.scroll_text(*a, **k))
         if p["appid"]:
-            c.scroll_text(x0, W, 1, p["game"] or "In game", "6x10", WHITE, t)
+            text(c, x0, W, 1, p["game"] or "In game", "6x10", WHITE, t)
             mins = (time.time() - p.get("since", time.time())) / 60
-            c.scroll_text(x0, W, 12, f"PLAYING · {fmt_minutes(mins)}", "5x8", INGAME_GREEN, t)
+            text(c, x0, W, 12, f"PLAYING · {fmt_minutes(mins)}", "5x8", INGAME_GREEN, t)
             bits = [p["name"]]
             if p.get("total_minutes"):
                 bits.append(f"{round(p['total_minutes'] / 60):,} hrs total")
-            c.scroll_text(x0, W, H - 7, "  ·  ".join(bits), "4x6", GRAY, t)
+            text(c, x0, W, H - 7, "  ·  ".join(bits), "4x6", GRAY if hero is None else (215, 215, 215), t)
         else:
             c.scroll_text(x0, W, 3, p["name"], "6x10", WHITE, t)
             c.text(x0, 15, STATES.get(p["state"], "ONLINE"), "5x8", STEAM_BLUE)
             c.text(x0, H - 7, "STEAM", "4x6", GRAY)
+
+    @staticmethod
+    def _shadow_scroll(c, x0, x1, y, text, font, color, t, **kw):
+        """scroll_text with a 1-pixel dark outline all around (for text over a picture)."""
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (1, 1), (-1, 1), (1, -1), (-1, -1)):
+            c.scroll_text(x0 + dx, x1 + dx, y + dy, text, font, (0, 0, 0), t, **kw)
+        c.scroll_text(x0, x1, y, text, font, color, t, **kw)
 
     @staticmethod
     def _steam_badge(c, x, y, s):
