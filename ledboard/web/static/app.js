@@ -148,6 +148,7 @@ function renderStatus() {
     if (n === "spotify" && b.enabled) info += b.now ? ` · ${b.now.playing ? "▶" : "⏸"} ${b.now.title} — ${b.now.artist}` : " · nothing playing";
     if (n === "spotify" && b.enabled && b.live) info += ` · live updates ${b.live}`;
     if (n === "plex" && b.enabled) info += ` · ${b.sessions.length} stream(s)`;
+    if (n === "pcstats" && b.enabled && b.pc_note) info += ` · ${b.pc_note}`;
     if (n === "steam" && b.enabled && b.ha_game) info += ` · game seen by Home Assistant: ${b.ha_game}` + (b.ha_game_note ? ` (${b.ha_game_note})` : "");
     if (n === "uptime" && b.enabled && (b.monitor_names || []).length) info += ` · monitors: ${b.monitor_names.join(", ")}`;
     if (b.enabled && b.next_games) {

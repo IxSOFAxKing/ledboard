@@ -36,7 +36,12 @@ LAYOUTS = {
     "gauges": "Gauges (four round dials: CPU, GPU, RAM, temperature)",
     "graph": "Graph (CPU and GPU load over the last 10 minutes, with the numbers)",
     "gaming": "Gaming (the game you're playing, with big GPU / temperature / CPU numbers)",
+    "meters": "Meters (LED level meters with peak markers, like an equalizer)",
+    "split": "Split (GPU and CPU panels side by side, each with a mini graph)",
+    "spotlight": "Spotlight (one stat at a time in huge numbers, switching every few seconds)",
+    "thermo": "Thermometers (CPU and GPU temperatures as thermometers)",
 }
+PEAK_HOLD = 3.0            # seconds a meter's peak marker holds before it falls
 SHOW = {"online": "While the PC is on", "gaming": "Only while gaming", "always": "Always"}
 HISTORY_SECONDS = 600
 
@@ -166,6 +171,10 @@ class PCStatsBoard(Board):
             return None, ""
         unit = (st.get("attributes") or {}).get("unit_of_measurement") or ""
         if METRICS[key][1] == "temp":
+            celsius = (v - 32) * 5 / 9 if "F" in unit else v
+            if celsius <= 1 or celsius > 150:
+                # HASS.Agent reports 0 when it can't read the sensor (e.g. that GPU isn't supported): no reading
+                return None, ""
             want = self.cfg.get("temp_unit", "auto")
             is_f = "F" in unit
             if want == "c" and is_f:
@@ -183,6 +192,11 @@ class PCStatsBoard(Board):
 
     def _sample(self):
         now = time.time()
+        peaks = self.__dict__.setdefault("_peaks", {})
+        for key in ("cpu_load", "gpu_load", "ram", "cpu_temp", "gpu_temp"):
+            f = self._frac(key)                         # where the meter is (0..1), whatever the units
+            if f is not None and (key not in peaks or f >= self._peak_frac(key)):
+                peaks[key] = (f, now)
         cpu, gpu = self.value("cpu_load")[0], self.value("gpu_load")[0]
         if cpu is None and gpu is None:
             return
@@ -261,13 +275,22 @@ class PCStatsBoard(Board):
         s = super().status()
         s["pc"] = {k: self.value(k)[0] for k in METRICS if self.cfg.get(f"{k}_entity")}
         s["pc_online"] = self.online()
+        notes = []
+        for key in ("cpu_temp", "gpu_temp"):
+            ent = (self.cfg.get(f"{key}_entity") or "").strip()
+            st = self.states.get(ent) if ent else None
+            if st and self.value(key)[0] is None and str(st.get("state", "")).lower() not in OFF_STATES:
+                notes.append(f"{METRICS[key][0]} temperature sensor reads {st.get('state')} (no real reading)")
+        if notes:
+            s["pc_note"] = "; ".join(notes)
         return s
 
     # -- drawing ---------------------------------------------------------------------
     def render(self, c, slide, t):
         lay = self.cfg.get("layout", "bars")
-        {"gauges": self._render_gauges, "graph": self._render_graph, "gaming": self._render_gaming}.get(
-            lay, self._render_bars)(c, t)
+        {"gauges": self._render_gauges, "graph": self._render_graph, "gaming": self._render_gaming,
+         "meters": self._render_meters, "split": self._render_split, "spotlight": self._render_spotlight,
+         "thermo": self._render_thermo}.get(lay, self._render_bars)(c, t)
 
     def _deg(self, key):
         v, unit = self.value(key)
@@ -402,3 +425,157 @@ class PCStatsBoard(Board):
             c.text_centered(H - 6, label + ("°" if kind == "temp" else ""), "4x6", lcol, x0, x1)
             if i:
                 c.line(x0, 12, x0, H - 3, (35, 35, 42))
+
+    # -- more layouts ------------------------------------------------------------------
+    def _frac(self, key):
+        """0..1 for a metric: loads as %, temperatures from 30 to 100 °C."""
+        if METRICS[key][1] == "temp":
+            tc = self._temp_c(key)
+            return None if tc is None else max(0.0, min(1.0, (tc - 30) / 70))
+        v = self.value(key)[0]
+        return None if v is None else max(0.0, min(1.0, v / 100))
+
+    def _peak_frac(self, key):
+        """The meter's peak marker: the highest recent value, falling after PEAK_HOLD seconds."""
+        pk = self.__dict__.get("_peaks", {}).get(key)
+        if not pk:
+            return None
+        f, at = pk
+        age = time.time() - at
+        if age > PEAK_HOLD:
+            f -= (age - PEAK_HOLD) * 0.25                  # falls a quarter of the meter per second
+        cur = self._frac(key) or 0
+        return max(cur, min(1.0, f))
+
+    def _render_meters(self, c, t):
+        W, H = c.width, c.height
+        temp_key = "gpu_temp" if self.cfg.get("gpu_temp_entity") else "cpu_temp"
+        cols = [k for k in ("cpu_load", "gpu_load", "ram") if self.cfg.get(f"{k}_entity")]
+        if self.cfg.get(f"{temp_key}_entity"):
+            cols.append(temp_key)
+        if not cols:
+            return
+        cell = W // len(cols)
+        seg_n, seg_h, gap = 8, 2, 1
+        top = H - 8 - seg_n * (seg_h + gap) + gap
+        for i, key in enumerate(cols):
+            x = i * cell + 3
+            bw = 9
+            frac, peak = self._frac(key), self._peak_frac(key)
+            lit = 0 if frac is None else round(frac * seg_n)
+            for sgi in range(seg_n):
+                y1 = H - 9 - sgi * (seg_h + gap)
+                pos = (sgi + 0.5) / seg_n
+                col = GREEN if pos < 0.6 else YELLOW if pos < 0.85 else RED
+                c.rect(x, y1 - seg_h + 1, x + bw - 1, y1, col if sgi < lit else scale(col, 0.12))
+            if peak is not None and round(peak * seg_n) > lit:     # only when the recent peak is above the level now
+                pi = min(seg_n - 1, max(0, round(peak * seg_n) - 1))
+                y1 = H - 9 - pi * (seg_h + gap)
+                c.rect(x, y1 - seg_h + 1, x + bw - 1, y1, WHITE)
+            v, _u = self.value(key)
+            temp = METRICS[key][1] == "temp"
+            text = "--" if v is None else (f"{v:.0f}°" if temp else f"{v:.0f}")
+            col = level_color(self._temp_c(key) if temp else v, "temp" if temp else "load")
+            c.text(x + bw + 2, top + 2, text, "5x7", col)
+            c.text(x + bw + 2, top + 11, "%" if not temp else ("C" if "C" in (self.value(key)[1] or "°C") else "F"),
+                   "4x6", scale(WHITE, 0.5))
+            c.text_centered(H - 6, METRICS[key][0] + ("°" if temp else ""), "4x6", scale(WHITE, 0.75),
+                            i * cell, (i + 1) * cell)
+
+    def _spark(self, c, x0, x1, y0, y1, idx, col):
+        """A small step graph of the last few minutes of CPU (idx 1) or GPU (idx 2) load."""
+        now = time.time()
+        span = 300
+        pts = [(ts, vals[idx - 1]) for ts, *vals in self.history if now - ts <= span and vals[idx - 1] is not None]
+        prev = None
+        for ts, v in pts:
+            x = x1 - round((now - ts) / span * (x1 - x0))
+            y = y1 - round((y1 - y0) * max(0, min(100, v)) / 100)
+            if prev:
+                c.line(prev[0], prev[1], x, prev[1], col)
+                c.line(x, prev[1], x, y, col)
+            prev = (x, y)
+        if prev:
+            c.line(prev[0], prev[1], x1, prev[1], col)
+
+    def _render_split(self, c, t):
+        W, H = c.width, c.height
+        mid = W // 2
+        panels = (("GPU", "gpu_load", "gpu_temp", GPU_COLOR, 2, 0), ("CPU", "cpu_load", "cpu_temp", CPU_COLOR, 1, mid + 1))
+        for label, load, temp, col, idx, x0 in panels:
+            x1 = x0 + mid - 2
+            c.rect(x0, 0, x0 + 1, H - 1, scale(col, 0.7))
+            c.text(x0 + 4, 0, label, "5x7", col)
+            deg = self._deg(temp)
+            if deg:
+                c.text_right(x1, 0, deg, "5x7", level_color(self._temp_c(temp), "temp"))
+            v, _u = self.value(load)
+            text = "--" if v is None else f"{v:.0f}%"
+            c.text(x0 + 4, 9, text, "7x13B", level_color(v, "load"))
+            c.rect(x0 + 4, H - 7, x1, H - 1, (12, 12, 16))
+            self._spark(c, x0 + 4, x1, H - 7, H - 1, idx, scale(col, 0.9))
+        c.line(mid, 0, mid, H - 1, (30, 30, 36))
+
+    def _spot_items(self):
+        out = []
+        for key, label in (("gpu_load", "GPU LOAD"), ("gpu_temp", "GPU TEMP"), ("cpu_load", "CPU LOAD"),
+                           ("cpu_temp", "CPU TEMP"), ("ram", "MEMORY")):
+            if not self.cfg.get(f"{key}_entity"):
+                continue
+            v, unit = self.value(key)
+            temp = METRICS[key][1] == "temp"
+            big = "--" if v is None else (f"{v:.0f}°" if temp else f"{v:.0f}%")
+            col = level_color(self._temp_c(key) if temp else v, "temp" if temp else "load")
+            out.append((label, big, col, self._frac(key), GPU_COLOR if key.startswith("gpu") else
+                        CPU_COLOR if key.startswith("cpu") else (200, 200, 200)))
+        if self.cfg.get("net_down_entity") or self.cfg.get("net_up_entity"):
+            dv, du = self.value("net_down")
+            uv, uu = self.value("net_up")
+            out.append(("NETWORK", "↓" + fmt_rate(dv, du), CPU_COLOR, None, (200, 200, 200)))
+            out.append(("NETWORK", "↑" + fmt_rate(uv, uu), GPU_COLOR, None, (200, 200, 200)))
+        return out
+
+    def _render_spotlight(self, c, t):
+        W, H = c.width, c.height
+        items = self._spot_items()
+        if not items:
+            return
+        i = int(t // 3) % len(items)
+        label, big, col, frac, lcol = items[i]
+        font = "10x20" if c.text_width(big, "10x20") <= 68 else "7x13B"
+        c.text(2, (H - (20 if font == "10x20" else 13)) // 2, big, font, col)
+        x0 = 74
+        c.text(x0, 3, label.split()[0], "6x10", lcol)
+        if len(label.split()) > 1:
+            c.text(x0, 13, label.split()[1], "5x7", scale(WHITE, 0.7))
+        if frac is not None:
+            c.rect(x0, H - 6, W - 3, H - 4, DIM_TRACK)
+            c.rect(x0, H - 6, x0 + round((W - 3 - x0) * frac), H - 4, col)
+        for k in range(len(items)):                       # page dots
+            c.pixel(W - 2 - (len(items) - 1 - k) * 2, 0, WHITE if k == i else (50, 50, 56))
+
+    def _thermo(self, c, y, label, key, lcol):
+        W = c.width
+        tc = self._temp_c(key)
+        col = level_color(tc, "temp")
+        bx, by, r = 6, y + 6, 5
+        x0, x1 = bx + 3, 78
+        c.draw.rounded_rectangle((x0, by - 3, x1, by + 3), radius=3, outline=(80, 80, 90), fill=(14, 14, 18))
+        c.draw.ellipse((bx - r, by - r, bx + r, by + r), outline=(80, 80, 90), fill=col if tc is not None else (30, 30, 36))
+        if tc is not None:
+            fill = x0 + round((x1 - x0 - 2) * max(0.0, min(1.0, (tc - 20) / 80)))
+            c.rect(x0, by - 1, fill, by + 1, col)
+        for f in (0.25, 0.5, 0.75):
+            tx = x0 + round((x1 - x0) * f)
+            c.pixel(tx, by - 4, (70, 70, 80))
+        c.text(83, y + 3, label, "4x6", lcol)
+        c.text_right(W - 1, y + 1, self._deg(key) or "--", "6x10", col)
+
+    def _render_thermo(self, c, t):
+        rows = [(lbl, k, col) for lbl, k, col in (("CPU", "cpu_temp", CPU_COLOR), ("GPU", "gpu_temp", GPU_COLOR))
+                if self.cfg.get(f"{k}_entity")]
+        if not rows:
+            return
+        ys = [(c.height - 13) // 2] if len(rows) == 1 else [1, 17]
+        for (lbl, k, col), y in zip(rows, ys):
+            self._thermo(c, y, lbl, k, col)

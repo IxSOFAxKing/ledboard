@@ -501,6 +501,12 @@ Shows your PC's stats from Home Assistant: CPU and GPU load and temperatures, me
 - **Gauges**: four dials (CPU, GPU, RAM, temperature).
 - **Graph**: CPU and GPU load over the last 10 minutes, with the numbers.
 - **Gaming**: the game you're playing (from the Steam board) with big GPU, GPU temperature and CPU numbers.
+- **Meters**: LED level meters (green → yellow → red) for CPU, GPU, RAM and temperature. A white peak marker holds the recent maximum for a few seconds, then falls.
+- **Split**: GPU and CPU panels side by side, each with big load and temperature numbers and a 5-minute mini graph.
+- **Spotlight**: one stat at a time in huge numbers (GPU, CPU, temperatures, memory, network), switching every 3 seconds.
+- **Thermometers**: CPU and GPU temperatures as thermometers that fill and change color.
+
+A temperature sensor that reads 0 (HASS.Agent reports that when it can't read the sensor, for example an unsupported GPU) shows as "--" instead of a fake 0°C / 32°F, and the Status tab points it out.
 
 Values turn yellow and then red as they climb: loads at 60% and 85%, temperatures at 65°C and 80°C. **Show the board**: while the PC is on (the default; it hides when the sensors go unavailable), only while gaming, or always. It can also take over the display while you game.
 
