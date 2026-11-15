@@ -513,6 +513,12 @@ The session timer counts from when LEDBoard first sees you in a game.
 
 **Non-Steam games** (games added to Steam as shortcuts, for example Game Pass / UWP games through UWPHook) show as playing too, by name. Steam has no hours, achievements or store art for them. With a SteamGridDB API key (below), their artwork comes from SteamGridDB automatically (the top match for the game's name), and you can pick your own like any other game. Steam only reports a non-Steam game while you launch it through Steam and your profile's game details are public. The log shows a line like `Steam: adam is playing 'ARC Raiders' (… a non-Steam game)` each time Steam reports a game.
 
+**Games outside Steam (via Home Assistant):** for games Steam doesn't report, such as Game Pass or Epic games, or shortcuts launched through UWPHook. Let Home Assistant tell the board instead, for example with [HASS.Agent](https://github.com/hass-agent/HASS.Agent) on your gaming PC. Under **Steam → Screens → Games outside Steam**, list entities as `entity=Game name`:
+- `sensor.gaming_pc_arc_raiders=ARC Raiders`: a HASS.Agent **ProcessActive** sensor. The game counts as running while it's above 0, or on/true.
+- `sensor.gaming_pc_activewindow=Hades II|Balatro`: an **ActiveWindow** sensor. Whichever listed name appears in the window title counts as running.
+
+The board shows the game for the first Steam ID, like a non-Steam game: session timer, SteamGridDB artwork, and every layout. It follows the entities live, using the Home Assistant board's URL and token. The Status tab shows what Home Assistant sees.
+
 **Custom artwork (SteamGridDB):** pick community artwork for any game you've played.
 1. Get a free API key at <https://www.steamgriddb.com> (log in, then **Preferences → API**).
 2. Paste it under **Steam → Look → Custom artwork**.

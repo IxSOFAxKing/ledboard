@@ -57,6 +57,37 @@ def game_key(gameid, name):
     return None, False
 
 
+_OFF = {"", "unknown", "unavailable", "none", "off", "false", "no", "0", "idle", "not running", "stopped", "closed"}
+_ON = {"on", "true", "yes", "running", "playing", "active", "open"}
+
+
+def ha_game_name(st, names):
+    """The game an entity's state says is running, or None.
+
+    With names: on / true / a number above 0 means the first name; otherwise the first name that appears in
+    the state text (e.g. a window title). Without names: the state text itself is the game."""
+    state = str((st or {}).get("state") or "").strip()
+    lo = state.lower()
+    if lo in _OFF:
+        return None
+    try:
+        number = float(state)
+    except ValueError:
+        number = None
+    if number is not None and number <= 0:
+        return None
+    if names:
+        for n in names:
+            if n.lower() in lo:
+                return n
+        if lo in _ON or number is not None:
+            return names[0]
+        return None
+    if lo in _ON or number is not None:
+        return ((st.get("attributes") or {}).get("friendly_name") or "").strip() or None
+    return state
+
+
 def parse_id(text):
     """('id', steamid64) or ('vanity', name) from an ID, profile URL or custom URL name."""
     t = (text or "").strip().rstrip("/")
@@ -86,7 +117,7 @@ class SteamBoard(Board):
     refresh = 60
     DEFAULTS = {"enabled": False, "duration": 12, "refresh": 60, "api_key": "", "steam_ids": [],
                 "takeover": False, "show_online": False, "art": "icon", "hero": False, "layout": "classic",
-                "griddb_key": "", "art_overrides": {},
+                "griddb_key": "", "art_overrides": {}, "ha_games": [],
                 "show_friends": True, "friend_filter": [], "show_achievements": True, "event_minutes": 10}
     FIELDS = [
         {"key": "api_key", "label": "Steam Web API key", "type": "password",
@@ -107,6 +138,13 @@ class SteamBoard(Board):
          "help": "Free at steamgriddb.com: log in, then Preferences → API. Lets you pick community artwork for "
                  "your games below."},
         {"key": "art_overrides", "label": "Your games", "type": "steam_art", "section": "Custom artwork"},
+        {"key": "ha_games", "label": "Home Assistant entities that show a game is running (comma-separated)",
+         "type": "list", "datalist": "ha-entities",
+         "help": "For games Steam doesn't report (Game Pass, Epic, UWPHook shortcuts...). Write each as "
+                 "entity=Game name, e.g. sensor.gaming_pc_arc_raiders=ARC Raiders. The game counts as running "
+                 "while the entity is on / above 0, or while its text contains the game name (e.g. an active-window "
+                 "sensor: sensor.gaming_pc_activewindow=ARC Raiders|Hades II). Shown for the first Steam ID above, "
+                 "using the Home Assistant board's URL and token."},
         {"key": "takeover", "label": "Take over the display while playing", "type": "bool"},
         {"key": "show_online", "label": "Also show when online but not in a game", "type": "bool"},
         {"key": "duration", "label": "Seconds on screen", "type": "number"},
@@ -125,6 +163,7 @@ class SteamBoard(Board):
         ("Basics", "Account", ["api_key", "steam_ids"]),
         ("Screens", "Now playing", ["layout", "takeover", "show_online", "art", "hero"]),
         ("Screens", "Friends & achievements", ["show_achievements", "show_friends", "friend_filter", "event_minutes"]),
+        ("Screens", "Games outside Steam", ["ha_games"]),
         ("Look", "Custom artwork", ["griddb_key", "art_overrides"]),
         ("Advanced", "Timing", ["duration", "refresh"])], {"duration": "Seconds per screen"})
 
@@ -174,6 +213,7 @@ class SteamBoard(Board):
         summ = self._get("ISteamUser/GetPlayerSummaries/v2/", steamids=",".join(ids))
         players = {}
         now = time.time()
+        ha_game = self._ha_game()                       # a game Home Assistant sees running on your PC
         for p in (summ.get("response") or {}).get("players") or []:
             sid = p.get("steamid")
             appid, nonsteam = game_key(p.get("gameid"), p.get("gameextrainfo"))
@@ -186,6 +226,10 @@ class SteamBoard(Board):
             info = {"steamid": sid, "name": p.get("personaname", ""), "state": p.get("personastate", 0),
                     "game": p.get("gameextrainfo") or "", "appid": appid, "nonsteam": nonsteam,
                     "avatar": p.get("avatarmedium"), "private": p.get("communityvisibilitystate", 3) != 3}
+            if not appid and ha_game and ids and sid == ids[0]:
+                # Steam doesn't know about it, but Home Assistant sees it running: show it like a non-Steam game
+                appid, nonsteam = "ns:" + ha_game, True
+                info.update(game=ha_game, appid=appid, nonsteam=True, via_ha=True)
             if appid:
                 prev = self._sessions.get(sid)
                 if not prev or prev[0] != appid:
@@ -298,6 +342,73 @@ class SteamBoard(Board):
             log.debug("rarity unavailable: %s", e)
         self._rarity[appid] = (time.time(), out)
         return out
+
+    # -- games running outside Steam (seen by Home Assistant, e.g. via HASS.Agent) -------
+    def _ha_entries(self):
+        """[(entity_id, [game names])] from 'entity=Name|Other name' entries."""
+        out = []
+        for line in self.cfg.get("ha_games") or []:
+            if not isinstance(line, str) or "." not in line:
+                continue
+            ent, _, names = line.partition("=")
+            out.append((ent.strip(), [n.strip() for n in names.split("|") if n.strip()]))
+        return out
+
+    def _ha_game(self):
+        """The game Home Assistant currently sees running (first matching entity), or None."""
+        entries = self._ha_entries()
+        ws = getattr(self, "_ha_ws", None)
+        if not entries:
+            if ws:
+                ws.stop()
+                self._ha_ws = None
+            self.ha_game_note = None
+            return None
+        ha = self.app.boards.get("homeassistant")
+        hcfg = ha.cfg if ha else {}
+        base, token = (hcfg.get("url") or "").rstrip("/"), hcfg.get("token")
+        if not (base and token):
+            self.ha_game_note = "set the Home Assistant URL and token on the Home Assistant board"
+            return None
+        verify = bool(hcfg.get("verify_ssl", True))
+        self._ensure_ha_live(base, token, verify, [e for e, _n in entries])
+        headers = {"Authorization": f"Bearer {token}"}
+        found, notes = None, []
+        for ent, names in entries:
+            try:
+                r = requests.get(f"{base}/api/states/{ent}", headers=headers, timeout=10, verify=verify)
+            except requests.RequestException as e:
+                notes.append(f"{ent}: {e.__class__.__name__}")
+                continue
+            if r.status_code == 404:
+                notes.append(f"{ent}: not found in Home Assistant")
+                continue
+            if not r.ok:
+                notes.append(f"{ent}: HTTP {r.status_code}")
+                continue
+            name = ha_game_name(r.json(), names)
+            if name and not found:
+                found = name
+        if found != getattr(self, "_ha_last", None):
+            self._ha_last = found
+            log.info("Steam: Home Assistant %s", f"sees {found!r} running" if found else "sees no game running")
+        self.ha_game_note = "; ".join(notes) or None
+        return found
+
+    def _ensure_ha_live(self, base, token, verify, ents):
+        """Follow the entities live, so a game starting / closing shows within a second or two."""
+        from ..ha_ws import HAStateStream
+        sig = (base, token, verify, tuple(ents))
+        ws = getattr(self, "_ha_ws", None)
+        if ws and (ws.sig != sig or not ws.is_alive()):
+            ws.stop()
+            ws = self._ha_ws = None
+        if ws is None:
+            ws = self._ha_ws = HAStateStream(base, token, verify, ents, lambda _ent, _st: self.poke(),
+                                             keep_running=lambda: self.enabled and bool(self._ha_entries()),
+                                             name="ha-live-steam")
+            ws.sig = sig
+            ws.start()
 
     # -- games played (for picking custom artwork) ----------------------------------
     def _games_file(self):
@@ -664,4 +775,8 @@ class SteamBoard(Board):
     def status(self):
         s = super().status()
         s["players"] = [{k: p.get(k) for k in ("name", "game", "state", "private")} for p in self.players.values()]
+        if self._ha_entries():
+            s["ha_game"] = getattr(self, "_ha_last", None) or "none running"
+            if getattr(self, "ha_game_note", None):
+                s["ha_game_note"] = self.ha_game_note
         return s
