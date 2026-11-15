@@ -20,6 +20,7 @@ from .base import Board, organize
 from PIL import Image, ImageEnhance
 
 from ..gfx import GRAY, WHITE, fetch_image, trim_alpha
+from .steam_layouts import HERO_LAYOUTS, LAYOUTS, RENDERERS, render_party
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ class SteamBoard(Board):
                    "Skipped when you're not in a game (unless 'show when online' is on).")
     refresh = 60
     DEFAULTS = {"enabled": False, "duration": 12, "refresh": 60, "api_key": "", "steam_ids": [],
-                "takeover": False, "show_online": False, "art": "icon", "hero": False,
+                "takeover": False, "show_online": False, "art": "icon", "hero": False, "layout": "classic",
                 "show_friends": True, "friend_filter": [], "show_achievements": True, "event_minutes": 10}
     FIELDS = [
         {"key": "api_key", "label": "Steam Web API key", "type": "password",
@@ -74,11 +75,15 @@ class SteamBoard(Board):
         {"key": "steam_ids", "label": "Steam IDs / profile URLs (comma-separated)", "type": "list",
          "help": "Your profile URL (steamcommunity.com/id/yourname), custom URL name or 17-digit ID. "
                  "Add more for other people in the house. Steam privacy 'Game details' must be Public."},
+        {"key": "layout", "label": "Layout", "type": "select", "options": list(LAYOUTS), "option_labels": LAYOUTS,
+         "help": "Cinema and Banner use the game's hero banner (games without one fall back to Classic). Party "
+                 "shows everyone in the house at once when two or more people are online."},
         {"key": "art", "label": "Game art", "type": "select", "options": ["icon", "cover"],
          "option_labels": {"icon": "Game icon (made for small sizes)", "cover": "Cover art"}},
         {"key": "hero", "label": "Game hero banner as the background", "type": "bool",
          "help": "The wide banner from the top of the game's Steam library page fills the board (dimmed), with "
-                 "the game art above in front of it. Games without a hero keep the plain background."},
+                 "the game art above in front of it. Games without a hero keep the plain background. "
+                 "(Classic, Session timer and Stats card layouts.)"},
         {"key": "takeover", "label": "Take over the display while playing", "type": "bool"},
         {"key": "show_online", "label": "Also show when online but not in a game", "type": "bool"},
         {"key": "duration", "label": "Seconds on screen", "type": "number"},
@@ -95,7 +100,7 @@ class SteamBoard(Board):
     ]
     FIELDS = organize(FIELDS, [
         ("Basics", "Account", ["api_key", "steam_ids"]),
-        ("Screens", "Now playing", ["takeover", "show_online", "art", "hero"]),
+        ("Screens", "Now playing", ["layout", "takeover", "show_online", "art", "hero"]),
         ("Screens", "Friends & achievements", ["show_achievements", "show_friends", "friend_filter", "event_minutes"]),
         ("Advanced", "Timing", ["duration", "refresh"])], {"duration": "Seconds per screen"})
 
@@ -158,15 +163,21 @@ class SteamBoard(Board):
                 info["since"] = self._sessions[sid][1]
                 info.update(self._game_stats(sid, appid))
                 info["art"] = self._game_art(appid, info.get("icon_hash"))
-                info["hero"] = self._game_hero(appid) if self.cfg.get("hero") else None
+                want_hero = self.cfg.get("hero") or self._layout() in HERO_LAYOUTS
+                hero = self._game_hero(appid) if want_hero else None
+                info["hero"] = hero["dim"] if hero and self.cfg.get("hero") else None
+                info["hero_full"] = hero["full"] if hero else None
+                info["hero_banner"] = hero["banner"] if hero else None
             else:
                 self._sessions.pop(sid, None)
                 if self.cfg.get("show_online") and info["state"] and info["avatar"]:
                     info["art"] = fetch_image(info["avatar"], self.app.height, self.app.height)
+            if self._layout() == "party" and info["avatar"]:
+                info["avatar_small"] = fetch_image(info["avatar"], 9, 9)
             players[sid] = info
         self.players = players
         self._expire_events()
-        if self.cfg.get("show_achievements", True):
+        if self.cfg.get("show_achievements", True) or self._layout() == "stats":
             for sid, p in players.items():
                 if p["appid"]:
                     try:
@@ -221,6 +232,8 @@ class SteamBoard(Board):
         j = self._get("ISteamUserStats/GetPlayerAchievements/v1/", steamid=sid, appid=appid, l="english")
         stats = j.get("playerstats") or {}
         got = [a for a in stats.get("achievements") or [] if a.get("achieved")]
+        if stats.get("achievements"):                   # progress for the Stats card layout
+            p["achievements"] = (len(got), len(stats["achievements"]))
         newest = max((int(a.get("unlocktime") or 0) for a in got), default=0)
         key = (sid, appid)
         if key not in self._ach_seen:            # first look at this game: remember, don't announce old ones
@@ -264,7 +277,8 @@ class SteamBoard(Board):
             return {}
         for g in games:
             if str(g.get("appid")) == str(appid):
-                return {"total_minutes": g.get("playtime_forever"), "icon_hash": g.get("img_icon_url")}
+                return {"total_minutes": g.get("playtime_forever"), "recent_minutes": g.get("playtime_2weeks"),
+                        "icon_hash": g.get("img_icon_url")}
         return {}
 
     def _store_assets(self, appid):
@@ -305,7 +319,8 @@ class SteamBoard(Board):
         return out
 
     def _game_hero(self, appid):
-        """The game's library hero banner, cut to fill the board and dimmed so text reads on top (cached)."""
+        """The game's library hero banner, prepared for the board (cached): {'dim': background for text,
+        'full': brighter (Cinema), 'banner': fitted to the height with a fade on its left (Banner)}, or None."""
         cache = self.__dict__.setdefault("_heroes", {})
         hit = cache.get(appid)
         if hit and (hit[0] is not None or time.time() - hit[1] < ART_RETRY):
@@ -322,11 +337,23 @@ class SteamBoard(Board):
             src = trim_alpha(src)                       # fetch_image pads to a square
             if src.width < 8 or src.height < 4:
                 continue
+            src = src.convert("RGB")
             # fill the width, then keep the middle band (heroes are about 3:1, the board is 4:1)
             h = max(H, round(src.height * W / src.width))
-            src = src.convert("RGB").resize((W, h), Image.LANCZOS)
+            band = src.resize((W, h), Image.LANCZOS)
             top = (h - H) // 2
-            img = ImageEnhance.Brightness(src.crop((0, top, W, top + H))).enhance(0.38).convert("RGBA")
+            band = band.crop((0, top, W, top + H))
+            # banner: the whole hero at the board's height, fading into black on its left
+            bw = max(1, min(W, round(src.width * H / src.height)))
+            banner = ImageEnhance.Brightness(src.resize((bw, H), Image.LANCZOS)).enhance(0.8).convert("RGBA")
+            fade = max(1, bw * 2 // 3)                  # a long fade, so the text on the left stays readable
+            mask = Image.new("L", (bw, H), 255)
+            for x in range(fade):
+                mask.paste(round(255 * (x / fade) ** 1.8), (x, 0, x + 1, H))
+            banner.putalpha(mask)
+            img = {"dim": ImageEnhance.Brightness(band).enhance(0.38).convert("RGBA"),
+                   "full": ImageEnhance.Brightness(band).enhance(0.85).convert("RGBA"),
+                   "banner": banner}
             break
         cache[appid] = (img, time.time())
         return img
@@ -365,16 +392,29 @@ class SteamBoard(Board):
                 out.append(sid)
         return out
 
+    def _layout(self):
+        lay = self.cfg.get("layout", "classic")
+        return lay if lay in LAYOUTS else "classic"
+
+    def _party_pages(self):
+        vis = self._visible()
+        if self._layout() != "party" or len(vis) < 2:
+            return None
+        return [f"party:{i}" for i in range(0, len(vis), 3)]
+
     def slides(self):
         now = time.time()
         ev = [e["key"] for e in self.events if e["until"] > now and
               (self.cfg.get("show_friends", True) if e["kind"] == "friend" else self.cfg.get("show_achievements", True))]
-        return ev + self._visible()
+        return ev + (self._party_pages() or self._visible())
 
     def takeover_slides(self):
         if not self.cfg.get("takeover"):
             return []
-        return [sid for sid in self._visible() if self.players[sid]["appid"]]
+        playing = [sid for sid in self._visible() if self.players[sid]["appid"]]
+        if not playing:
+            return []
+        return self._party_pages() or playing
 
     def _render_friend(self, c, e, t):
         W, H = c.width, c.height
@@ -422,9 +462,22 @@ class SteamBoard(Board):
             if e:
                 (self._render_friend if e["kind"] == "friend" else self._render_achievement)(c, e, t)
             return
+        if isinstance(slide, str) and slide.startswith("party:"):
+            vis = [self.players[s] for s in self._visible()]
+            vis.sort(key=lambda p: (not p["appid"], p["name"].lower()))
+            i = int(slide.split(":")[1])
+            render_party(self, c, vis[i:i + 3], t)
+            return
         p = self.players.get(slide)
         if not p:
             return
+        fn = RENDERERS.get(self._layout()) if p["appid"] else None
+        if fn:
+            fn(self, c, p, t)
+        else:
+            self._render_classic(c, p, t)
+
+    def _render_classic(self, c, p, t):
         H, W = c.height, c.width
         hero = p.get("hero") if p["appid"] else None
         if hero is not None:

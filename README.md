@@ -493,6 +493,16 @@ Monitors that are down are always listed first; maintenance shows in blue and pe
 2. On the **Steam** board, paste the key and your **profile URL** (`https://steamcommunity.com/id/yourname`), custom URL name or 17-digit Steam ID. Add more, comma-separated, for others in the house.
 3. In Steam, open **Profile → Edit Profile → Privacy Settings** and set **Game details** to **Public**. Without that, Steam doesn't report the game you're playing.
 
+**Layouts:**
+- **Classic**: game art, name, session time and total hours.
+- **Cinema**: the game's hero banner, bright, with a slim bar along the bottom for the name and a ticking session clock.
+- **Banner**: the hero on the right, fading into black, with the game, session time and hours on the left.
+- **Session timer**: a big play-time clock that ticks up by the second, next to the game art.
+- **Stats card**: total hours, hours in the last 2 weeks, and achievement progress (earned / total, with a gold bar).
+- **Party**: when two or more people in the house are online, everyone at once, one per row: avatar, name, game and session time (or their status). With one person it shows Classic.
+
+Cinema and Banner fall back to Classic for games without a hero. The hero background switch below applies to Classic, Session timer and Stats card.
+
 **Options:**
 - game icon or cover art. Cover art comes from Steam's current store artwork, with fallbacks to the header image and the icon.
 - **game hero banner as the background**: the wide banner from the top of the game's Steam library page fills the board, dimmed, with the icon or cover in front and outlined text on top. Games without a hero keep the plain background.
