@@ -517,13 +517,18 @@ The session timer counts from when LEDBoard first sees you in a game.
 - `sensor.gaming_pc_arc_raiders=ARC Raiders`: a HASS.Agent **ProcessActive** sensor. The game counts as running while it's above 0, or on/true.
 - `sensor.gaming_pc_activewindow=Hades II|Balatro`: an **ActiveWindow** sensor. Whichever listed name appears in the window title counts as running.
 
-The board shows the game for the first Steam ID, like a non-Steam game: session timer, SteamGridDB artwork, and every layout. It follows the entities live, using the Home Assistant board's URL and token. The Status tab shows what Home Assistant sees.
+The board shows the game for the first Steam ID, like a non-Steam game: session timer, SteamGridDB artwork, and every layout. It follows the entities live, using the Home Assistant board's URL and token. The Status tab shows what Home Assistant sees. If you leave out `=Game name`, the board uses the entity's name minus its device's name, so "GamingPC Arc Raiders" from a PC called GamingPC becomes "Arc Raiders".
 
 **Custom artwork (SteamGridDB):** pick community artwork for any game you've played.
 1. Get a free API key at <https://www.steamgriddb.com> (log in, then **Preferences → API**).
 2. Paste it under **Steam → Look → Custom artwork**.
 
-The board remembers every game it sees anyone play, and lists them there, newest first. Each game has **Icon**, **Cover** and **Hero** buttons. Tap one to see SteamGridDB's artwork for that game, tap the one you like, then **Save**. The board uses it from then on: the icon or cover as the game art (depending on the **Game art** setting), and the hero wherever the hero banner shows. **↺** goes back to Steam's own artwork. The list of games is kept in `steam_games.json` next to the config file.
+The board remembers every game it sees anyone play, and lists them there, newest first. For each game:
+- **Name**: type your own name for the game. It's shown on the board and used to search SteamGridDB.
+- **Search**: find the right game on SteamGridDB yourself (for example the full game rather than its demo), and pick it from the results. ↺ goes back to the automatic match.
+- **✕** removes a game from the list. It comes back if it's played again.
+
+Each game also has **Icon**, **Cover** and **Hero** buttons. Tap one to see SteamGridDB's artwork for that game, tap the one you like, then **Save**. The board uses it from then on: the icon or cover as the game art (depending on the **Game art** setting), and the hero wherever the hero banner shows. **↺** goes back to Steam's own artwork. The list of games is kept in `steam_games.json` next to the config file.
 
 **Friends & achievements** (both on by default):
 - **Friend now playing**: when a friend starts a game. It uses the first Steam ID, and needs your friends list (and their game details) to be public. You can limit it to certain friends.

@@ -442,70 +442,121 @@ function entitiesField(obj, f) {
   return h("div", {}, h("div", { class: "muted small", style: "margin-bottom:6px" }, f.label), wrap);
 }
 
-// Steam: the games LEDBoard has seen you play, each with a SteamGridDB picker for its icon / cover / hero.
-// Picks are stored in obj.art_overrides = {appid: {icon|cover|hero: url, <kind>_thumb: thumbnail url}}.
+// Steam: the games LEDBoard has seen you play. Per game: your own name for it, which SteamGridDB game it is
+// (matched automatically or searched by hand), and an icon / cover / hero picked from SteamGridDB.
+// Stored in obj.art_overrides = {appid: {name, sgdb_id, sgdb_name, icon|cover|hero: url, <kind>_thumb: url}}.
 const ART_KINDS = { icon: "Icon", cover: "Cover", hero: "Hero" };
 function steamArtField(obj, f) {
   obj.art_overrides = obj.art_overrides || {};
   const wrap = h("div", { class: "steam-art" });
-  let games = null, open = null;         // open = {appid, kind, items | error | loading}
+  let games = null, open = null, search = null;   // open = {appid, kind, items|error|loading}; search = {appid, q, games|error|loading}
   const ago = (t) => {
     const d = Math.round((Date.now() / 1000 - t) / 86400);
     return !t ? "" : d <= 0 ? "played today" : d === 1 ? "played yesterday" : `played ${d} days ago`;
   };
-  const pick = async (appid, kind) => {
-    if (open && open.appid === appid && open.kind === kind) { open = null; draw(); return; }
-    open = { appid, kind, loading: true }; draw();
-    try { open.items = (await api(`/api/steam/griddb?appid=${encodeURIComponent(appid)}&kind=${kind}`)).items; }
+  const ov = (appid) => obj.art_overrides[appid] = obj.art_overrides[appid] || {};
+  const tidy = (appid) => { if (!Object.keys(obj.art_overrides[appid] || {}).length) delete obj.art_overrides[appid]; };
+  const pick = async (g, kind) => {
+    if (open && open.appid === g.appid && open.kind === kind) { open = null; draw(); return; }
+    const o = obj.art_overrides[g.appid] || {};
+    open = { appid: g.appid, kind, loading: true }; search = null; draw();
+    const qs = new URLSearchParams({ appid: g.appid, kind });
+    if (o.sgdb_id) qs.set("sgdb_id", o.sgdb_id);
+    if (o.name) qs.set("name", o.name);
+    try { open.items = (await api(`/api/steam/griddb?${qs}`)).items; }
     catch (e) { open.error = e.message; }
     open.loading = false; draw();
   };
+  const runSearch = async () => {
+    search.loading = true; search.error = null; draw();
+    try { search.games = (await api(`/api/steam/griddb/search?q=${encodeURIComponent(search.q)}`)).games; }
+    catch (e) { search.error = e.message; }
+    search.loading = false; draw();
+  };
   const choose = (appid, kind, item) => {
-    const o = obj.art_overrides[appid] = obj.art_overrides[appid] || {};
-    o[kind] = item.url; o[kind + "_thumb"] = item.thumb || item.url;
+    const o = ov(appid); o[kind] = item.url; o[kind + "_thumb"] = item.thumb || item.url;
     open = null; markDirty(); draw();
   };
   const reset = (appid, kind) => {
-    const o = obj.art_overrides[appid] || {};
-    delete o[kind]; delete o[kind + "_thumb"];
-    if (!Object.keys(o).length) delete obj.art_overrides[appid];
-    markDirty(); draw();
+    const o = ov(appid); delete o[kind]; delete o[kind + "_thumb"]; tidy(appid); markDirty(); draw();
+  };
+  const forget = async (g) => {
+    if (!confirm(`Remove "${(obj.art_overrides[g.appid] || {}).name || g.name}" from this list? It comes back if it's played again.`)) return;
+    try { await api("/api/steam/games/forget", { appid: g.appid }); } catch (e) { toast(e.message, true); return; }
+    games = games.filter((x) => x.appid !== g.appid);
+    if (obj.art_overrides[g.appid]) { delete obj.art_overrides[g.appid]; markDirty(); }
+    draw();
   };
   const draw = () => {
     if (games === null) { wrap.replaceChildren(h("div", { class: "muted small" }, "Loading your games…")); return; }
     if (!games.length) {
-      wrap.replaceChildren(h("div", { class: "muted small" },
-        "Games show up here after the Steam board sees someone play them."));
+      wrap.replaceChildren(h("div", { class: "muted small" }, "Games show up here after the Steam board sees someone play them."));
       return;
     }
     wrap.replaceChildren(...games.map((g) => {
       const o = obj.art_overrides[g.appid] || {};
+      const nonSteam = String(g.appid).startsWith("ns:");
+      // name (shown on the board, and used to search SteamGridDB)
+      const nameRow = h("div", { class: "row nowrap art-head" },
+        h("input", { type: "text", value: o.name || "", placeholder: g.name, title: "Name shown on the board",
+          oninput: (e) => { const v = e.target.value.trim(); const x = ov(g.appid); if (v) x.name = v; else delete x.name; tidy(g.appid); markDirty(); } }),
+        h("button", { class: "small", title: "Remove from this list", onclick: () => forget(g) }, "✕"));
+      // which SteamGridDB game
+      const matched = o.sgdb_name ? `SteamGridDB: ${o.sgdb_name}` : `SteamGridDB: ${nonSteam || o.name ? "found by name" : "matched by Steam ID"}`;
+      const sgdbRow = h("div", { class: "row nowrap small" },
+        h("span", { class: "muted" }, matched),
+        h("button", { class: "small" + (search && search.appid === g.appid ? " primary" : ""), onclick: () => {
+          search = search && search.appid === g.appid ? null : { appid: g.appid, q: o.name || g.name }; open = null; draw();
+          if (search) setTimeout(() => wrap.querySelector(".sgdb-q")?.focus(), 0);
+        } }, "Search"),
+        o.sgdb_id ? h("button", { class: "small", title: "Back to the automatic match", onclick: () => {
+          delete o.sgdb_id; delete o.sgdb_name; tidy(g.appid); markDirty(); draw(); } }, "↺") : null);
+      let searchBox = null;
+      if (search && search.appid === g.appid) {
+        const results = search.loading ? h("div", { class: "muted small" }, "Searching SteamGridDB…")
+          : search.error ? h("div", { class: "err-line" }, search.error)
+          : search.games ? (search.games.length ? h("div", { class: "sgdb-results" }, search.games.map((x) =>
+              h("button", { class: "small" + (o.sgdb_id === x.id ? " primary" : ""), onclick: () => {
+                const y = ov(g.appid); y.sgdb_id = x.id; y.sgdb_name = x.name + (x.year ? ` (${x.year})` : "");
+                search = null; open = null; markDirty(); draw();
+              } }, x.name + (x.year ? ` (${x.year})` : "") + (x.verified ? " ✓" : ""))))
+            : h("div", { class: "muted small" }, "No games found. Try a shorter or different name."))
+          : null;
+        searchBox = h("div", { class: "sgdb-search" },
+          h("div", { class: "row nowrap" },
+            h("input", { type: "text", class: "sgdb-q", value: search.q, placeholder: "Game name",
+              oninput: (e) => { search.q = e.target.value; }, onkeydown: (e) => { if (e.key === "Enter") runSearch(); } }),
+            h("button", { class: "small primary", onclick: runSearch }, "Search")),
+          results);
+      }
       const kinds = Object.entries(ART_KINDS).map(([kind, label]) => h("div", { class: "art-slot" },
         o[kind + "_thumb"] ? h("img", { class: "art-thumb " + kind, src: o[kind + "_thumb"], alt: label, loading: "lazy" })
-                           : h("div", { class: "art-thumb empty " + kind }, "Steam"),
+                           : h("div", { class: "art-thumb empty " + kind }, nonSteam ? "auto" : "Steam"),
         h("div", { class: "row nowrap" },
           h("button", { class: "small" + (open && open.appid === g.appid && open.kind === kind ? " primary" : ""),
-            onclick: () => pick(g.appid, kind) }, label),
-          o[kind] ? h("button", { class: "small", title: `Back to Steam's ${label.toLowerCase()}`, onclick: () => reset(g.appid, kind) }, "↺") : null)));
+            onclick: () => pick(g, kind) }, label),
+          o[kind] ? h("button", { class: "small", title: "Back to the default", onclick: () => reset(g.appid, kind) }, "↺") : null)));
       let picker = null;
       if (open && open.appid === g.appid) {
         picker = open.loading ? h("div", { class: "muted small" }, "Loading artwork from SteamGridDB…")
           : open.error ? h("div", { class: "err-line" }, open.error)
-          : !open.items.length ? h("div", { class: "muted small" }, `SteamGridDB has no ${ART_KINDS[open.kind].toLowerCase()} artwork for this game.`)
+          : !open.items.length ? h("div", { class: "muted small" }, `SteamGridDB has no ${ART_KINDS[open.kind].toLowerCase()} artwork for this game. Try Search to pick the right game.`)
           : h("div", { class: "art-grid " + open.kind }, open.items.map((it) =>
               h("img", { src: it.thumb || it.url, loading: "lazy", title: `${it.width}×${it.height}${it.style ? " · " + it.style : ""}`,
                 class: o[open.kind] === it.url ? "on" : "", onclick: () => choose(g.appid, open.kind, it) })));
       }
       return h("div", { class: "art-game" },
-        h("div", { class: "art-name" }, g.name, h("span", { class: "muted small" },
-          (String(g.appid).startsWith("ns:") ? " · non-Steam game" : "") + " · " + ago(g.last))),
+        nameRow,
+        h("div", { class: "muted small" }, (nonSteam ? "non-Steam game · " : "") + ago(g.last) + (o.name ? ` · was "${g.name}"` : "")),
+        sgdbRow, searchBox,
         h("div", { class: "art-slots" }, kinds), picker);
     }));
   };
   api("/api/steam/games").then((j) => { games = j.games || []; draw(); }).catch(() => { games = []; draw(); });
   draw();
   return h("div", {}, h("div", { class: "muted small", style: "margin-bottom:6px" }, f.label), wrap,
-    h("div", { class: "help" }, "Tap Icon, Cover or Hero to pick artwork from SteamGridDB, then Save. ↺ goes back to Steam's own."));
+    h("div", { class: "help" }, "Type a name to rename a game on the board. Search picks which SteamGridDB game to take artwork from. " +
+      "Icon / Cover / Hero pick the artwork. Then Save. ↺ undoes a choice."));
 }
 
 // A row of buttons that each send {action, board, kind} to /api/control, then jump to the board.

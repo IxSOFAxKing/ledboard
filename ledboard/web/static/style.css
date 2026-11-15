@@ -194,3 +194,7 @@ a.button:hover, label.button:hover { border-color: #3a4350; }
 .art-grid.cover img { aspect-ratio: 2 / 3; object-fit: cover; }
 .art-grid.hero img { aspect-ratio: 3 / 1; object-fit: cover; }
 .art-grid img.on, .art-grid img:hover { border-color: var(--accent, #3b9cff); }
+.art-head input { flex: 1; font-weight: 600; }
+.sgdb-search { display: flex; flex-direction: column; gap: 6px; }
+.sgdb-search input { flex: 1; }
+.sgdb-results { display: flex; flex-wrap: wrap; gap: 6px; }

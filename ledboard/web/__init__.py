@@ -289,10 +289,26 @@ def create_app(engine):
         if not st or not (appid.isdigit() or (appid.startswith("ns:") and len(appid) > 3)) \
                 or kind not in ("icon", "cover", "hero"):
             return jsonify({"error": "bad request"}), 400
+        sgdb_id = request.args.get("sgdb_id", "")
         try:
-            return jsonify({"items": st.griddb(appid, kind)})
+            return jsonify({"items": st.griddb(appid, kind, sgdb_id=int(sgdb_id) if sgdb_id.isdigit() else None,
+                                               name=(request.args.get("name") or "").strip() or None)})
         except Exception as e:
             return jsonify({"error": str(e)}), 400
+
+    @app.get("/api/steam/griddb/search")
+    def steam_griddb_search():
+        st = engine.boards.get("steam")
+        try:
+            return jsonify({"games": st.griddb_search(request.args.get("q", "")) if st else []})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
+    @app.post("/api/steam/games/forget")
+    def steam_games_forget():
+        st = engine.boards.get("steam")
+        appid = str((request.get_json(force=True) or {}).get("appid") or "")
+        return jsonify({"ok": bool(st and appid and st.forget_game(appid))})
 
     # -- home assistant / plex helpers ------------------------------------------------
     def _creds(board, keys):

@@ -61,7 +61,7 @@ _OFF = {"", "unknown", "unavailable", "none", "off", "false", "no", "0", "idle",
 _ON = {"on", "true", "yes", "running", "playing", "active", "open"}
 
 
-def ha_game_name(st, names):
+def ha_game_name(st, names, device=""):
     """The game an entity's state says is running, or None.
 
     With names: on / true / a number above 0 means the first name; otherwise the first name that appears in
@@ -84,8 +84,17 @@ def ha_game_name(st, names):
             return names[0]
         return None
     if lo in _ON or number is not None:
-        return ((st.get("attributes") or {}).get("friendly_name") or "").strip() or None
+        return _strip_device((st.get("attributes") or {}).get("friendly_name") or "", device) or None
     return state
+
+
+def _strip_device(friendly, device):
+    """'GamingPC Arc Raiders' -> 'Arc Raiders' when the sensor belongs to the device 'GamingPC': Home Assistant
+    names a device's sensors '<device> <sensor>' (HASS.Agent sensors all start with the PC's name)."""
+    friendly, device = friendly.strip(), (device or "").strip()
+    if device and friendly.lower().startswith(device.lower() + " ") and len(friendly) > len(device) + 1:
+        return friendly[len(device):].strip()
+    return friendly
 
 
 def parse_id(text):
@@ -230,6 +239,8 @@ class SteamBoard(Board):
                 # Steam doesn't know about it, but Home Assistant sees it running: show it like a non-Steam game
                 appid, nonsteam = "ns:" + ha_game, True
                 info.update(game=ha_game, appid=appid, nonsteam=True, via_ha=True)
+            if appid and self._game_setting(appid, "name"):
+                info["game"] = self._game_setting(appid, "name")      # your name for the game (web UI)
             if appid:
                 prev = self._sessions.get(sid)
                 if not prev or prev[0] != appid:
@@ -386,7 +397,7 @@ class SteamBoard(Board):
             if not r.ok:
                 notes.append(f"{ent}: HTTP {r.status_code}")
                 continue
-            name = ha_game_name(r.json(), names)
+            name = ha_game_name(r.json(), names, "" if names else self._ha_device_name(base, headers, verify, ent))
             if name and not found:
                 found = name
         if found != getattr(self, "_ha_last", None):
@@ -394,6 +405,21 @@ class SteamBoard(Board):
             log.info("Steam: Home Assistant %s", f"sees {found!r} running" if found else "sees no game running")
         self.ha_game_note = "; ".join(notes) or None
         return found
+
+    def _ha_device_name(self, base, headers, verify, ent):
+        """The name of the device an entity belongs to (e.g. the PC running HASS.Agent), from Home Assistant."""
+        cache = self.__dict__.setdefault("_ha_devices", {})
+        if ent in cache:
+            return cache[ent]
+        tpl = ("{% set d = device_id('" + ent.replace("'", "") + "') %}"
+               "{{ (device_attr(d, 'name_by_user') or device_attr(d, 'name') or '') if d else '' }}")
+        try:
+            r = requests.post(f"{base}/api/template", headers=headers, json={"template": tpl}, timeout=10, verify=verify)
+            name = r.text.strip() if r.ok else ""
+        except requests.RequestException:
+            return ""
+        cache[ent] = name
+        return name
 
     def _ensure_ha_live(self, base, token, verify, ents):
         """Follow the entities live, so a game starting / closing shows within a second or two."""
@@ -443,19 +469,64 @@ class SteamBoard(Board):
         except OSError as e:
             log.info("couldn't save the Steam games list: %s", e)
 
-    def griddb(self, appid, kind):
-        """Artwork choices from SteamGridDB for a game: [{"id", "url", "thumb", "width", "height", "style"}]."""
+    def _griddb_headers(self):
         key = (self.cfg.get("griddb_key") or "").strip()
         if not key:
-            raise RuntimeError("Add your SteamGridDB API key first (Steam → Custom artwork)")
+            raise RuntimeError("Add your SteamGridDB API key first (Steam → Custom artwork), then Save")
+        return {"Authorization": f"Bearer {key}"}
+
+    def griddb_search(self, term):
+        """SteamGridDB games matching a search: [{"id", "name", "year"}]."""
+        from urllib.parse import quote
+        term = (term or "").strip()
+        if not term:
+            return []
+        r = requests.get(f"{GRIDDB_URL}/search/autocomplete/{quote(term)}", headers=self._griddb_headers(), timeout=15)
+        if r.status_code == 401:
+            raise RuntimeError("SteamGridDB didn't accept the API key")
+        r.raise_for_status()
+        out = []
+        for d in (r.json().get("data") or [])[:15]:
+            if isinstance(d, dict) and d.get("id"):
+                year = ""
+                if d.get("release_date"):
+                    try:
+                        year = time.strftime("%Y", time.gmtime(int(d["release_date"])))
+                    except (TypeError, ValueError, OverflowError):
+                        year = ""
+                out.append({"id": d["id"], "name": d.get("name") or "", "year": year, "verified": bool(d.get("verified"))})
+        return out
+
+    def forget_game(self, appid):
+        """Remove a game from the remembered list (it comes back if it's played again)."""
+        games = self.known_games()
+        if games.pop(str(appid), None) is None:
+            return False
+        try:
+            path = self._games_file()
+            with open(path + ".tmp", "w") as f:
+                json.dump(games, f, indent=1)
+            os.replace(path + ".tmp", path)
+        except OSError as e:
+            log.info("couldn't save the Steam games list: %s", e)
+        return True
+
+    def griddb(self, appid, kind, sgdb_id=None, name=None):
+        """Artwork choices from SteamGridDB for a game: [{"id", "url", "thumb", "width", "height", "style"}].
+
+        Uses (in order) the SteamGridDB game picked in the web UI, a search for the game's name (non-Steam
+        games, or a renamed game), or the Steam app ID."""
         path, params = {"cover": ("grids", {"dimensions": "600x900,342x482,660x930"}),
                         "hero": ("heroes", {}), "icon": ("icons", {})}[kind]
-        headers = {"Authorization": f"Bearer {key}"}
-        if str(appid).startswith("ns:"):
-            gid = self._griddb_game_id(str(appid)[3:], headers)
+        headers = self._griddb_headers()
+        gid = sgdb_id or self._game_setting(appid, "sgdb_id")
+        search = name or self._game_setting(appid, "name")
+        if not gid and (str(appid).startswith("ns:") or search):
+            gid = self._griddb_game_id(search or str(appid)[3:], headers)
             if gid is None:
                 return []
-            url = f"{GRIDDB_URL}/{path}/game/{gid}"
+        if gid:
+            url = f"{GRIDDB_URL}/{path}/game/{int(gid)}"
         else:
             url = f"{GRIDDB_URL}/{path}/steam/{int(appid)}"
         r = requests.get(url, headers=headers, params=dict(params, nsfw="false"), timeout=15)
@@ -490,7 +561,8 @@ class SteamBoard(Board):
         if not (self.cfg.get("griddb_key") or "").strip():
             return None
         cache = self.__dict__.setdefault("_sgdb_auto", {})
-        hit = cache.get((appid, kind))
+        sig = (appid, kind, self._game_setting(appid, "sgdb_id"), self._game_setting(appid, "name"))
+        hit = cache.get(sig)
         if hit and (hit[0] or time.time() - hit[1] < ART_RETRY):
             return hit[0]
         try:
@@ -499,8 +571,13 @@ class SteamBoard(Board):
             log.info("SteamGridDB artwork for %s unavailable: %s", appid, e)
             items = []
         url = items[0]["url"] if items else None
-        cache[(appid, kind)] = (url, time.time())
+        cache[sig] = (url, time.time())
         return url
+
+    def _game_setting(self, appid, key):
+        """A per-game setting from the web UI's game list: 'name' (display / search name) or 'sgdb_id'."""
+        v = ((self.cfg.get("art_overrides") or {}).get(str(appid)) or {}).get(key)
+        return v.strip() if isinstance(v, str) and v.strip() else (v if isinstance(v, int) else None)
 
     def _override(self, appid, kind):
         o = (self.cfg.get("art_overrides") or {}).get(str(appid)) or {}
@@ -563,7 +640,8 @@ class SteamBoard(Board):
         'full': brighter (Cinema), 'banner': fitted to the height with a fade on its left (Banner)}, or None."""
         cache = self.__dict__.setdefault("_heroes", {})
         custom = self._override(appid, "hero")
-        hit = cache.get((appid, custom))
+        csig = (appid, custom, self._game_setting(appid, "sgdb_id"), self._game_setting(appid, "name"))
+        hit = cache.get(csig)
         if hit and (hit[0] is not None or time.time() - hit[1] < ART_RETRY):
             return hit[0]
         W, H = self.app.width, self.app.height
@@ -599,7 +677,7 @@ class SteamBoard(Board):
                    "full": ImageEnhance.Brightness(band).enhance(0.85).convert("RGBA"),
                    "banner": banner}
             break
-        cache[(appid, custom)] = (img, time.time())
+        cache[csig] = (img, time.time())
         return img
 
     def _game_art(self, appid, icon_hash):
@@ -607,7 +685,7 @@ class SteamBoard(Board):
         only when nothing at all can be downloaded (tried again after a while)."""
         style = self.cfg.get("art", "icon")
         custom = self._override(appid, style)
-        key = (appid, style, icon_hash, custom)
+        key = (appid, style, icon_hash, custom, self._game_setting(appid, "sgdb_id"), self._game_setting(appid, "name"))
         hit = self._art.get(key)
         if hit and (hit[0] is not None or time.time() - hit[1] < ART_RETRY):
             return hit[0]
