@@ -41,6 +41,22 @@ INGAME_GREEN = (144, 186, 60)
 STATES = {0: "OFFLINE", 1: "ONLINE", 2: "BUSY", 3: "AWAY", 4: "SNOOZE", 5: "LOOKING TO TRADE", 6: "LOOKING TO PLAY"}
 
 
+def game_key(gameid, name):
+    """(key, non_steam) for what Steam says someone is playing.
+
+    Steam games have their app ID. Non-Steam games added to Steam (shortcuts, e.g. via UWPHook) come with
+    only a name, or a large 64-bit shortcut ID that isn't a real app: those are keyed 'ns:<name>'."""
+    try:
+        gid = int(gameid) if gameid else 0
+    except (TypeError, ValueError):
+        gid = 0
+    if 0 < gid < 2 ** 32:
+        return str(gid), False
+    if gid or name:
+        return "ns:" + (name or str(gid)), True
+    return None, False
+
+
 def parse_id(text):
     """('id', steamid64) or ('vanity', name) from an ID, profile URL or custom URL name."""
     t = (text or "").strip().rstrip("/")
@@ -160,17 +176,24 @@ class SteamBoard(Board):
         now = time.time()
         for p in (summ.get("response") or {}).get("players") or []:
             sid = p.get("steamid")
-            appid = p.get("gameid")
+            appid, nonsteam = game_key(p.get("gameid"), p.get("gameextrainfo"))
+            seen = (p.get("gameid"), p.get("gameextrainfo"))
+            if self.__dict__.setdefault("_seen_game", {}).get(sid) != seen:
+                self._seen_game[sid] = seen
+                if any(seen):
+                    log.info("Steam: %s is playing %r (game id %s%s)", p.get("personaname"), seen[1], seen[0],
+                             ", a non-Steam game" if nonsteam else "")
             info = {"steamid": sid, "name": p.get("personaname", ""), "state": p.get("personastate", 0),
-                    "game": p.get("gameextrainfo") or "", "appid": appid, "avatar": p.get("avatarmedium"),
-                    "private": p.get("communityvisibilitystate", 3) != 3}
+                    "game": p.get("gameextrainfo") or "", "appid": appid, "nonsteam": nonsteam,
+                    "avatar": p.get("avatarmedium"), "private": p.get("communityvisibilitystate", 3) != 3}
             if appid:
                 prev = self._sessions.get(sid)
                 if not prev or prev[0] != appid:
                     self._sessions[sid] = (appid, now)
                 info["since"] = self._sessions[sid][1]
                 self._remember_game(appid, info["game"])
-                info.update(self._game_stats(sid, appid))
+                if not nonsteam:                        # hours / icon only exist for Steam games
+                    info.update(self._game_stats(sid, appid))
                 info["art"] = self._game_art(appid, info.get("icon_hash"))
                 want_hero = self.cfg.get("hero") or self._layout() in HERO_LAYOUTS
                 hero = self._game_hero(appid) if want_hero else None
@@ -188,7 +211,7 @@ class SteamBoard(Board):
         self._expire_events()
         if self.cfg.get("show_achievements", True) or self._layout() == "stats":
             for sid, p in players.items():
-                if p["appid"]:
+                if p["appid"] and not p.get("nonsteam"):
                     try:
                         self._check_achievements(sid, p)
                     except Exception as e:
@@ -224,7 +247,7 @@ class SteamBoard(Board):
             for p in (summ.get("response") or {}).get("players") or []:
                 if wanted and (p.get("personaname") or "").lower() not in wanted:
                     continue
-                now_playing[p["steamid"]] = (p.get("gameid"), p)
+                now_playing[p["steamid"]] = (game_key(p.get("gameid"), p.get("gameextrainfo"))[0], p)
         first = self._friend_games is None
         prev = self._friend_games or {}
         for sid, (appid, p) in now_playing.items():
@@ -316,8 +339,15 @@ class SteamBoard(Board):
             raise RuntimeError("Add your SteamGridDB API key first (Steam → Custom artwork)")
         path, params = {"cover": ("grids", {"dimensions": "600x900,342x482,660x930"}),
                         "hero": ("heroes", {}), "icon": ("icons", {})}[kind]
-        r = requests.get(f"{GRIDDB_URL}/{path}/steam/{int(appid)}", headers={"Authorization": f"Bearer {key}"},
-                         params=dict(params, nsfw="false"), timeout=15)
+        headers = {"Authorization": f"Bearer {key}"}
+        if str(appid).startswith("ns:"):
+            gid = self._griddb_game_id(str(appid)[3:], headers)
+            if gid is None:
+                return []
+            url = f"{GRIDDB_URL}/{path}/game/{gid}"
+        else:
+            url = f"{GRIDDB_URL}/{path}/steam/{int(appid)}"
+        r = requests.get(url, headers=headers, params=dict(params, nsfw="false"), timeout=15)
         if r.status_code == 401:
             raise RuntimeError("SteamGridDB didn't accept the API key")
         if r.status_code == 404:
@@ -328,6 +358,38 @@ class SteamBoard(Board):
             if isinstance(d, dict) and d.get("url"):
                 out.append({k: d.get(k) for k in ("id", "url", "thumb", "width", "height", "style")})
         return out
+
+    def _griddb_game_id(self, name, headers):
+        """SteamGridDB's game ID for a game name (best search match), or None."""
+        cache = self.__dict__.setdefault("_sgdb_ids", {})
+        if name in cache:
+            return cache[name]
+        from urllib.parse import quote
+        r = requests.get(f"{GRIDDB_URL}/search/autocomplete/{quote(name)}", headers=headers, timeout=15)
+        if r.status_code == 401:
+            raise RuntimeError("SteamGridDB didn't accept the API key")
+        r.raise_for_status()
+        hits = [d for d in r.json().get("data") or [] if isinstance(d, dict) and d.get("id")]
+        exact = [d for d in hits if (d.get("name") or "").strip().lower() == name.strip().lower()]
+        cache[name] = (exact or hits or [{}])[0].get("id")
+        return cache[name]
+
+    def _griddb_auto(self, appid, kind):
+        """The top SteamGridDB artwork for a non-Steam game (when there's an API key), or None."""
+        if not (self.cfg.get("griddb_key") or "").strip():
+            return None
+        cache = self.__dict__.setdefault("_sgdb_auto", {})
+        hit = cache.get((appid, kind))
+        if hit and (hit[0] or time.time() - hit[1] < ART_RETRY):
+            return hit[0]
+        try:
+            items = self.griddb(appid, kind)
+        except Exception as e:
+            log.info("SteamGridDB artwork for %s unavailable: %s", appid, e)
+            items = []
+        url = items[0]["url"] if items else None
+        cache[(appid, kind)] = (url, time.time())
+        return url
 
     def _override(self, appid, kind):
         o = (self.cfg.get("art_overrides") or {}).get(str(appid)) or {}
@@ -394,9 +456,12 @@ class SteamBoard(Board):
         if hit and (hit[0] is not None or time.time() - hit[1] < ART_RETRY):
             return hit[0]
         W, H = self.app.width, self.app.height
-        assets = self._store_assets(appid)
-        urls = [custom, assets.get("hero"), ASSET_BASE + f"steam/apps/{appid}/library_hero.jpg",
-                f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/library_hero.jpg"]
+        if str(appid).startswith("ns:"):
+            urls = [custom, self._griddb_auto(appid, "hero")]
+        else:
+            assets = self._store_assets(appid)
+            urls = [custom, assets.get("hero"), ASSET_BASE + f"steam/apps/{appid}/library_hero.jpg",
+                    f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/library_hero.jpg"]
         img = None
         for u in dict.fromkeys(u for u in urls if u):
             src = fetch_image(u, W * 2, W * 2, trim=False)
@@ -438,13 +503,15 @@ class SteamBoard(Board):
         H = self.app.height
         icon = ICON_URL.format(appid=appid, hash=icon_hash) if icon_hash else None
         old = [COVER_URL.format(appid=appid), ASSET_BASE + f"steam/apps/{appid}/library_600x900.jpg"]
-        if style == "cover":
+        if str(appid).startswith("ns:"):
+            # a non-Steam game: Steam has no art for it, so SteamGridDB's top match by name
+            urls = [self._griddb_auto(appid, style)] + ([self._griddb_auto(appid, "cover")] if style == "icon" else [])
+        elif style == "cover":
             assets = self._store_assets(appid)
             urls = [assets.get("cover")] + old + [assets.get("header"), HEADER_URL.format(appid=appid), icon]
         else:
             urls = [icon] + old + [HEADER_URL.format(appid=appid)]
-        if custom:
-            urls.insert(0, custom)                      # your pick from SteamGridDB comes first
+        urls.insert(0, custom)                          # your pick from SteamGridDB comes first
         img = None
         for u in dict.fromkeys(u for u in urls if u):
             img = fetch_image(u, H, H)

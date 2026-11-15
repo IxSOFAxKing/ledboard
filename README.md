@@ -511,6 +511,8 @@ Cinema and Banner fall back to Classic for games without a hero. The hero backgr
 
 The session timer counts from when LEDBoard first sees you in a game.
 
+**Non-Steam games** (games added to Steam as shortcuts, for example Game Pass / UWP games through UWPHook) show as playing too, by name. Steam has no hours, achievements or store art for them. With a SteamGridDB API key (below), their artwork comes from SteamGridDB automatically (the top match for the game's name), and you can pick your own like any other game. Steam only reports a non-Steam game while you launch it through Steam and your profile's game details are public. The log shows a line like `Steam: adam is playing 'ARC Raiders' (… a non-Steam game)` each time Steam reports a game.
+
 **Custom artwork (SteamGridDB):** pick community artwork for any game you've played.
 1. Get a free API key at <https://www.steamgriddb.com> (log in, then **Preferences → API**).
 2. Paste it under **Steam → Look → Custom artwork**.

@@ -286,7 +286,8 @@ def create_app(engine):
     def steam_griddb():
         st = engine.boards.get("steam")
         appid, kind = request.args.get("appid", ""), request.args.get("kind", "")
-        if not st or not appid.isdigit() or kind not in ("icon", "cover", "hero"):
+        if not st or not (appid.isdigit() or (appid.startswith("ns:") and len(appid) > 3)) \
+                or kind not in ("icon", "cover", "hero"):
             return jsonify({"error": "bad request"}), 400
         try:
             return jsonify({"items": st.griddb(appid, kind)})

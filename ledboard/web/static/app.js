@@ -455,7 +455,7 @@ function steamArtField(obj, f) {
   const pick = async (appid, kind) => {
     if (open && open.appid === appid && open.kind === kind) { open = null; draw(); return; }
     open = { appid, kind, loading: true }; draw();
-    try { open.items = (await api(`/api/steam/griddb?appid=${appid}&kind=${kind}`)).items; }
+    try { open.items = (await api(`/api/steam/griddb?appid=${encodeURIComponent(appid)}&kind=${kind}`)).items; }
     catch (e) { open.error = e.message; }
     open.loading = false; draw();
   };
@@ -496,7 +496,8 @@ function steamArtField(obj, f) {
                 class: o[open.kind] === it.url ? "on" : "", onclick: () => choose(g.appid, open.kind, it) })));
       }
       return h("div", { class: "art-game" },
-        h("div", { class: "art-name" }, g.name, h("span", { class: "muted small" }, " · " + ago(g.last))),
+        h("div", { class: "art-name" }, g.name, h("span", { class: "muted small" },
+          (String(g.appid).startsWith("ns:") ? " · non-Steam game" : "") + " · " + ago(g.last))),
         h("div", { class: "art-slots" }, kinds), picker);
     }));
   };
