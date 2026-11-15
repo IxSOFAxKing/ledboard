@@ -394,6 +394,8 @@ You can also show only bouts with a favorite, and have the board **take over the
 
 LEDBoard saves the refresh token, so you only do this once.
 
+Spotify limits how often an app can ask for the current song. With the Spotify Web API source, the board checks at most every 2 seconds while music plays and every 10 seconds when nothing is playing. If Spotify still says "too many requests", the board waits as long as Spotify asks before checking again; the Status tab shows how long, and the current song stays on screen. Use a separate Spotify app for LEDBoard rather than Home Assistant's, so the two don't share a limit.
+
 **How quickly songs update:** the progress bar moves smoothly on its own, but the title, artist and art change when the board checks. That happens every **Check every** seconds (5 by default) and again right after the current song should end, so songs that change on their own show up almost instantly. A skip shows up at the next check: lower **Check every** to 2–3 seconds to see skips sooner.
 
 **Live updates from Home Assistant** (on by default): the board keeps a live connection to Home Assistant (its WebSocket API, using the same URL and token), so a new song, skip or pause shows up the instant the player changes in Home Assistant. The regular checks keep running as a backup and take over if the connection drops; it reconnects by itself, for example after Home Assistant restarts. The Status tab shows "live updates on" when it's connected.

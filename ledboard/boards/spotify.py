@@ -31,6 +31,16 @@ SCOPES = "user-read-currently-playing user-read-playback-state"
 GREEN = (30, 215, 96)
 
 
+def _dur(secs):
+    """'45 s', '12 min' or '3 h 5 min' for a wait time."""
+    secs = int(round(secs))
+    if secs < 120:
+        return f"{secs} s"
+    if secs < 3600:
+        return f"{secs // 60} min"
+    return f"{secs // 3600} h {secs % 3600 // 60} min"
+
+
 class SpotifyBoard(Board):
     name = "spotify"
     title = "Now Playing (Spotify)"
@@ -146,18 +156,31 @@ class SpotifyBoard(Board):
         if not (self.cfg.get("client_id") and self.cfg.get("refresh_token")):
             self._apply({})
             return
+        wait = getattr(self, "_blocked_until", 0) - time.time()
+        if wait > 0:                                    # Spotify said to wait: don't ask before then
+            raise RuntimeError(f"Spotify asked LEDBoard to slow down; checking again in {_dur(wait)} "
+                               "(the current song stays on screen)")
         r = requests.get(f"{API}/me/player/currently-playing", timeout=10,
                          params={"additional_types": "track,episode"},
                          headers={"Authorization": f"Bearer {self._token()}"})
         if r.status_code == 401:
             self.access_token = None
             raise RuntimeError("access token rejected; will refresh")
-        if r.status_code == 204 or not r.content:
+        if r.status_code == 429:
+            # too many requests: Spotify says how long to wait (Retry-After, seconds). Asking again sooner
+            # only extends the wait, so honor it, and keep showing what we have meanwhile.
+            try:
+                wait = max(5, int(float(r.headers.get("Retry-After") or 30)))
+            except ValueError:
+                wait = 30
+            self._blocked_until = time.time() + wait
+            log.warning("Spotify rate limit: waiting %s before checking again", _dur(wait))
+            raise RuntimeError(f"Spotify asked LEDBoard to slow down; checking again in {_dur(wait)} "
+                               "(the current song stays on screen)")
+        r.raise_for_status()
+        if r.status_code == 204 or not r.content:      # nothing playing
             self._apply({})
             return
-        if r.status_code == 429:
-            raise RuntimeError("rate limited by Spotify")
-        r.raise_for_status()
         now = self.parse(r.json(), self.app.height)
         self._apply({"spotify": (now, time.time())} if now else {})
 
@@ -356,8 +379,16 @@ class SpotifyBoard(Board):
         base = super().interval()
         if self.cfg.get("source", "homeassistant") == "homeassistant" and self._live_ok():
             return base                                 # changes arrive live; the checks are just a backup
+        direct = self.cfg.get("source", "homeassistant") == "spotify"
+        if direct:
+            wait = getattr(self, "_blocked_until", 0) - time.time()
+            if wait > 0:
+                return min(3600.0, wait + 1)            # rate limited: next check once Spotify allows it
+            base = max(2.0, base)                       # Spotify limits how often an app may ask
+            if not any(n.get("playing") for n, _at in self.players.values()):
+                return max(base, 10.0)                  # nothing playing: check every 10 s
         if getattr(self, "_confirm_soon", False):
-            return 1.0                                  # confirm a song change quickly
+            return 1.5 if direct else 1.0               # confirm a song change quickly
         best = base
         now = time.time()
         at_end = self.__dict__.setdefault("_at_end", {})
@@ -377,7 +408,18 @@ class SpotifyBoard(Board):
         return best
 
     def slides(self):
-        return [k for k, (n, _) in self.players.items() if n["playing"] or self.cfg.get("show_paused")]
+        out = []
+        blocked = getattr(self, "_blocked_until", 0) > time.time()
+        for k, (n, at) in self.players.items():
+            if not (n["playing"] or self.cfg.get("show_paused")):
+                continue
+            if blocked and n.get("duration"):
+                # can't ask Spotify right now: stop showing a song once it's been over for 30 s
+                left = (n["duration"] - n["progress"]) / 1000 - (time.time() - at)
+                if left < -30:
+                    continue
+            out.append(k)
+        return out
 
     def takeover_slides(self):
         return self.slides() if self.cfg.get("takeover") else []
