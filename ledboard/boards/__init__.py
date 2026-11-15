@@ -6,6 +6,7 @@ from .clock import ClockBoard
 from .homeassistant import HomeAssistantBoard
 from .klipper import KlipperBoard
 from .message import MessageBoard
+from .pcstats import PCStatsBoard
 from .plex import PlexBoard
 from .sports import LEAGUE_BOARDS, LEAGUES, LeagueBoard
 from .spotify import SpotifyBoard
@@ -16,7 +17,7 @@ from .weather import WeatherBoard
 from .weather_alerts import WeatherAlertsBoard
 
 BOARD_CLASSES = {cls.name: cls for cls in (
-    *LEAGUE_BOARDS, UFCBoard, WeatherBoard, WeatherAlertsBoard, SpotifyBoard, SteamBoard, PlexBoard, HomeAssistantBoard, UptimeBoard, KlipperBoard, ClockBoard, AmbientBoard, MessageBoard)}
+    *LEAGUE_BOARDS, UFCBoard, WeatherBoard, WeatherAlertsBoard, SpotifyBoard, SteamBoard, PlexBoard, HomeAssistantBoard, UptimeBoard, PCStatsBoard, KlipperBoard, ClockBoard, AmbientBoard, MessageBoard)}
 
 
 def board_defaults():

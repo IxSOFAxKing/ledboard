@@ -379,8 +379,11 @@ function renderField(obj, f, onDepChange) {
       "Plays the celebration now, then this board's games, exactly as it would after a real score.");
     case "actions": return actionsField(f, f, f.label, f.help);
     case "spotify_auth": return spotifyAuthField(obj);
+    case "pc_discover": return pcDiscoverField(obj, f);
     default:
-      return field(f.label, h("input", { type: "text", value: val ?? "", oninput: (e) => set(e.target.value) }), f.help);
+      return field(f.label, h("input", { type: "text", value: val ?? "", placeholder: f.placeholder || null, list: f.datalist || null,
+        onfocus: () => { if (f.datalist === "ha-entities" && !haEntitiesLoaded) loadHaEntities(); },
+        oninput: (e) => set(e.target.value) }), f.help);
   }
 }
 
@@ -559,6 +562,23 @@ function steamArtField(obj, f) {
       "Icon / Cover / Hero pick the artwork. Then Save. ↺ undoes a choice."));
 }
 
+// Gaming PC: look through Home Assistant for CPU / GPU / memory / network sensors and fill in the boxes.
+function pcDiscoverField(obj, f) {
+  const out = h("div", { class: "muted small" });
+  const btn = h("button", { class: "small", onclick: async () => {
+    btn.disabled = true; out.textContent = "Looking through Home Assistant…";
+    try {
+      const found = (await api("/api/pcstats/discover")).found || {};
+      const keys = Object.keys(found);
+      keys.forEach((k) => { obj[k + "_entity"] = found[k]; });
+      if (keys.length) { markDirty(); renderBoards(); toast(`Found ${keys.length} sensor${keys.length > 1 ? "s" : ""}. Check them, then Save.`); }
+      else out.textContent = "No CPU / GPU / memory sensors found. Is HASS.Agent connected to Home Assistant?";
+    } catch (e) { out.textContent = e.message; }
+    finally { btn.disabled = false; }
+  } }, "🔍 " + f.label);
+  return field("", h("div", {}, btn, out), f.help);
+}
+
 // A row of buttons that each send {action, board, kind} to /api/control, then jump to the board.
 function actionsField(f, schemaField, label, help) {
   const board = Object.keys(SCHEMA).find((n) => SCHEMA[n].fields.includes(schemaField));
@@ -591,7 +611,9 @@ function geocodeField(obj, f) {
 }
 
 // Fills the entity autocomplete lists from Home Assistant (unsaved URL/token from the HA form win).
+let haEntitiesLoaded = false;
 async function loadHaEntities(ha) {
+  haEntitiesLoaded = true;
   ha = ha || draft.boards.homeassistant || {};
   try {
     const j = await api("/api/homeassistant/entities", { url: ha.url, token: ha.token, verify_ssl: ha.verify_ssl });
@@ -599,7 +621,7 @@ async function loadHaEntities(ha) {
     $("#ha-entities").replaceChildren(...j.entities.map(opt));
     $("#ha-media-players").replaceChildren(...j.entities.filter((e) => e.entity_id.startsWith("media_player.")).map(opt));
     toast(`Loaded ${j.entities.length} entities from Home Assistant — start typing to pick one`);
-  } catch (e) { toast("Home Assistant: " + e.message, true); }
+  } catch (e) { haEntitiesLoaded = false; toast("Home Assistant: " + e.message, true); }
 }
 
 function spotifyAuthField(obj) {

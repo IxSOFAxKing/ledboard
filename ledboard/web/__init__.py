@@ -296,6 +296,14 @@ def create_app(engine):
         except Exception as e:
             return jsonify({"error": str(e)}), 400
 
+    @app.get("/api/pcstats/discover")
+    def pcstats_discover():
+        b = engine.boards.get("pcstats")
+        try:
+            return jsonify({"found": b.discover() if b else {}})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
     @app.get("/api/steam/griddb/search")
     def steam_griddb_search():
         st = engine.boards.get("steam")

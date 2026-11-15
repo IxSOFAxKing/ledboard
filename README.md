@@ -11,6 +11,7 @@ It's built for two chained 64×32 panels (128×32), and the layouts scale to oth
 | **Now Playing** | Album art, scrolling title and artist, and an animated wavy progress bar (Material 3 style; a straight bar is an option), from a **Home Assistant media player** (HA's Spotify integration, Sonos and so on) or directly from the Spotify API. It's skipped when nothing is playing and can take over the display while music plays. |
 | **Steam** | What you're playing on Steam: the game icon, name, session time and total hours. It can take over the display while you play, and supports several players. Also "friend now playing" and "achievement unlocked" (with how rare it is) screens. |
 | **Plex** | Active streams (movies, TV, music) with the poster, title, S/E or artist, who's watching, and a wavy (or straight) progress bar. You can filter by user. Plus a carousel of recently added movies and episodes. |
+| **Gaming PC** | Your PC's CPU and GPU load and temperatures, memory and network from Home Assistant (e.g. HASS.Agent), live, as bars, gauges, a graph, or a gaming view with the current game. |
 | **Server Status** | Your Uptime Kuma monitors: green/red dots and response times, and an automatic critical alert when one goes down that clears when it's back. |
 | **Home Assistant** | Any entities (sensors, locks, doors, lights, thermostats, and so on) at 1, 2 or 3 per screen, with automatic formatting and colors. |
 | **3D Printer (Klipper)** | Print progress from Klipper via Moonraker: the model thumbnail or a live camera snapshot, progress, time left or finish time, layer, nozzle and bed temperatures, and paused, finished and error states. |
@@ -487,6 +488,21 @@ Monitors that are down are always listed first; maintenance shows in blue and pe
 - **Heartbeat bars**: 3 monitors per page, each with its 24-hour uptime and a row of its recent checks as green / red bars, like Uptime Kuma's own page.
 - **One at a time**: a big check / cross badge, the name, status and response time, 24-hour uptime, and a graph of recent response times (red lines where a check failed). With "only show when something is down", it cycles through just the broken ones and shows the error message.
 - **Summary**: a single screen: "ALL SYSTEMS OPERATIONAL" with a shield, or "OUTAGE" with what's down.
+
+### Gaming PC (HASS.Agent)
+
+Shows your PC's stats from Home Assistant: CPU and GPU load and temperatures, memory, and network. Any Home Assistant sensors work; [HASS.Agent](https://github.com/hass-agent/HASS.Agent) on the PC is the easy way to get them. It uses the Home Assistant board's URL and token, and follows the sensors live.
+
+1. In HASS.Agent, add sensors: **CpuLoad**, **GpuLoad**, **GpuTemperature**, **MemoryUsage**, plus a CPU temperature and network sensors if you have them. Set their update interval to 5–10 seconds for a lively board.
+2. On the **Gaming PC** board, click **Find my PC's sensors**, check what it filled in, and **Save**.
+
+**Layouts:**
+- **Bars**: a bar per stat with its value and temperature.
+- **Gauges**: four dials (CPU, GPU, RAM, temperature).
+- **Graph**: CPU and GPU load over the last 10 minutes, with the numbers.
+- **Gaming**: the game you're playing (from the Steam board) with big GPU, GPU temperature and CPU numbers.
+
+Values turn yellow and then red as they climb: loads at 60% and 85%, temperatures at 65°C and 80°C. **Show the board**: while the PC is on (the default; it hides when the sensors go unavailable), only while gaming, or always. It can also take over the display while you game.
 
 ### Steam
 1. Get a free **Steam Web API key** at <https://steamcommunity.com/dev/apikey>. Any domain name works, for example `ledboard`.
