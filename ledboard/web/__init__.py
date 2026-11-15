@@ -271,6 +271,28 @@ def create_app(engine):
         engine.boards["spotify"].players = {}
         return jsonify({"ok": True})
 
+    # -- steam: games played + SteamGridDB artwork ---------------------------------------
+    @app.get("/api/steam/games")
+    def steam_games():
+        st = engine.boards.get("steam")
+        if not st:
+            return jsonify({"games": []})
+        games = [{"appid": k, "name": v.get("name") or f"App {k}", "last": v.get("last", 0)}
+                 for k, v in st.known_games().items()]
+        games.sort(key=lambda g: -g["last"])
+        return jsonify({"games": games})
+
+    @app.get("/api/steam/griddb")
+    def steam_griddb():
+        st = engine.boards.get("steam")
+        appid, kind = request.args.get("appid", ""), request.args.get("kind", "")
+        if not st or not appid.isdigit() or kind not in ("icon", "cover", "hero"):
+            return jsonify({"error": "bad request"}), 400
+        try:
+            return jsonify({"items": st.griddb(appid, kind)})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 400
+
     # -- home assistant / plex helpers ------------------------------------------------
     def _creds(board, keys):
         """Use values from the request (unsaved form) falling back to saved config."""

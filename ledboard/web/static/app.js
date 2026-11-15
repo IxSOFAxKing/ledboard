@@ -371,6 +371,7 @@ function renderField(obj, f, onDepChange) {
         h("button", { class: "small", onclick: () => loadHaEntities() }, "Load from HA")), f.help);
     }
     case "entities": return entitiesField(obj, f);
+    case "steam_art": return steamArtField(obj, f);
     case "screens": return screensField(obj, f, onDepChange);
     case "geocode": return geocodeField(obj, f);
     case "simulate": return actionsField({ ...f, action: "simulate" }, f, "Simulate a score",
@@ -438,6 +439,71 @@ function entitiesField(obj, f) {
   };
   draw();
   return h("div", {}, h("div", { class: "muted small", style: "margin-bottom:6px" }, f.label), wrap);
+}
+
+// Steam: the games LEDBoard has seen you play, each with a SteamGridDB picker for its icon / cover / hero.
+// Picks are stored in obj.art_overrides = {appid: {icon|cover|hero: url, <kind>_thumb: thumbnail url}}.
+const ART_KINDS = { icon: "Icon", cover: "Cover", hero: "Hero" };
+function steamArtField(obj, f) {
+  obj.art_overrides = obj.art_overrides || {};
+  const wrap = h("div", { class: "steam-art" });
+  let games = null, open = null;         // open = {appid, kind, items | error | loading}
+  const ago = (t) => {
+    const d = Math.round((Date.now() / 1000 - t) / 86400);
+    return !t ? "" : d <= 0 ? "played today" : d === 1 ? "played yesterday" : `played ${d} days ago`;
+  };
+  const pick = async (appid, kind) => {
+    if (open && open.appid === appid && open.kind === kind) { open = null; draw(); return; }
+    open = { appid, kind, loading: true }; draw();
+    try { open.items = (await api(`/api/steam/griddb?appid=${appid}&kind=${kind}`)).items; }
+    catch (e) { open.error = e.message; }
+    open.loading = false; draw();
+  };
+  const choose = (appid, kind, item) => {
+    const o = obj.art_overrides[appid] = obj.art_overrides[appid] || {};
+    o[kind] = item.url; o[kind + "_thumb"] = item.thumb || item.url;
+    open = null; markDirty(); draw();
+  };
+  const reset = (appid, kind) => {
+    const o = obj.art_overrides[appid] || {};
+    delete o[kind]; delete o[kind + "_thumb"];
+    if (!Object.keys(o).length) delete obj.art_overrides[appid];
+    markDirty(); draw();
+  };
+  const draw = () => {
+    if (games === null) { wrap.replaceChildren(h("div", { class: "muted small" }, "Loading your games…")); return; }
+    if (!games.length) {
+      wrap.replaceChildren(h("div", { class: "muted small" },
+        "Games show up here after the Steam board sees someone play them."));
+      return;
+    }
+    wrap.replaceChildren(...games.map((g) => {
+      const o = obj.art_overrides[g.appid] || {};
+      const kinds = Object.entries(ART_KINDS).map(([kind, label]) => h("div", { class: "art-slot" },
+        o[kind + "_thumb"] ? h("img", { class: "art-thumb " + kind, src: o[kind + "_thumb"], alt: label, loading: "lazy" })
+                           : h("div", { class: "art-thumb empty " + kind }, "Steam"),
+        h("div", { class: "row nowrap" },
+          h("button", { class: "small" + (open && open.appid === g.appid && open.kind === kind ? " primary" : ""),
+            onclick: () => pick(g.appid, kind) }, label),
+          o[kind] ? h("button", { class: "small", title: `Back to Steam's ${label.toLowerCase()}`, onclick: () => reset(g.appid, kind) }, "↺") : null)));
+      let picker = null;
+      if (open && open.appid === g.appid) {
+        picker = open.loading ? h("div", { class: "muted small" }, "Loading artwork from SteamGridDB…")
+          : open.error ? h("div", { class: "err-line" }, open.error)
+          : !open.items.length ? h("div", { class: "muted small" }, `SteamGridDB has no ${ART_KINDS[open.kind].toLowerCase()} artwork for this game.`)
+          : h("div", { class: "art-grid " + open.kind }, open.items.map((it) =>
+              h("img", { src: it.thumb || it.url, loading: "lazy", title: `${it.width}×${it.height}${it.style ? " · " + it.style : ""}`,
+                class: o[open.kind] === it.url ? "on" : "", onclick: () => choose(g.appid, open.kind, it) })));
+      }
+      return h("div", { class: "art-game" },
+        h("div", { class: "art-name" }, g.name, h("span", { class: "muted small" }, " · " + ago(g.last))),
+        h("div", { class: "art-slots" }, kinds), picker);
+    }));
+  };
+  api("/api/steam/games").then((j) => { games = j.games || []; draw(); }).catch(() => { games = []; draw(); });
+  draw();
+  return h("div", {}, h("div", { class: "muted small", style: "margin-bottom:6px" }, f.label), wrap,
+    h("div", { class: "help" }, "Tap Icon, Cover or Hero to pick artwork from SteamGridDB, then Save. ↺ goes back to Steam's own."));
 }
 
 // A row of buttons that each send {action, board, kind} to /api/control, then jump to the board.

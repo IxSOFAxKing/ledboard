@@ -511,6 +511,12 @@ Cinema and Banner fall back to Classic for games without a hero. The hero backgr
 
 The session timer counts from when LEDBoard first sees you in a game.
 
+**Custom artwork (SteamGridDB):** pick community artwork for any game you've played.
+1. Get a free API key at <https://www.steamgriddb.com> (log in, then **Preferences → API**).
+2. Paste it under **Steam → Look → Custom artwork**.
+
+The board remembers every game it sees anyone play, and lists them there, newest first. Each game has **Icon**, **Cover** and **Hero** buttons. Tap one to see SteamGridDB's artwork for that game, tap the one you like, then **Save**. The board uses it from then on: the icon or cover as the game art (depending on the **Game art** setting), and the hero wherever the hero banner shows. **↺** goes back to Steam's own artwork. The list of games is kept in `steam_games.json` next to the config file.
+
 **Friends & achievements** (both on by default):
 - **Friend now playing**: when a friend starts a game. It uses the first Steam ID, and needs your friends list (and their game details) to be public. You can limit it to certain friends.
 - **Achievement unlocked**: a trophy, the achievement, the game and how rare it is (from Steam's global stats). Achievements you already had are never announced.

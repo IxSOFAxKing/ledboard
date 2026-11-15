@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 
@@ -33,6 +34,7 @@ HEADER_URL = "https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/header.j
 ASSET_BASE = "https://shared.cloudflare.steamstatic.com/store_item_assets/"
 STORE_ITEMS_URL = "https://api.steampowered.com/IStoreBrowseService/GetItems/v1/"
 APPDETAILS_URL = "https://store.steampowered.com/api/appdetails"
+GRIDDB_URL = "https://www.steamgriddb.com/api/v2"
 ART_RETRY = 1800          # seconds before trying again for a game whose art couldn't be downloaded
 STEAM_BLUE = (102, 192, 244)
 INGAME_GREEN = (144, 186, 60)
@@ -68,6 +70,7 @@ class SteamBoard(Board):
     refresh = 60
     DEFAULTS = {"enabled": False, "duration": 12, "refresh": 60, "api_key": "", "steam_ids": [],
                 "takeover": False, "show_online": False, "art": "icon", "hero": False, "layout": "classic",
+                "griddb_key": "", "art_overrides": {},
                 "show_friends": True, "friend_filter": [], "show_achievements": True, "event_minutes": 10}
     FIELDS = [
         {"key": "api_key", "label": "Steam Web API key", "type": "password",
@@ -84,6 +87,10 @@ class SteamBoard(Board):
          "help": "The wide banner from the top of the game's Steam library page fills the board (dimmed), with "
                  "the game art above in front of it. Games without a hero keep the plain background. "
                  "(Classic, Session timer and Stats card layouts.)"},
+        {"key": "griddb_key", "label": "SteamGridDB API key (optional)", "type": "password", "section": "Custom artwork",
+         "help": "Free at steamgriddb.com: log in, then Preferences → API. Lets you pick community artwork for "
+                 "your games below."},
+        {"key": "art_overrides", "label": "Your games", "type": "steam_art", "section": "Custom artwork"},
         {"key": "takeover", "label": "Take over the display while playing", "type": "bool"},
         {"key": "show_online", "label": "Also show when online but not in a game", "type": "bool"},
         {"key": "duration", "label": "Seconds on screen", "type": "number"},
@@ -102,6 +109,7 @@ class SteamBoard(Board):
         ("Basics", "Account", ["api_key", "steam_ids"]),
         ("Screens", "Now playing", ["layout", "takeover", "show_online", "art", "hero"]),
         ("Screens", "Friends & achievements", ["show_achievements", "show_friends", "friend_filter", "event_minutes"]),
+        ("Look", "Custom artwork", ["griddb_key", "art_overrides"]),
         ("Advanced", "Timing", ["duration", "refresh"])], {"duration": "Seconds per screen"})
 
     def __init__(self, cfg, app):
@@ -161,6 +169,7 @@ class SteamBoard(Board):
                 if not prev or prev[0] != appid:
                     self._sessions[sid] = (appid, now)
                 info["since"] = self._sessions[sid][1]
+                self._remember_game(appid, info["game"])
                 info.update(self._game_stats(sid, appid))
                 info["art"] = self._game_art(appid, info.get("icon_hash"))
                 want_hero = self.cfg.get("hero") or self._layout() in HERO_LAYOUTS
@@ -267,6 +276,64 @@ class SteamBoard(Board):
         self._rarity[appid] = (time.time(), out)
         return out
 
+    # -- games played (for picking custom artwork) ----------------------------------
+    def _games_file(self):
+        cfg = getattr(self.app, "config", None)
+        base = os.path.dirname(getattr(cfg, "path", "") or "") or os.environ.get("LEDBOARD_CACHE") or "."
+        return os.path.join(base, "steam_games.json")
+
+    def known_games(self):
+        """{appid: {"name": str, "last": epoch}} for every game LEDBoard has seen anyone play."""
+        if getattr(self, "_known", None) is None:
+            try:
+                with open(self._games_file()) as f:
+                    self._known = {str(k): v for k, v in json.load(f).items() if isinstance(v, dict)}
+            except (OSError, ValueError):
+                self._known = {}
+        return self._known
+
+    def _remember_game(self, appid, name):
+        games = self.known_games()
+        appid, now = str(appid), time.time()
+        g = games.get(appid)
+        # write when a game is new, renamed, or about once an hour while playing (spares the SD card)
+        if g and g.get("name") == name and now - g.get("last", 0) < 3600:
+            return
+        games[appid] = {"name": name or (g or {}).get("name") or f"App {appid}", "last": now}
+        try:
+            path = self._games_file()
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            with open(path + ".tmp", "w") as f:
+                json.dump(games, f, indent=1)
+            os.replace(path + ".tmp", path)
+        except OSError as e:
+            log.info("couldn't save the Steam games list: %s", e)
+
+    def griddb(self, appid, kind):
+        """Artwork choices from SteamGridDB for a game: [{"id", "url", "thumb", "width", "height", "style"}]."""
+        key = (self.cfg.get("griddb_key") or "").strip()
+        if not key:
+            raise RuntimeError("Add your SteamGridDB API key first (Steam → Custom artwork)")
+        path, params = {"cover": ("grids", {"dimensions": "600x900,342x482,660x930"}),
+                        "hero": ("heroes", {}), "icon": ("icons", {})}[kind]
+        r = requests.get(f"{GRIDDB_URL}/{path}/steam/{int(appid)}", headers={"Authorization": f"Bearer {key}"},
+                         params=dict(params, nsfw="false"), timeout=15)
+        if r.status_code == 401:
+            raise RuntimeError("SteamGridDB didn't accept the API key")
+        if r.status_code == 404:
+            return []
+        r.raise_for_status()
+        out = []
+        for d in (r.json().get("data") or [])[:60]:
+            if isinstance(d, dict) and d.get("url"):
+                out.append({k: d.get(k) for k in ("id", "url", "thumb", "width", "height", "style")})
+        return out
+
+    def _override(self, appid, kind):
+        o = (self.cfg.get("art_overrides") or {}).get(str(appid)) or {}
+        u = o.get(kind)
+        return u if isinstance(u, str) and u.startswith("http") else None
+
     def _game_stats(self, sid, appid):
         """Total hours and the icon hash from the player's recently played games."""
         try:
@@ -322,12 +389,13 @@ class SteamBoard(Board):
         """The game's library hero banner, prepared for the board (cached): {'dim': background for text,
         'full': brighter (Cinema), 'banner': fitted to the height with a fade on its left (Banner)}, or None."""
         cache = self.__dict__.setdefault("_heroes", {})
-        hit = cache.get(appid)
+        custom = self._override(appid, "hero")
+        hit = cache.get((appid, custom))
         if hit and (hit[0] is not None or time.time() - hit[1] < ART_RETRY):
             return hit[0]
         W, H = self.app.width, self.app.height
         assets = self._store_assets(appid)
-        urls = [assets.get("hero"), ASSET_BASE + f"steam/apps/{appid}/library_hero.jpg",
+        urls = [custom, assets.get("hero"), ASSET_BASE + f"steam/apps/{appid}/library_hero.jpg",
                 f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/library_hero.jpg"]
         img = None
         for u in dict.fromkeys(u for u in urls if u):
@@ -355,14 +423,15 @@ class SteamBoard(Board):
                    "full": ImageEnhance.Brightness(band).enhance(0.85).convert("RGBA"),
                    "banner": banner}
             break
-        cache[appid] = (img, time.time())
+        cache[(appid, custom)] = (img, time.time())
         return img
 
     def _game_art(self, appid, icon_hash):
         """Art for a game: its cover (portrait) or icon, falling back step by step; the Steam badge is drawn
         only when nothing at all can be downloaded (tried again after a while)."""
         style = self.cfg.get("art", "icon")
-        key = (appid, style, icon_hash)
+        custom = self._override(appid, style)
+        key = (appid, style, icon_hash, custom)
         hit = self._art.get(key)
         if hit and (hit[0] is not None or time.time() - hit[1] < ART_RETRY):
             return hit[0]
@@ -374,6 +443,8 @@ class SteamBoard(Board):
             urls = [assets.get("cover")] + old + [assets.get("header"), HEADER_URL.format(appid=appid), icon]
         else:
             urls = [icon] + old + [HEADER_URL.format(appid=appid)]
+        if custom:
+            urls.insert(0, custom)                      # your pick from SteamGridDB comes first
         img = None
         for u in dict.fromkeys(u for u in urls if u):
             img = fetch_image(u, H, H)

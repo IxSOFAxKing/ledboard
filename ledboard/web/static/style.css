@@ -173,3 +173,24 @@ a.button:hover, label.button:hover { border-color: #3a4350; }
 .chip.on { background: var(--accent, #3b82f6); color: #fff; }
 .chip-n { margin-left: 6px; opacity: .7; font-size: 11px; }
 .cat-tag { margin-left: 8px; font-size: 10px; font-weight: 500; padding: 1px 6px; border-radius: 999px; background: rgba(127,127,127,.15); color: var(--muted, #888); vertical-align: middle; }
+
+/* Steam: custom artwork picker */
+.steam-art { display: flex; flex-direction: column; gap: 12px; }
+.art-game { border: 1px solid var(--line, #2a313b); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.art-name { font-weight: 600; }
+.art-slots { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+.art-slot { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.art-thumb { display: block; border-radius: 4px; object-fit: cover; background: rgba(127,127,127,.12); }
+.art-thumb.icon { width: 40px; height: 40px; }
+.art-thumb.cover { width: 40px; height: 60px; }
+.art-thumb.hero { width: 120px; height: 40px; }
+.art-thumb.empty { display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--muted, #888); }
+.art-grid { display: grid; gap: 6px; max-height: 320px; overflow-y: auto; padding: 2px; }
+.art-grid.icon { grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); }
+.art-grid.cover { grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); }
+.art-grid.hero { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.art-grid img { width: 100%; border-radius: 4px; cursor: pointer; border: 2px solid transparent; background: rgba(127,127,127,.12); }
+.art-grid.icon img { aspect-ratio: 1; object-fit: contain; }
+.art-grid.cover img { aspect-ratio: 2 / 3; object-fit: cover; }
+.art-grid.hero img { aspect-ratio: 3 / 1; object-fit: cover; }
+.art-grid img.on, .art-grid img:hover { border-color: var(--accent, #3b9cff); }

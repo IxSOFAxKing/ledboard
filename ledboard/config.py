@@ -56,7 +56,7 @@ DEFAULTS = {
 }
 
 # Keys whose values must never be returned to the browser in clear text.
-SECRET_KEYS = {"client_secret", "refresh_token", "token", "password", "api_key"}
+SECRET_KEYS = {"client_secret", "refresh_token", "token", "password", "api_key", "griddb_key"}
 MASK = "••••••••"
 
 
