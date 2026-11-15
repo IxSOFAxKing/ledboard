@@ -123,10 +123,13 @@ class SpotifyBoard(Board):
             raise RuntimeError(f"Spotify token exchange failed: {r.text}")
         j = r.json()
         self.access_token = j["access_token"]
+        self._token_app = self.cfg.get("client_id")
         self.token_expiry = time.time() + j.get("expires_in", 3600) - 60
         return j["refresh_token"]
 
     def _token(self):
+        if getattr(self, "_token_app", None) != self.cfg.get("client_id"):
+            self.access_token = None                    # a login belongs to the app it came from
         if self.access_token and time.time() < self.token_expiry:
             return self.access_token
         rt = self.cfg.get("refresh_token")
@@ -138,6 +141,7 @@ class SpotifyBoard(Board):
             raise RuntimeError(f"token refresh failed ({r.status_code}): {r.text[:200]}")
         j = r.json()
         self.access_token = j["access_token"]
+        self._token_app = self.cfg.get("client_id")
         self.token_expiry = time.time() + j.get("expires_in", 3600) - 60
         if j.get("refresh_token") and j["refresh_token"] != rt:
             # Spotify may rotate the refresh token - persist the new one.
@@ -185,7 +189,8 @@ class SpotifyBoard(Board):
             except ValueError:
                 wait = 30
             self._blocked = (self._account(), time.time() + wait)
-            log.warning("Spotify rate limit: waiting %s before checking again", _dur(wait))
+            log.warning("Spotify rate limit for app %s…: waiting %s before checking again",
+                        (self.cfg.get("client_id") or "")[:6], _dur(wait))
             raise RuntimeError(f"Spotify asked LEDBoard to slow down; checking again in {_dur(wait)} "
                                "(the current song stays on screen)")
         r.raise_for_status()

@@ -9,6 +9,7 @@ and "achievement unlocked" (with how rare it is) screens, shown for a few minute
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -24,6 +25,12 @@ API = "https://api.steampowered.com"
 ICON_URL = "https://media.steampowered.com/steamcommunity/public/images/apps/{appid}/{hash}.jpg"
 COVER_URL = "https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/library_600x900.jpg"
 HEADER_URL = "https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/header.jpg"
+# Since 2024 many games' store artwork lives at addresses with a hash in them, so the fixed addresses above
+# 404 for those games. Steam's store API tells us the real ones.
+ASSET_BASE = "https://shared.cloudflare.steamstatic.com/store_item_assets/"
+STORE_ITEMS_URL = "https://api.steampowered.com/IStoreBrowseService/GetItems/v1/"
+APPDETAILS_URL = "https://store.steampowered.com/api/appdetails"
+ART_RETRY = 1800          # seconds before trying again for a game whose art couldn't be downloaded
 STEAM_BLUE = (102, 192, 244)
 INGAME_GREEN = (144, 186, 60)
 STATES = {0: "OFFLINE", 1: "ONLINE", 2: "BUSY", 3: "AWAY", 4: "SNOOZE", 5: "LOOKING TO TRADE", 6: "LOOKING TO PLAY"}
@@ -92,7 +99,7 @@ class SteamBoard(Board):
         self.players = {}         # steamid -> dict
         self._resolved = {}       # input text -> steamid64
         self._sessions = {}       # steamid -> (appid, first seen in-game, epoch)
-        self._art = {}            # (appid, style) -> image
+        self._art = {}            # (appid, style, icon hash) -> (image or None, when)
         self.events = []          # friend / achievement screens: dicts with key, kind, until
         self._friend_games = None  # friend steamid -> appid (None until the first poll)
         self._ach_seen = {}       # (steamid, appid) -> newest unlock time already known
@@ -254,22 +261,66 @@ class SteamBoard(Board):
                 return {"total_minutes": g.get("playtime_forever"), "icon_hash": g.get("img_icon_url")}
         return {}
 
+    def _store_assets(self, appid):
+        """The game's current store artwork addresses from Steam: {'cover': url, 'header': url} (cached)."""
+        cache = self.__dict__.setdefault("_assets", {})
+        hit = cache.get(appid)
+        if hit and (hit[0] or time.time() - hit[1] < ART_RETRY):
+            return hit[0]
+        out = {}
+        try:
+            params = {"input_json": json.dumps({"ids": [{"appid": int(appid)}],
+                                                "context": {"language": "english", "country_code": "US"},
+                                                "data_request": {"include_assets": True}})}
+            r = requests.get(STORE_ITEMS_URL, params=params, timeout=10)
+            r.raise_for_status()
+            items = (r.json().get("response") or {}).get("store_items") or [{}]
+            assets = items[0].get("assets") or {}
+            fmt = assets.get("asset_url_format")              # e.g. "steam/apps/570/${FILENAME}?t=1700000000"
+            if fmt:
+                for kind, names in (("cover", ("library_capsule_2x", "library_capsule")),
+                                    ("header", ("header", "main_capsule", "small_capsule"))):
+                    name = next((assets[n] for n in names if assets.get(n)), None)
+                    if name:
+                        out[kind] = ASSET_BASE + fmt.replace("${FILENAME}", name)
+        except Exception as e:
+            log.info("Steam store artwork lookup failed for %s: %s", appid, e)
+        if "header" not in out:
+            try:
+                r = requests.get(APPDETAILS_URL, params={"appids": appid, "filters": "basic"}, timeout=10)
+                r.raise_for_status()
+                data = (r.json().get(str(appid)) or {}).get("data") or {}
+                if data.get("header_image"):
+                    out["header"] = data["header_image"]
+            except Exception as e:
+                log.info("Steam app details lookup failed for %s: %s", appid, e)
+        cache[appid] = (out, time.time())
+        return out
+
     def _game_art(self, appid, icon_hash):
+        """Art for a game: its cover (portrait) or icon, falling back step by step; the Steam badge is drawn
+        only when nothing at all can be downloaded (tried again after a while)."""
         style = self.cfg.get("art", "icon")
         key = (appid, style, icon_hash)
-        if key in self._art:
-            return self._art[key]
+        hit = self._art.get(key)
+        if hit and (hit[0] is not None or time.time() - hit[1] < ART_RETRY):
+            return hit[0]
         H = self.app.height
-        urls = []
-        if style == "icon" and icon_hash:
-            urls.append(ICON_URL.format(appid=appid, hash=icon_hash))
-        urls += [COVER_URL.format(appid=appid), HEADER_URL.format(appid=appid)]
+        icon = ICON_URL.format(appid=appid, hash=icon_hash) if icon_hash else None
+        old = [COVER_URL.format(appid=appid), ASSET_BASE + f"steam/apps/{appid}/library_600x900.jpg"]
+        if style == "cover":
+            assets = self._store_assets(appid)
+            urls = [assets.get("cover")] + old + [assets.get("header"), HEADER_URL.format(appid=appid), icon]
+        else:
+            urls = [icon] + old + [HEADER_URL.format(appid=appid)]
         img = None
-        for u in urls:
+        for u in dict.fromkeys(u for u in urls if u):
             img = fetch_image(u, H, H)
             if img is not None:
                 break
-        self._art[key] = img
+        if img is None:
+            log.info("no artwork could be downloaded for Steam app %s; showing the Steam badge", appid)
+        self._art[key] = (img, time.time())
         return img
 
     # -- slides ---------------------------------------------------------------
