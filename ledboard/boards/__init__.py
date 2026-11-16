@@ -89,6 +89,23 @@ def migrate(data: dict) -> bool:
                 and b.get("upcoming_layout", "classic") == "classic":
             b["upcoming_layout"], b["upcoming_style"] = b["upcoming_style"], "plain"
             changed = True
+    # v7 -> v8: the Gaming PC board became graph-only (pick the lines and their colors); old layouts move to the
+    # closest graph, with matching lines
+    pc = boards.get("pcstats")
+    if isinstance(pc, dict) and pc.get("layout") not in (None, "graph", "wide", "area", "lanes"):
+        old = pc["layout"]
+        pc["layout"] = {"graph_wide": "wide", "graph_area": "area", "graph_stack": "lanes",
+                        "split": "lanes"}.get(old, "graph")
+        lines = {"graph_temp": ["gpu_temp", "cpu_temp"], "thermo": ["gpu_temp", "cpu_temp"],
+                 "graph_power": ["power", "gpu_power", "cpu_power"], "power": ["power", "gpu_power", "cpu_power"],
+                 "graph_net": ["net_down", "net_up"], "cooling": ["gpu_fan", "gpu_temp"],
+                 "memory": ["ram", "vram"], "clocks": ["gpu_clock", "cpu_clock"],
+                 "gaming": ["gpu_load", "gpu_temp", "cpu_load"], "gpucard": ["gpu_load", "gpu_temp", "gpu_power"],
+                 }.get(old)
+        if lines and "line1" not in pc:
+            for n in range(4):
+                pc[f"line{n + 1}"] = lines[n] if n < len(lines) else "none"
+        changed = True
     # v6 -> v7: Server Status alerts got their own monitor list; keep alerting for the monitors that were shown
     up = boards.get("uptime")
     if isinstance(up, dict) and "alert_monitors" not in up:

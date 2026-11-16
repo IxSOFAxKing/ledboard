@@ -11,7 +11,7 @@ It's built for two chained 64×32 panels (128×32), and the layouts scale to oth
 | **Now Playing** | Album art, scrolling title and artist, and an animated wavy progress bar (Material 3 style; a straight bar is an option), from a **Home Assistant media player** (HA's Spotify integration, Sonos and so on) or directly from the Spotify API. It's skipped when nothing is playing and can take over the display while music plays. |
 | **Steam** | What you're playing on Steam: the game icon, name, session time and total hours. It can take over the display while you play, and supports several players. Also "friend now playing" and "achievement unlocked" (with how rare it is) screens. |
 | **Plex** | Active streams (movies, TV, music) with the poster, title, S/E or artist, who's watching, and a wavy (or straight) progress bar. You can filter by user. Plus a carousel of recently added movies and episodes. |
-| **Gaming PC** | Your PC's CPU and GPU load and temperatures, memory and network from Home Assistant (e.g. HASS.Agent), live, as bars, gauges, a graph, or a gaming view with the current game. |
+| **Gaming PC** | A live graph of your PC's stats (load, temperatures, memory, power, fans, clocks, network) from LibreHardwareMonitor or Home Assistant. You pick up to 4 lines and their colors. |
 | **Server Status** | Your Uptime Kuma monitors: green/red dots and response times, and an automatic critical alert when one goes down that clears when it's back. |
 | **Home Assistant** | Any entities (sensors, locks, doors, lights, thermostats, and so on) at 1, 2 or 3 per screen, with automatic formatting and colors. |
 | **3D Printer (Klipper)** | Print progress from Klipper via Moonraker: the model thumbnail or a live camera snapshot, progress, time left or finish time, layer, nozzle and bed temperatures, and paused, finished and error states. |
@@ -505,38 +505,25 @@ With Home Assistant instead: Any Home Assistant sensors work; [HASS.Agent](https
 1. In HASS.Agent, add sensors: **CpuLoad**, **GpuLoad**, **GpuTemperature**, **MemoryUsage**, plus a CPU temperature and network sensors if you have them. Set their update interval to 5–10 seconds for a lively board.
 2. On the **Gaming PC** board, click **Find my PC's sensors**, check what it filled in, and **Save**.
 
+**The graph.** Pick up to **4 lines** under **Screens → Graph**, and give each one a color. The stats you can graph:
+- GPU load, CPU load, memory used
+- GPU and CPU temperature
+- network download and upload
+- with LibreHardwareMonitor also: GPU memory used, total power (GPU + CPU), GPU power, CPU power, GPU fan speed, GPU clock and CPU clock.
+
+Loads and temperatures share a fixed scale (0–100%, 30–100°C). Everything else scales to the busiest moment on screen. Each line's label is in its color. Load and temperature numbers turn yellow and then red as they climb: loads at 60% and 85%, temperatures at 65°C and 80°C.
+
 **Layouts:**
-- **Bars**: a bar per stat with its value and temperature.
-- **Gauges**: four dials (CPU, GPU, RAM, temperature).
-- **Graph**: CPU and GPU load over the last 10 minutes, with the numbers.
-- **Gaming**: the game you're playing (from the Steam board) with big GPU, GPU temperature and CPU numbers.
-- **Meters**: LED level meters (green → yellow → red) for CPU, GPU, RAM and temperature. A white peak marker holds the recent maximum for a few seconds, then falls.
-- **Split**: GPU and CPU panels side by side, each with big load and temperature numbers and a 5-minute mini graph.
-- **Spotlight**: one stat at a time in huge numbers (GPU, CPU, temperatures, memory, network), switching every 3 seconds.
-- **Thermometers**: CPU and GPU temperatures as thermometers that fill and change color.
-- **Details** (LibreHardwareMonitor): GPU and CPU power, GPU fan speed, GPU memory used / total, and GPU and CPU clocks, four to a page.
-- **Power** (LibreHardwareMonitor): total watts (GPU + CPU) in big numbers with a lightning bolt that pulses faster under load, and how it splits between GPU and CPU.
-- **GPU card** (LibreHardwareMonitor): your graphics card's name, with load, temperature, power, clock, fan and GPU memory.
-- **Cooling** (LibreHardwareMonitor): a fan picture that spins faster as the real GPU fan does and changes color with the temperature, plus the RPM and GPU / CPU temperatures.
-- **Memory** (LibreHardwareMonitor): system RAM and GPU memory as two big bars, with GB used / total.
-- **Clocks** (LibreHardwareMonitor): GPU and CPU clock speedometers.
+- **Graph**: the lines, with a number for each line on the right.
+- **Wide graph**: the lines across the whole board, with the numbers small in the corners.
+- **Area graph**: like Graph, with each line filled in underneath.
+- **Lanes**: each line in its own strip with its number beside it. With 3–4 lines, the number alone in the line's color.
 
-The LibreHardwareMonitor layouts fall back to Bars with the Home Assistant source.
-
-**Graphs** (more versions of Graph):
-- **Temperature graph**: CPU and GPU temperatures over time, with the current values and the highest in the window.
-- **Area graph**: GPU load filled in, with CPU load as a line on top, plus the average GPU load.
-- **Stacked graphs**: GPU above and CPU below, each filled in its own color with a big number beside it.
-- **Columns**: GPU load as bars, one per slice of time, colored green / yellow / red by the busiest moment in each.
-- **Power graph** (LibreHardwareMonitor): total watts over time, with now, peak and average.
-- **Network graph**: download (filled) and upload (line) over time, scaled to the busiest moment, with the current speeds.
-- **Wide graph**: CPU and GPU load across the whole board, with the numbers small in the corners.
-
-**Graph time span** sets how far back every graph looks: 2, 5, 10 or 30 minutes, or 1 hour. History starts when LEDBoard starts, so a graph fills in over its first few minutes.
+**Graph time span** sets how far back the graph looks: 2, 5, 10 or 30 minutes, or 1 hour. History starts when LEDBoard starts, so the graph fills in over its first few minutes.
 
 A temperature sensor that reads 0 (HASS.Agent reports that when it can't read the sensor, for example an unsupported GPU) shows as "--" instead of a fake 0°C / 32°F, and the Status tab points it out.
 
-Values turn yellow and then red as they climb: loads at 60% and 85%, temperatures at 65°C and 80°C. **Show the board**: while the PC is on (the default; it hides when the sensors go unavailable), only while gaming, or always. It can also take over the display while you game.
+**Show the board**: while the PC is on (the default; it hides when the sensors go unavailable), only while gaming, or always. It can also take over the display while you game.
 
 ### Steam
 1. Get a free **Steam Web API key** at <https://steamcommunity.com/dev/apikey>. Any domain name works, for example `ledboard`.

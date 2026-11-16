@@ -3,7 +3,6 @@ network. Values follow Home Assistant live; four layouts (bars, gauges, graph, g
 from __future__ import annotations
 
 import logging
-import math
 import re
 import time
 from collections import deque
@@ -11,7 +10,7 @@ from collections import deque
 import requests
 
 from .base import Board, organize
-from ..gfx import GRAY, WHITE, scale
+from ..gfx import GRAY, WHITE, hex_to_rgb, scale
 
 log = logging.getLogger(__name__)
 
@@ -20,8 +19,6 @@ YELLOW = (255, 190, 40)
 RED = (240, 50, 50)
 CPU_COLOR = (80, 200, 255)
 GPU_COLOR = (190, 110, 255)
-DIM_TRACK = (35, 35, 42)
-STEAM_GREY = (150, 150, 160)
 OFF_STATES = {"unavailable", "unknown", "none", ""}
 
 METRICS = {   # key: (label, kind, search patterns for "find my sensors")
@@ -34,28 +31,30 @@ METRICS = {   # key: (label, kind, search patterns for "find my sensors")
     "net_up": ("UP", "rate", [r"(upload|sent|send|tx)(.?(rate|speed|bytes))?"]),
 }
 LAYOUTS = {
-    "bars": "Bars (a bar per stat with its value and temperature)",
-    "gauges": "Gauges (four round dials: CPU, GPU, RAM, temperature)",
-    "graph": "Graph (CPU and GPU load over the last 10 minutes, with the numbers)",
-    "gaming": "Gaming (the game you're playing, with big GPU / temperature / CPU numbers)",
-    "meters": "Meters (LED level meters with peak markers, like an equalizer)",
-    "split": "Split (GPU and CPU panels side by side, each with a mini graph)",
-    "spotlight": "Spotlight (one stat at a time in huge numbers, switching every few seconds)",
-    "thermo": "Thermometers (CPU and GPU temperatures as thermometers)",
-    "details": "Details (power, fans, clocks, GPU memory; needs LibreHardwareMonitor)",
-    "power": "Power (total watts with a GPU / CPU split; LibreHardwareMonitor)",
-    "gpucard": "GPU card (your graphics card's name with load, temp, power, clock, fan, memory; LibreHardwareMonitor)",
-    "cooling": "Cooling (an animated fan at the real fan speed, with temperatures; LibreHardwareMonitor)",
-    "memory": "Memory (system RAM and GPU memory bars; LibreHardwareMonitor)",
-    "clocks": "Clocks (GPU and CPU clock speedometers; LibreHardwareMonitor)",
-    "graph_temp": "Temperature graph (CPU and GPU temperatures over time)",
-    "graph_area": "Area graph (GPU load filled in, CPU load as a line on top)",
-    "graph_stack": "Stacked graphs (GPU above, CPU below, each with its own number)",
-    "graph_columns": "Columns (GPU load as green / yellow / red bars over time)",
-    "graph_power": "Power graph (total watts over time with the peak; LibreHardwareMonitor)",
-    "graph_net": "Network graph (download and upload over time)",
-    "graph_wide": "Wide graph (CPU and GPU load across the whole board)",
+    "graph": "Graph (the lines, with the numbers on the right)",
+    "wide": "Wide graph (the lines across the whole board, numbers small in the corners)",
+    "area": "Area graph (each line filled in underneath, numbers on the right)",
+    "lanes": "Lanes (each stat in its own strip, with its number)",
 }
+# stat -> (short label on the board, name in the settings, kind, fixed range or None = scale to the data)
+STATS = {
+    "gpu_load": ("GPU", "GPU load", "pct", (0, 100)),
+    "cpu_load": ("CPU", "CPU load", "pct", (0, 100)),
+    "ram": ("RAM", "Memory used", "pct", (0, 100)),
+    "vram": ("VRAM", "GPU memory used (LibreHardwareMonitor)", "pct", (0, 100)),
+    "gpu_temp": ("GPU°", "GPU temperature", "temp", (30, 100)),
+    "cpu_temp": ("CPU°", "CPU temperature", "temp", (30, 100)),
+    "power": ("PWR", "Total power, GPU + CPU (LibreHardwareMonitor)", "watts", None),
+    "gpu_power": ("GPUW", "GPU power (LibreHardwareMonitor)", "watts", None),
+    "cpu_power": ("CPUW", "CPU power (LibreHardwareMonitor)", "watts", None),
+    "gpu_fan": ("FAN", "GPU fan speed (LibreHardwareMonitor)", "rpm", None),
+    "gpu_clock": ("GCLK", "GPU clock (LibreHardwareMonitor)", "ghz", None),
+    "cpu_clock": ("CCLK", "CPU clock (LibreHardwareMonitor)", "ghz", None),
+    "net_down": ("DOWN", "Network download", "rate", None),
+    "net_up": ("UP", "Network upload", "rate", None),
+}
+LINES = 4
+LINE_DEFAULTS = [("gpu_load", "#be6eff"), ("cpu_load", "#50c8ff"), ("none", "#3cd25a"), ("none", "#ffbe28")]
 GRAPH_SPANS = {2: "2 minutes", 5: "5 minutes", 10: "10 minutes", 30: "30 minutes", 60: "1 hour"}
 LHM_LABELS = {
     "cpu_load": "CPU load", "cpu_temp": "CPU temperature", "gpu_load": "GPU load", "gpu_temp": "GPU temperature",
@@ -64,9 +63,7 @@ LHM_LABELS = {
     "cpu_clock": "CPU clock", "vram_used": "GPU memory used", "vram_total": "GPU memory total",
 }
 LHM_KEYS = list(LHM_LABELS)
-PEAK_HOLD = 3.0            # seconds a meter's peak marker holds before it falls
 SHOW = {"online": "While the PC is on", "gaming": "Only while gaming", "always": "Always"}
-HISTORY_SECONDS = 600
 
 
 def level_color(value, kind):
@@ -111,12 +108,14 @@ class PCStatsBoard(Board):
     name = "pcstats"
     title = "Gaming PC"
     category = "Home & status"
-    description = ("Your PC's CPU / GPU load and temperatures, memory and network, from Home Assistant "
-                   "(e.g. HASS.Agent sensors), updated live.")
+    description = ("A live graph of your PC's stats (load, temperatures, memory, power, fans, clocks, network), "
+                   "from LibreHardwareMonitor or Home Assistant. You pick the lines and their colors.")
     refresh = 30
-    DEFAULTS = {"enabled": False, "duration": 10, "refresh": 30, "layout": "bars", "show": "online",
+    DEFAULTS = {"enabled": False, "duration": 10, "refresh": 30, "layout": "graph", "show": "online",
                 "takeover": False, "temp_unit": "auto", "source": "homeassistant", "lhm_url": "", "lhm_refresh": 3, "graph_minutes": 10,
-                **{f"{k}_entity": "" for k in METRICS}, **{f"lhm_{k}": "" for k in LHM_KEYS}}
+                **{f"{k}_entity": "" for k in METRICS}, **{f"lhm_{k}": "" for k in LHM_KEYS},
+                **{f"line{n + 1}": st for n, (st, _c) in enumerate(LINE_DEFAULTS)},
+                **{f"line{n + 1}_color": col for n, (_s, col) in enumerate(LINE_DEFAULTS)}}
     FIELDS = [
         {"key": "source", "label": "Get the stats from", "type": "select", "options": ["homeassistant", "lhm"],
          "option_labels": {"homeassistant": "Home Assistant (e.g. HASS.Agent sensors)",
@@ -138,12 +137,16 @@ class PCStatsBoard(Board):
                            ("gpu_temp", "GPU temperature"), ("ram", "Memory used (%)"),
                            ("net_down", "Network download rate"), ("net_up", "Network upload rate"))],
         {"key": "layout", "label": "Layout", "type": "select", "options": list(LAYOUTS), "option_labels": LAYOUTS},
+        *[f for n in range(1, LINES + 1) for f in (
+            {"key": f"line{n}", "label": f"Line {n}", "type": "select", "options": ["none"] + list(STATS),
+             "option_labels": {"none": "(not used)", **{k: v[1] for k, v in STATS.items()}}},
+            {"key": f"line{n}_color", "label": f"Line {n} color", "type": "color"})],
         {"key": "show", "label": "Show the board", "type": "select", "options": list(SHOW), "option_labels": SHOW,
          "help": "'While the PC is on' hides it when the sensors go unavailable (PC off or asleep). 'While gaming' "
                  "uses the Steam board (including games seen through Home Assistant)."},
         {"key": "takeover", "label": "Take over the display while gaming", "type": "bool"},
         {"key": "graph_minutes", "label": "Graph time span", "type": "select", "options": list(GRAPH_SPANS),
-         "option_labels": GRAPH_SPANS, "help": "How far back the graph layouts look. History starts when LEDBoard starts."},
+         "option_labels": GRAPH_SPANS, "help": "How far back the graph looks. History starts when LEDBoard starts."},
         {"key": "temp_unit", "label": "Temperatures in", "type": "select", "options": ["auto", "c", "f"],
          "option_labels": {"auto": "Whatever the sensor reports", "c": "°C", "f": "°F"}},
         {"key": "duration", "label": "Seconds on screen", "type": "number"},
@@ -153,7 +156,9 @@ class PCStatsBoard(Board):
     FIELDS = organize(FIELDS, [
         ("Basics", "Sensors", ["source", "lhm_url", "discover"] + [f"{k}_entity" for k in METRICS]
          + [f"lhm_{k}" for k in LHM_KEYS]),
-        ("Screens", "Display", ["layout", "graph_minutes", "show", "takeover"]),
+        ("Screens", "Graph", ["layout", "graph_minutes"] + [k for n in range(1, LINES + 1)
+                                                           for k in (f"line{n}", f"line{n}_color")]),
+        ("Screens", "When to show", ["show", "takeover"]),
         ("Look", "Units", ["temp_unit"]),
         ("Advanced", "Timing", ["duration", "refresh", "lhm_refresh"]),
     ])
@@ -161,8 +166,7 @@ class PCStatsBoard(Board):
     def __init__(self, cfg, app):
         super().__init__(cfg, app)
         self.states = {}                     # entity_id -> HA state dict
-        self.history = deque(maxlen=4000)    # (time, cpu %, gpu %): up to an hour at one sample a second
-        self.series = {}                     # metric -> deque of (time, value) for the graph layouts
+        self.series = {}                     # stat -> deque of (time, value): up to an hour at one sample a second
         self._ws = None
 
     # -- data -------------------------------------------------------------------
@@ -311,22 +315,39 @@ class PCStatsBoard(Board):
             return None
         return (v - 32) * 5 / 9 if "F" in unit else v
 
+    def stat(self, key):
+        """A stat's current value in its graph units: % / °C / W / RPM / GHz / bytes per second (or None)."""
+        if key in ("cpu_load", "gpu_load", "ram"):
+            return self.value(key)[0]
+        if key in ("cpu_temp", "gpu_temp"):
+            return self._temp_c(key)
+        if key in ("net_down", "net_up"):
+            return to_bytes(*self.value(key))
+        if not self._lhm_on():
+            return None                                  # the rest only come from LibreHardwareMonitor
+        if key == "power":
+            gw, cw = self._x("gpu_power")[0], self._x("cpu_power")[0]
+            return None if gw is None and cw is None else (gw or 0) + (cw or 0)
+        if key in ("gpu_power", "cpu_power", "gpu_fan"):
+            return self._x(key)[0]
+        if key in ("gpu_clock", "cpu_clock"):
+            v, u = self._x(key)
+            return None if v is None else v / 1e6 if "kHz" in u else v if "GHz" in u else v / 1000
+        if key == "vram":
+            used, total = self._x("vram_used")[0], self._x("vram_total")[0]
+            return None if used is None or not total else 100 * used / total
+        return None
+
+    def _x(self, key):
+        """(value, unit) of a LibreHardwareMonitor reading, or (None, '')."""
+        got = getattr(self, "lhm_values", {}).get(key) if self._lhm_on() else None
+        return (got[0], got[1]) if got else (None, "")
+
     def _sample(self):
+        """Record every stat (at most once a second) for the graph."""
         now = time.time()
-        peaks = self.__dict__.setdefault("_peaks", {})
-        for key in ("cpu_load", "gpu_load", "ram", "cpu_temp", "gpu_temp"):
-            f = self._frac(key)                         # where the meter is (0..1), whatever the units
-            if f is not None and (key not in peaks or f >= self._peak_frac(key)):
-                peaks[key] = (f, now)
-        # every graphable metric, at most once a second (temperatures in °C, network in bytes/s)
-        point = {k: self.value(k)[0] for k in ("cpu_load", "gpu_load", "ram")}
-        point.update(cpu_temp=self._temp_c("cpu_temp"), gpu_temp=self._temp_c("gpu_temp"))
-        gw, cw = (self._x("gpu_power")[0], self._x("cpu_power")[0]) if self._lhm_on() else (None, None)
-        point["power"] = None if gw is None and cw is None else (gw or 0) + (cw or 0)
-        for k in ("net_down", "net_up"):
-            v, u = self.value(k)
-            point[k] = to_bytes(v, u)
-        for k, v in point.items():
+        for k in STATS:
+            v = self.stat(k)
             if v is None:
                 continue
             q = self.series.setdefault(k, deque(maxlen=4000))
@@ -334,13 +355,6 @@ class PCStatsBoard(Board):
                 q[-1] = (now, v)
             else:
                 q.append((now, v))
-        cpu, gpu = point["cpu_load"], point["gpu_load"]
-        if cpu is None and gpu is None:
-            return
-        if self.history and now - self.history[-1][0] < 1:
-            self.history[-1] = (now, cpu, gpu)
-        else:
-            self.history.append((now, cpu, gpu))
 
     def online(self):
         """True while any configured sensor has a real value (the PC is on and HASS.Agent is running)."""
@@ -442,509 +456,47 @@ class PCStatsBoard(Board):
         return s
 
     # -- drawing ---------------------------------------------------------------------
-    def render(self, c, slide, t):
-        lay = self.cfg.get("layout", "bars")
-        {"gauges": self._render_gauges, "graph": self._render_graph, "gaming": self._render_gaming,
-         "meters": self._render_meters, "split": self._render_split, "spotlight": self._render_spotlight,
-         "thermo": self._render_thermo, "details": self._render_details,
-         "graph_temp": self._render_graph_temp, "graph_area": self._render_graph_area,
-         "graph_stack": self._render_graph_stack, "graph_columns": self._render_graph_columns,
-         "graph_power": self._render_graph_power, "graph_net": self._render_graph_net,
-         "graph_wide": self._render_graph_wide, "power": self._render_power,
-         "gpucard": self._render_gpucard, "cooling": self._render_cooling, "memory": self._render_memory,
-         "clocks": self._render_clocks}.get(lay, self._render_bars)(c, t)
+    def _lines(self):
+        """The graph's lines: [(stat, color)] from the Line 1-4 settings."""
+        out = []
+        for n in range(1, LINES + 1):
+            key = self.cfg.get(f"line{n}", LINE_DEFAULTS[n - 1][0])
+            if key in STATS and key not in [k for k, _c in out]:
+                out.append((key, hex_to_rgb(self.cfg.get(f"line{n}_color") or LINE_DEFAULTS[n - 1][1])))
+        return out
 
     def _deg(self, key):
         v, unit = self.value(key)
         return None if v is None else f"{v:.0f}°"
 
-    def _render_bars(self, c, t):
-        W = c.width
-        rows = []
-        for key, temp in (("cpu_load", "cpu_temp"), ("gpu_load", "gpu_temp"), ("ram", None)):
-            if self.has(key) or (temp and self.has(temp)):
-                rows.append((key, temp))
-        net = self.has("net_down") or self.has("net_up")
-        n = len(rows) + (1 if net else 0)
-        if n == 0:
-            return
-        step = max(8, min(11, c.height // n))
-        y = (c.height - step * n) // 2 + 1
-        for key, temp in rows:
-            label = METRICS[key][0]
-            v, _u = self.value(key)
-            col = level_color(v, "load")
-            c.text(1, y, label, "4x6", scale(WHITE, 0.8))
-            x0, x1 = 17, 77
-            c.rect(x0, y + 1, x1, y + 4, DIM_TRACK)
-            if v is not None:
-                c.rect(x0, y + 1, x0 + round((x1 - x0) * max(0, min(100, v)) / 100), y + 4, col)
-            c.text(81, y, "--" if v is None else f"{v:.0f}%", "4x6", col)
-            if temp and self.has(temp):
-                deg = self._deg(temp)
-                c.text_right(W - 1, y, deg or "--", "4x6", level_color(self._temp_c(temp), "temp"))
-            y += step
-        if net:
-            dv, du = self.value("net_down")
-            uv, uu = self.value("net_up")
-            c.text(1, y, "NET", "4x6", scale(WHITE, 0.8))
-            c.text(17, y, "↓" + fmt_rate(dv, du), "4x6", CPU_COLOR)
-            c.text_right(W - 1, y, "↑" + fmt_rate(uv, uu), "4x6", GPU_COLOR)
-
-    def _gauge(self, c, cx, cy, r, frac, col, value_text, label):
-        box = (cx - r, cy - r, cx + r, cy + r)
-        c.draw.arc(box, 150, 390, fill=DIM_TRACK, width=3)
-        if frac is not None and frac > 0:
-            c.draw.arc(box, 150, 150 + 240 * max(0.0, min(1.0, frac)), fill=col, width=3)
-        c.text_centered(cy - 3, value_text, "5x7", WHITE, cx - r, cx + r + 1)
-        c.text_centered(c.height - 6, label, "4x6", scale(WHITE, 0.75), cx - r - 2, cx + r + 3)
-
-    def _render_gauges(self, c, t):
-        W = c.width
-        temp_key = "gpu_temp" if self.has("gpu_temp") else "cpu_temp"
-        dials = [(k, METRICS[k][0]) for k in ("cpu_load", "gpu_load", "ram") if self.has(k)]
-        if self.has(temp_key):
-            dials.append((temp_key, METRICS[temp_key][0] + "°"))
-        if not dials:
-            return
-        cell = W // len(dials)
-        for i, (key, label) in enumerate(dials):
-            cx = i * cell + cell // 2
-            v, _u = self.value(key)
-            if METRICS[key][1] == "temp":
-                tc = self._temp_c(key)
-                frac = None if tc is None else (tc - 30) / 70
-                col = level_color(tc, "temp")
-                text = "--" if v is None else f"{v:.0f}"
-            else:
-                frac = None if v is None else v / 100
-                col = level_color(v, "load")
-                text = "--" if v is None else f"{v:.0f}"
-            self._gauge(c, cx, 13, 11, frac, col, text, label)
-
-    def _render_graph(self, c, t):
-        W, H = c.width, c.height
-        gx0, gx1, gy0, gy1 = 0, 83, 1, H - 2
-        c.rect(gx0, gy0, gx1, gy1, (10, 10, 14))
-        for f in (0.5,):
-            y = gy1 - round((gy1 - gy0) * f)
-            for x in range(gx0, gx1, 3):
-                c.pixel(x, y, (30, 30, 36))
-        now = time.time()
-        span = self._span()
-        pts = [p for p in self.history if now - p[0] <= span]
-        for idx, col in ((1, CPU_COLOR), (2, GPU_COLOR)):
-            prev = None
-            for ts, *vals in pts:
-                v = vals[idx - 1]
-                if v is None:
-                    prev = None
-                    continue
-                x = gx1 - round((now - ts) / span * (gx1 - gx0))
-                y = gy1 - round((gy1 - gy0) * max(0, min(100, v)) / 100)
-                if prev:
-                    c.line(prev[0], prev[1], x, prev[1], col)      # step lines: a value holds until the next one
-                    c.line(x, prev[1], x, y, col)
-                prev = (x, y)
-            if prev:
-                c.line(prev[0], prev[1], gx1, prev[1], col)
-        x0 = 87
-        rows = [("CPU", "cpu_load", CPU_COLOR), ("GPU", "gpu_load", GPU_COLOR)]
-        for i, (label, key, col) in enumerate(rows):
-            v, _u = self.value(key)
-            y = 1 + i * 8
-            c.text(x0, y, label, "4x6", col)
-            c.text_right(W - 1, y, "--" if v is None else f"{v:.0f}%", "4x6", level_color(v, "load"))
-        # temperatures: CPU on the left, GPU on the right, each in its own warning color
-        ct, gt = self._deg("cpu_temp"), self._deg("gpu_temp")
-        if ct:
-            c.text(x0, 17, ct, "4x6", level_color(self._temp_c("cpu_temp"), "temp"))
-        if gt:
-            c.text_right(W - 1, 17, gt, "4x6", level_color(self._temp_c("gpu_temp"), "temp"))
-        rv, _u = self.value("ram")
-        if rv is not None:
-            c.text(x0, 25, "RAM", "4x6", scale(WHITE, 0.7))
-            c.text_right(W - 1, 25, f"{rv:.0f}%", "4x6", level_color(rv, "load"))
-
-    def _render_gaming(self, c, t):
-        W, H = c.width, c.height
-        game = self.gaming() or "GAMING PC"
-        c.rect(0, 0, W - 1, 8, (20, 20, 28))
-        c.scroll_text(2, W - 2, 1, game.upper(), "5x7", WHITE, t)
-        cells = [("GPU", self.value("gpu_load")[0], "%", "load", GPU_COLOR),
-                 ("GPU", self._deg("gpu_temp"), "", "temp", GPU_COLOR),
-                 ("CPU", self.value("cpu_load")[0], "%", "load", CPU_COLOR)]
-        if self.value("gpu_temp")[0] is None and self.value("cpu_temp")[0] is not None:
-            cells[1] = ("CPU", self._deg("cpu_temp"), "", "temp", CPU_COLOR)
-        cw = W // 3
-        for i, (label, v, suffix, kind, lcol) in enumerate(cells):
-            x0, x1 = i * cw, (i + 1) * cw
-            if kind == "temp":
-                key = "gpu_temp" if label == "GPU" else "cpu_temp"
-                text, col = (v or "--"), level_color(self._temp_c(key), "temp")
-            else:
-                text, col = ("--" if v is None else f"{v:.0f}{suffix}"), level_color(v, "load")
-            c.text_centered(11, text, "7x13B" if c.text_width(text, "7x13B") <= cw - 2 else "6x10", col, x0, x1)
-            c.text_centered(H - 6, label + ("°" if kind == "temp" else ""), "4x6", lcol, x0, x1)
-            if i:
-                c.line(x0, 12, x0, H - 3, (35, 35, 42))
-
-    # -- more layouts ------------------------------------------------------------------
-    def _frac(self, key):
-        """0..1 for a metric: loads as %, temperatures from 30 to 100 °C."""
-        if METRICS[key][1] == "temp":
-            tc = self._temp_c(key)
-            return None if tc is None else max(0.0, min(1.0, (tc - 30) / 70))
-        v = self.value(key)[0]
-        return None if v is None else max(0.0, min(1.0, v / 100))
-
-    def _peak_frac(self, key):
-        """The meter's peak marker: the highest recent value, falling after PEAK_HOLD seconds."""
-        pk = self.__dict__.get("_peaks", {}).get(key)
-        if not pk:
-            return None
-        f, at = pk
-        age = time.time() - at
-        if age > PEAK_HOLD:
-            f -= (age - PEAK_HOLD) * 0.25                  # falls a quarter of the meter per second
-        cur = self._frac(key) or 0
-        return max(cur, min(1.0, f))
-
-    def _render_meters(self, c, t):
-        W, H = c.width, c.height
-        temp_key = "gpu_temp" if self.has("gpu_temp") else "cpu_temp"
-        cols = [k for k in ("cpu_load", "gpu_load", "ram") if self.has(k)]
-        if self.has(temp_key):
-            cols.append(temp_key)
-        if not cols:
-            return
-        cell = W // len(cols)
-        seg_n, seg_h, gap = 8, 2, 1
-        top = H - 8 - seg_n * (seg_h + gap) + gap
-        for i, key in enumerate(cols):
-            x = i * cell + 3
-            bw = 9
-            frac, peak = self._frac(key), self._peak_frac(key)
-            lit = 0 if frac is None else round(frac * seg_n)
-            for sgi in range(seg_n):
-                y1 = H - 9 - sgi * (seg_h + gap)
-                pos = (sgi + 0.5) / seg_n
-                col = GREEN if pos < 0.6 else YELLOW if pos < 0.85 else RED
-                c.rect(x, y1 - seg_h + 1, x + bw - 1, y1, col if sgi < lit else scale(col, 0.12))
-            if peak is not None and round(peak * seg_n) > lit:     # only when the recent peak is above the level now
-                pi = min(seg_n - 1, max(0, round(peak * seg_n) - 1))
-                y1 = H - 9 - pi * (seg_h + gap)
-                c.rect(x, y1 - seg_h + 1, x + bw - 1, y1, WHITE)
-            v, _u = self.value(key)
-            temp = METRICS[key][1] == "temp"
-            text = "--" if v is None else (f"{v:.0f}°" if temp else f"{v:.0f}")
-            col = level_color(self._temp_c(key) if temp else v, "temp" if temp else "load")
-            c.text(x + bw + 2, top + 2, text, "5x7", col)
-            c.text(x + bw + 2, top + 11, "%" if not temp else ("C" if "C" in (self.value(key)[1] or "°C") else "F"),
-                   "4x6", scale(WHITE, 0.5))
-            c.text_centered(H - 6, METRICS[key][0] + ("°" if temp else ""), "4x6", scale(WHITE, 0.75),
-                            i * cell, (i + 1) * cell)
-
-    def _spark(self, c, x0, x1, y0, y1, idx, col):
-        """A small step graph of the last few minutes of CPU (idx 1) or GPU (idx 2) load."""
-        now = time.time()
-        span = 300
-        pts = [(ts, vals[idx - 1]) for ts, *vals in self.history if now - ts <= span and vals[idx - 1] is not None]
-        prev = None
-        for ts, v in pts:
-            x = x1 - round((now - ts) / span * (x1 - x0))
-            y = y1 - round((y1 - y0) * max(0, min(100, v)) / 100)
-            if prev:
-                c.line(prev[0], prev[1], x, prev[1], col)
-                c.line(x, prev[1], x, y, col)
-            prev = (x, y)
-        if prev:
-            c.line(prev[0], prev[1], x1, prev[1], col)
-
-    def _render_split(self, c, t):
-        W, H = c.width, c.height
-        mid = W // 2
-        panels = (("GPU", "gpu_load", "gpu_temp", GPU_COLOR, 2, 0), ("CPU", "cpu_load", "cpu_temp", CPU_COLOR, 1, mid + 1))
-        for label, load, temp, col, idx, x0 in panels:
-            x1 = x0 + mid - 2
-            c.rect(x0, 0, x0 + 1, H - 1, scale(col, 0.7))
-            c.text(x0 + 4, 0, label, "5x7", col)
-            deg = self._deg(temp)
-            if deg:
-                c.text_right(x1, 0, deg, "5x7", level_color(self._temp_c(temp), "temp"))
-            v, _u = self.value(load)
-            text = "--" if v is None else f"{v:.0f}%"
-            c.text(x0 + 4, 9, text, "7x13B", level_color(v, "load"))
-            c.rect(x0 + 4, H - 7, x1, H - 1, (12, 12, 16))
-            self._spark(c, x0 + 4, x1, H - 7, H - 1, idx, scale(col, 0.9))
-        c.line(mid, 0, mid, H - 1, (30, 30, 36))
-
-    def _spot_items(self):
-        out = []
-        for key, label in (("gpu_load", "GPU LOAD"), ("gpu_temp", "GPU TEMP"), ("cpu_load", "CPU LOAD"),
-                           ("cpu_temp", "CPU TEMP"), ("ram", "MEMORY")):
-            if not self.has(key):
-                continue
-            v, unit = self.value(key)
-            temp = METRICS[key][1] == "temp"
-            big = "--" if v is None else (f"{v:.0f}°" if temp else f"{v:.0f}%")
-            col = level_color(self._temp_c(key) if temp else v, "temp" if temp else "load")
-            out.append((label, big, col, self._frac(key), GPU_COLOR if key.startswith("gpu") else
-                        CPU_COLOR if key.startswith("cpu") else (200, 200, 200)))
-        if self.has("net_down") or self.has("net_up"):
-            dv, du = self.value("net_down")
-            uv, uu = self.value("net_up")
-            out.append(("NETWORK", "↓" + fmt_rate(dv, du), CPU_COLOR, None, (200, 200, 200)))
-            out.append(("NETWORK", "↑" + fmt_rate(uv, uu), GPU_COLOR, None, (200, 200, 200)))
-        return out
-
-    def _render_spotlight(self, c, t):
-        W, H = c.width, c.height
-        items = self._spot_items()
-        if not items:
-            return
-        i = int(t // 3) % len(items)
-        label, big, col, frac, lcol = items[i]
-        font = "10x20" if c.text_width(big, "10x20") <= 68 else "7x13B"
-        c.text(2, (H - (20 if font == "10x20" else 13)) // 2, big, font, col)
-        x0 = 74
-        c.text(x0, 3, label.split()[0], "6x10", lcol)
-        if len(label.split()) > 1:
-            c.text(x0, 13, label.split()[1], "5x7", scale(WHITE, 0.7))
-        if frac is not None:
-            c.rect(x0, H - 6, W - 3, H - 4, DIM_TRACK)
-            c.rect(x0, H - 6, x0 + round((W - 3 - x0) * frac), H - 4, col)
-        for k in range(len(items)):                       # page dots
-            c.pixel(W - 2 - (len(items) - 1 - k) * 2, 0, WHITE if k == i else (50, 50, 56))
-
-    def _thermo(self, c, y, label, key, lcol):
-        W = c.width
-        tc = self._temp_c(key)
-        col = level_color(tc, "temp")
-        bx, by, r = 6, y + 6, 5
-        x0, x1 = bx + 3, 78
-        c.draw.rounded_rectangle((x0, by - 3, x1, by + 3), radius=3, outline=(80, 80, 90), fill=(14, 14, 18))
-        c.draw.ellipse((bx - r, by - r, bx + r, by + r), outline=(80, 80, 90), fill=col if tc is not None else (30, 30, 36))
-        if tc is not None:
-            fill = x0 + round((x1 - x0 - 2) * max(0.0, min(1.0, (tc - 20) / 80)))
-            c.rect(x0, by - 1, fill, by + 1, col)
-        for f in (0.25, 0.5, 0.75):
-            tx = x0 + round((x1 - x0) * f)
-            c.pixel(tx, by - 4, (70, 70, 80))
-        c.text(83, y + 3, label, "4x6", lcol)
-        c.text_right(W - 1, y + 1, self._deg(key) or "--", "6x10", col)
-
-    def _render_thermo(self, c, t):
-        rows = [(lbl, k, col) for lbl, k, col in (("CPU", "cpu_temp", CPU_COLOR), ("GPU", "gpu_temp", GPU_COLOR))
-                if self.has(k)]
-        if not rows:
-            return
-        ys = [(c.height - 13) // 2] if len(rows) == 1 else [1, 17]
-        for (lbl, k, col), y in zip(rows, ys):
-            self._thermo(c, y, lbl, k, col)
-
-    def _detail_items(self):
-        """[(label, value text, color)] for the extra LibreHardwareMonitor readings."""
-        out = []
-
-        def num(key):
-            got = getattr(self, "lhm_values", {}).get(key) if self._lhm_on() else None
-            return (got[0], got[1]) if got else (None, "")
-
-        def clock(v, unit):
-            if v is None:
-                return None
-            mhz = v / 1000 if "kHz" in unit else v * 1000 if "GHz" in unit else v
-            return f"{mhz / 1000:.2f} GHz" if mhz >= 1000 else f"{mhz:.0f} MHz"
-        v, u = num("gpu_power")
-        if v is not None:
-            out.append(("GPU POWER", f"{v:.0f} W", GPU_COLOR))
-        v, u = num("cpu_power")
-        if v is not None:
-            out.append(("CPU POWER", f"{v:.0f} W", CPU_COLOR))
-        v, u = num("gpu_fan")
-        if v is not None:
-            out.append(("GPU FAN", f"{v:.0f} RPM" if "RPM" in u or not u else f"{v:.0f}{u}", GPU_COLOR))
-        used, uu = num("vram_used")
-        total, tu = num("vram_total")
-        if used is not None:
-            to_gb = (lambda x, unit: x / 1024 if "MB" in unit else x)
-            text = f"{to_gb(used, uu):.1f}" + (f"/{to_gb(total, tu):.0f} GB" if total else " GB")
-            out.append(("VRAM", text, GPU_COLOR))
-        c_ = clock(*num("gpu_clock"))
-        if c_:
-            out.append(("GPU CLOCK", c_, GPU_COLOR))
-        c_ = clock(*num("cpu_clock"))
-        if c_:
-            out.append(("CPU CLOCK", c_, CPU_COLOR))
-        return out
-
-    def _render_details(self, c, t):
-        W, H = c.width, c.height
-        items = self._detail_items()
-        if not items:
-            return self._render_bars(c, t)              # Home Assistant source: no extras, show the bars
-        per = 4
-        pages = (len(items) + per - 1) // per
-        page = int(t // 4) % pages
-        for i, (label, text, col) in enumerate(items[page * per:(page + 1) * per]):
-            y = i * 8
-            c.text(1, y + 1, label, "4x6", col)
-            c.text_right(W - (3 if pages > 1 else 1), y, text, "5x7", WHITE)
-        if pages > 1:
-            for k in range(pages):
-                c.pixel(W - 1, H - 1 - (pages - 1 - k) * 2, WHITE if k == page else (50, 50, 56))
-
-    # -- LibreHardwareMonitor detail layouts ----------------------------------------------
-    def _x(self, key):
-        """(value, unit) of an extra reading (LibreHardwareMonitor), or (None, '')."""
-        got = getattr(self, "lhm_values", {}).get(key) if self._lhm_on() else None
-        return (got[0], got[1]) if got else (None, "")
-
-    @staticmethod
-    def _ghz(v, unit):
+    def _text(self, key):
+        """A stat's current value, short enough for the number panel."""
+        kind = STATS[key][2]
+        if kind == "temp":
+            return self._deg(key) or "--"
+        v = self.stat(key)
         if v is None:
-            return None
-        return v / 1e6 if "kHz" in unit else v if "GHz" in unit else v / 1000
+            return "--"
+        if kind == "pct":
+            return f"{v:.0f}%"
+        if kind == "watts":
+            return f"{v:.0f}W"
+        if kind == "rpm":
+            return f"{v:.0f}"
+        if kind == "ghz":
+            return f"{v:.2f}G"
+        return fmt_rate(v, "B/s").replace("/s", "")       # rate: 18.7MB
 
-    @staticmethod
-    def _gb(v, unit):
-        if v is None:
-            return None
-        return v / 1024 if "MB" in unit else v / 1024 ** 2 if "KB" in unit else v
+    def _value_color(self, key, line_color):
+        """Loads and temperatures warn green / yellow / red; everything else is white."""
+        kind = STATS[key][2]
+        v = self.stat(key)
+        if kind == "pct" and key != "vram":
+            return level_color(v, "load")
+        if kind == "temp":
+            return level_color(v, "temp")
+        return WHITE
 
-    def _render_power(self, c, t):
-        W = c.width
-        gw, cw = self._x("gpu_power")[0], self._x("cpu_power")[0]
-        if gw is None and cw is None:
-            return self._render_bars(c, t)
-        total = (gw or 0) + (cw or 0)
-        load = max(self.value("gpu_load")[0] or 0, self.value("cpu_load")[0] or 0) / 100
-        k = 0.55 + 0.45 * (0.5 + 0.5 * math.sin(t * (2 + 6 * load)))         # pulses faster when busy
-        bolt = [(8, 2), (2, 17), (7, 17), (4, 29), (13, 12), (8, 12), (11, 2)]
-        c.draw.polygon(bolt, fill=scale(YELLOW, k), outline=YELLOW)
-        num = f"{total:.0f}"
-        font = "10x20" if c.text_width(num, "10x20") <= 46 else "7x13B"
-        x = 17
-        x += c.text(x, 6 if font == "10x20" else 10, num, font, WHITE)
-        c.text(x + 1, 16, "W", "6x10", YELLOW)
-        x0, x1 = 77, W - 1
-        rows = [("GPU", gw, GPU_COLOR), ("CPU", cw, CPU_COLOR)]
-        for i, (label, v, col) in enumerate(rows):
-            y = 2 + i * 15
-            c.text(x0, y, label, "4x6", col)
-            c.text_right(x1, y, "--" if v is None else f"{v:.0f}W", "5x7", WHITE)
-            c.rect(x0, y + 8, x1, y + 10, DIM_TRACK)
-            if v and total:
-                c.rect(x0, y + 8, x0 + round((x1 - x0) * v / total), y + 10, col)
-
-    def _gpu_name(self):
-        hw = getattr(self, "lhm_hw", {}).get("gpu_load") or getattr(self, "lhm_hw", {}).get("gpu_temp") or "GPU"
-        name = re.sub(r"(?i)\b(nvidia|amd|intel|geforce|radeon|graphics)\b", "", hw)
-        return re.sub(r"\s+", " ", name).strip().upper() or "GPU"
-
-    def _render_gpucard(self, c, t):
-        W, H = c.width, c.height
-        c.rect(0, 0, W - 1, 7, (24, 16, 36))
-        c.rect(0, 0, 1, 7, GPU_COLOR)
-        c.scroll_text(4, W - 2, 0, self._gpu_name(), "5x7", WHITE, t)
-        gl, gt = self.value("gpu_load")[0], self._deg("gpu_temp")
-        gp, (gc, gcu), (gf, _) = self._x("gpu_power")[0], self._x("gpu_clock"), self._x("gpu_fan")
-        vu, vuu = self._x("vram_used")
-        vt, vtu = self._x("vram_total")
-        ghz = self._ghz(gc, gcu)
-        cells = [("LOAD", "--" if gl is None else f"{gl:.0f}%", level_color(gl, "load")),
-                 ("TEMP", gt or "--", level_color(self._temp_c("gpu_temp"), "temp")),
-                 ("POWER", "--" if gp is None else f"{gp:.0f}W", WHITE),
-                 ("CLOCK", "--" if ghz is None else f"{ghz:.2f}G", WHITE),
-                 ("FAN", "--" if gf is None else f"{gf:.0f}", WHITE),
-                 ("VRAM", "--" if vu is None else (f"{self._gb(vu, vuu):.1f}/{self._gb(vt, vtu):.0f}" if vt else
-                                                   f"{self._gb(vu, vuu):.1f}G"), WHITE)]
-        half = W // 2
-        for i, (label, text, col) in enumerate(cells):
-            x0 = (i % 2) * half
-            y = 9 + (i // 2) * 8
-            c.text(x0 + 2, y + 1, label, "4x6", scale(GPU_COLOR, 0.9))
-            c.text_right(x0 + half - 3, y, text, "5x7", col)
-        c.line(half - 1, 9, half - 1, H - 1, (35, 30, 45))
-
-    def _render_cooling(self, c, t):
-        W = c.width
-        rpm, _u = self._x("gpu_fan")
-        tc = self._temp_c("gpu_temp") if self.value("gpu_temp")[0] is not None else self._temp_c("cpu_temp")
-        col = level_color(tc, "temp") if tc is not None else STEAM_GREY
-        cx, cy, r = 15, 15, 14
-        c.draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=(60, 60, 70))
-        # blades: the real fan turns far too fast to show, so the picture turns at a tenth of a turn per 100 RPM
-        angle = (t * (rpm or 0) / 1000) * 2 * math.pi
-        for b in range(5):
-            a = angle + b * 2 * math.pi / 5
-            tip = [(cx + math.cos(a + d) * rr, cy + math.sin(a + d) * rr) for d, rr in ((0, 3), (0.25, 12), (0.6, 12), (0.5, 3))]
-            c.draw.polygon(tip, fill=scale(col, 0.85))
-        c.draw.ellipse((cx - 3, cy - 3, cx + 3, cy + 3), fill=(40, 40, 46), outline=col)
-        x0 = 34
-        c.text(x0, 0, "GPU FAN", "4x6", scale(WHITE, 0.7))
-        text = "--" if rpm is None else f"{rpm:.0f}"
-        w = c.text(x0, 6, text, "10x20" if c.text_width(text, "10x20") <= 50 else "7x13B", WHITE)
-        c.text(x0 + w + 2, 18, "RPM", "5x7", scale(WHITE, 0.6))
-        for i, (label, key, lc) in enumerate((("GPU", "gpu_temp", GPU_COLOR), ("CPU", "cpu_temp", CPU_COLOR))):
-            y = 4 + i * 13
-            c.text(W - 30, y, label, "4x6", lc)
-            c.text_right(W - 1, y + 5, self._deg(key) or "--", "6x10", level_color(self._temp_c(key), "temp"))
-
-    def _render_memory(self, c, t):
-        W = c.width
-        rows = []
-        rv = self.value("ram")[0]
-        if rv is not None:
-            rows.append(("RAM", rv / 100, f"{rv:.0f}%", CPU_COLOR))
-        vu, vuu = self._x("vram_used")
-        vt, vtu = self._x("vram_total")
-        if vu is not None:
-            used, total = self._gb(vu, vuu), self._gb(vt, vtu)
-            rows.append(("VRAM", used / total if total else None,
-                         f"{used:.1f}/{total:.0f} GB" if total else f"{used:.1f} GB", GPU_COLOR))
-        if not rows:
-            return self._render_bars(c, t)
-        for i, (label, frac, text, col) in enumerate(rows):
-            y = 1 + i * 16
-            c.text(1, y, label, "5x7", col)
-            c.text_right(W - 1, y, text, "5x7", WHITE)
-            c.draw.rounded_rectangle((1, y + 9, W - 2, y + 13), radius=2, fill=DIM_TRACK)
-            if frac:
-                fx = 1 + round((W - 3) * max(0.0, min(1.0, frac)))
-                c.draw.rounded_rectangle((1, y + 9, max(3, fx), y + 13), radius=2,
-                                         fill=level_color(frac * 100, "load") if label == "RAM" else col)
-
-    def _dial(self, c, cx, cy, r, frac, col, label, text):
-        box = (cx - r, cy - r, cx + r, cy + r)
-        c.draw.arc(box, 180, 360, fill=DIM_TRACK, width=2)
-        if frac is not None:
-            c.draw.arc(box, 180, 180 + 180 * max(0.0, min(1.0, frac)), fill=col, width=2)
-        for f in (0, 0.25, 0.5, 0.75, 1):                 # tick marks
-            a = math.pi + math.pi * f
-            c.line(round(cx + math.cos(a) * (r - 4)), round(cy + math.sin(a) * (r - 4)),
-                   round(cx + math.cos(a) * (r - 2)), round(cy + math.sin(a) * (r - 2)), (90, 90, 100))
-        if frac is not None:
-            a = math.pi + math.pi * max(0.0, min(1.0, frac))
-            c.draw.line((cx, cy, cx + math.cos(a) * (r - 3), cy + math.sin(a) * (r - 3)), fill=WHITE, width=1)
-        c.draw.ellipse((cx - 1, cy - 1, cx + 1, cy + 1), fill=WHITE)
-        c.text_centered(cy - 9, label, "4x6", col, cx - 8, cx + 9)
-        c.text_centered(cy + 2, text, "5x7", WHITE, cx - r - 4, cx + r + 5)
-
-    def _render_clocks(self, c, t):
-        W = c.width
-        g = self._ghz(*self._x("gpu_clock"))
-        cpu = self._ghz(*self._x("cpu_clock"))
-        if g is None and cpu is None:
-            return self._render_bars(c, t)
-        half = W // 2
-        self._dial(c, half // 2, 22, 19, None if g is None else g / 3.2, GPU_COLOR, "GPU",
-                   "--" if g is None else f"{g:.2f}GHz")
-        self._dial(c, half + half // 2, 22, 19, None if cpu is None else cpu / 6.0, CPU_COLOR, "CPU",
-                   "--" if cpu is None else f"{cpu:.2f}GHz")
-
-    # -- graph layouts ---------------------------------------------------------------------
     def _span(self):
         try:
             return max(60, int(float(self.cfg.get("graph_minutes") or 10)) * 60)
@@ -955,27 +507,37 @@ class PCStatsBoard(Board):
         now, span = time.time(), self._span()
         return [(ts, v) for ts, v in self.series.get(key, ()) if now - ts <= span]
 
-    def _plot(self, c, box, key, lo, hi, color, fill=None, line=True):
-        """A step graph of a metric's history inside box=(x0, y0, x1, y1); fill = color under the line."""
+    def _range(self, key):
+        """(low, high) for a stat's line: fixed for % and temperatures, otherwise scaled to the data shown."""
+        fixed = STATS[key][3]
+        if fixed:
+            return fixed
+        top = max([v for _ts, v in self._pts(key)] + [0])
+        floor = {"watts": 50, "rpm": 500, "ghz": 1, "rate": 1e5}.get(STATS[key][2], 1)
+        return 0, max(floor, top * 1.1)
+
+    def _plot(self, c, box, key, color, fill=None):
+        """A step graph of a stat's history inside box=(x0, y0, x1, y1); fill = a color under the line."""
         x0, y0, x1, y1 = box
         now, span = time.time(), self._span()
         pts = self._pts(key)
         if not pts:
             return
+        lo, hi = self._range(key)
         rng = (hi - lo) or 1
 
         def xy(ts, v):
             return (x1 - round((now - ts) / span * (x1 - x0)),
                     y1 - round((y1 - y0) * max(0.0, min(1.0, (v - lo) / rng))))
-        coords = [xy(ts, v) for ts, v in pts] + [(x1, xy(pts[-1][0], pts[-1][1])[1])]
+        coords = [xy(ts, v) for ts, v in pts]
+        coords.append((x1, coords[-1][1]))              # the latest value holds to the right edge
         if fill:
             for (xa, ya), (xb, _yb) in zip(coords, coords[1:]):
-                for x in range(xa, xb + 1):
+                for x in range(max(x0, xa), xb + 1):
                     c.line(x, ya, x, y1, fill)
-        if line:
-            for (xa, ya), (xb, yb) in zip(coords, coords[1:]):
-                c.line(xa, ya, xb, ya, color)
-                c.line(xb, ya, xb, yb, color)
+        for (xa, ya), (xb, yb) in zip(coords, coords[1:]):
+            c.line(xa, ya, xb, ya, color)
+            c.line(xb, ya, xb, yb, color)
 
     @staticmethod
     def _grid(c, box, fracs=(0.5,)):
@@ -986,124 +548,65 @@ class PCStatsBoard(Board):
             for x in range(x0, x1, 3):
                 c.pixel(x, y, (30, 30, 36))
 
-    def _side(self, c, rows, x0=87):
-        """The number panel on the right: [(label, text, label color, value color)], 8 px a row."""
-        W = c.width
-        for i, (label, text, lcol, vcol) in enumerate(rows[:4]):
-            y = 1 + i * 8
-            if label:
-                c.text(x0, y, label, "4x6", lcol)
-            c.text_right(W - 1, y, text, "4x6", vcol)
-
-    def _render_graph_temp(self, c, t):
-        H = c.height
-        box = (0, 1, 83, H - 2)
-        self._grid(c, box, (0.5,))
-        lo, hi = 30, 100                                   # °C
-        self._plot(c, box, "cpu_temp", lo, hi, CPU_COLOR)
-        self._plot(c, box, "gpu_temp", lo, hi, GPU_COLOR)
-        rows = []
-        for label, key, col in (("CPU", "cpu_temp", CPU_COLOR), ("GPU", "gpu_temp", GPU_COLOR)):
-            rows.append((label, self._deg(key) or "--", col, level_color(self._temp_c(key), "temp")))
-        hot = max((v for k in ("cpu_temp", "gpu_temp") for _ts, v in self._pts(k)), default=None)
-        if hot is not None:
-            disp = hot * 9 / 5 + 32 if self.cfg.get("temp_unit") == "f" or "F" in (self.value("gpu_temp")[1] or "") else hot
-            rows.append(("MAX", f"{disp:.0f}°", scale(WHITE, 0.6), level_color(hot, "temp")))
-        self._side(c, rows)
-
-    def _render_graph_area(self, c, t):
-        H = c.height
-        box = (0, 1, 83, H - 2)
-        self._grid(c, box, (0.5,))
-        self._plot(c, box, "gpu_load", 0, 100, GPU_COLOR, fill=scale(GPU_COLOR, 0.35))
-        self._plot(c, box, "cpu_load", 0, 100, CPU_COLOR)
-        rows = [("GPU", self._pct("gpu_load"), GPU_COLOR, level_color(self.value("gpu_load")[0], "load")),
-                ("CPU", self._pct("cpu_load"), CPU_COLOR, level_color(self.value("cpu_load")[0], "load"))]
-        avg = [v for _ts, v in self._pts("gpu_load")]
-        if avg:
-            rows.append(("AVG", f"{sum(avg) / len(avg):.0f}%", scale(WHITE, 0.6), scale(GPU_COLOR, 0.9)))
-        self._side(c, rows)
-
-    def _pct(self, key):
-        v = self.value(key)[0]
-        return "--" if v is None else f"{v:.0f}%"
-
-    def _render_graph_stack(self, c, t):
-        W = c.width
-        for i, (label, key, col) in enumerate((("GPU", "gpu_load", GPU_COLOR), ("CPU", "cpu_load", CPU_COLOR))):
-            y0, y1 = i * 16 + 1, i * 16 + 14
-            box = (0, y0, 99, y1)
-            c.rect(*box, (10, 10, 14))
-            self._plot(c, box, key, 0, 100, col, fill=scale(col, 0.3))
-            c.text(103, y0, label, "4x6", col)
-            v = self.value(key)[0]
-            c.text_right(W - 1, y0 + 6, self._pct(key), "5x7", level_color(v, "load"))
-
-    def _render_graph_columns(self, c, t):
+    def _numbers(self, c, lines, x0=87):
+        """The number panel on the right: a row per line (label in the line's color, then the value)."""
         W, H = c.width, c.height
-        x0, x1, y0, y1 = 0, 99, 1, H - 2
-        c.rect(x0, y0, x1, y1, (10, 10, 14))
-        n = 25                                             # columns (each a slice of the time span)
-        cw = (x1 - x0 + 1) // n
-        now, span = time.time(), self._span()
-        pts = self._pts("gpu_load")
-        for i in range(n):
-            t0 = now - span + i * span / n
-            vals = [v for ts, v in pts if t0 <= ts < t0 + span / n]
-            if not vals:
-                continue
-            v = max(vals)
-            h = round((y1 - y0) * v / 100)
-            x = x0 + i * cw
-            c.rect(x, y1 - h, x + cw - 2, y1, level_color(v, "load"))
-        c.text(103, 1, "GPU", "4x6", GPU_COLOR)
-        c.text_right(W - 1, 8, self._pct("gpu_load"), "5x7", level_color(self.value("gpu_load")[0], "load"))
-        c.text(103, 18, "CPU", "4x6", CPU_COLOR)
-        c.text_right(W - 1, 25, self._pct("cpu_load"), "4x6", level_color(self.value("cpu_load")[0], "load"))
+        step = max(8, min(10, H // max(1, len(lines))))
+        y = (H - step * len(lines)) // 2 + 1
+        for key, col in lines:
+            c.text(x0, y, STATS[key][0], "4x6", col)
+            c.text_right(W - 1, y, self._text(key), "4x6", self._value_color(key, col))
+            y += step
 
-    def _render_graph_power(self, c, t):
+    def render(self, c, slide, t):
+        lines = self._lines()
+        if not lines:
+            c.text_centered(12, "PICK GRAPH LINES", "5x7", GRAY)
+            return
+        lay = self.cfg.get("layout", "graph")
+        {"wide": self._render_wide, "area": self._render_area, "lanes": self._render_lanes}.get(
+            lay, self._render_graph)(c, lines, t)
+
+    def _render_graph(self, c, lines, t, fill=False):
         H = c.height
-        pts = self._pts("power")
-        if not pts:
-            return self._render_graph(c, t)
         box = (0, 1, 83, H - 2)
-        self._grid(c, box, (0.5,))
-        top = max(100.0, max(v for _ts, v in pts) * 1.1)
-        self._plot(c, box, "power", 0, top, YELLOW, fill=scale(YELLOW, 0.28))
-        now_w = pts[-1][1]
-        peak = max(v for _ts, v in pts)
-        avg = sum(v for _ts, v in pts) / len(pts)
-        self._side(c, [("NOW", f"{now_w:.0f}W", YELLOW, WHITE), ("PEAK", f"{peak:.0f}W", scale(WHITE, 0.6), RED),
-                       ("AVG", f"{avg:.0f}W", scale(WHITE, 0.6), scale(WHITE, 0.8))])
+        self._grid(c, box)
+        for key, col in reversed(lines):                 # line 1 drawn last, on top
+            self._plot(c, box, key, col, fill=scale(col, 0.28) if fill else None)
+        self._numbers(c, lines)
 
-    def _render_graph_net(self, c, t):
-        H = c.height
-        down, up = self._pts("net_down"), self._pts("net_up")
-        if not down and not up:
-            return self._render_graph(c, t)
-        box = (0, 1, 83, H - 2)
-        self._grid(c, box, (0.5,))
-        top = max([1e5] + [v * 1.1 for _ts, v in down + up])          # at least 100 KB/s tall
-        self._plot(c, box, "net_down", 0, top, CPU_COLOR, fill=scale(CPU_COLOR, 0.3))
-        self._plot(c, box, "net_up", 0, top, GPU_COLOR)
-        dv, du = self.value("net_down")
-        uv, uu = self.value("net_up")
-        self._side(c, [("DOWN", "", CPU_COLOR, WHITE), (None, fmt_rate(dv, du), None, CPU_COLOR),
-                       ("UP", "", GPU_COLOR, WHITE), (None, fmt_rate(uv, uu), None, GPU_COLOR)])
+    def _render_area(self, c, lines, t):
+        self._render_graph(c, lines, t, fill=True)
 
-    def _render_graph_wide(self, c, t):
+    def _render_wide(self, c, lines, t):
         W, H = c.width, c.height
         box = (0, 0, W - 1, H - 1)
         self._grid(c, box, (0.25, 0.5, 0.75))
-        self._plot(c, box, "gpu_load", 0, 100, GPU_COLOR, fill=scale(GPU_COLOR, 0.18))
-        self._plot(c, box, "cpu_load", 0, 100, CPU_COLOR)
-        # the numbers, small in the top corners, on a dark backing so the lines stay readable around them
-        for label, key, col, right in (("GPU", "gpu_load", GPU_COLOR, False), ("CPU", "cpu_load", CPU_COLOR, True)):
-            text = f"{label} {self._pct(key)}"
-            w = c.text_width(text, "4x6")
+        for key, col in reversed(lines):
+            self._plot(c, box, key, col)
+        # the numbers in the corners (top-left, top-right, bottom-left, bottom-right), on a dark backing
+        spots = [(False, 0), (True, 0), (False, H - 6), (True, H - 6)]
+        for (key, col), (right, y) in zip(lines, spots):
+            label, val = STATS[key][0], self._text(key)
+            w = c.text_width(f"{label} {val}", "4x6")
             x = W - w - 1 if right else 1
-            c.rect(x - 1, 0, x + w, 6, (0, 0, 0))
-            c.text(x, 0, label, "4x6", col)
-            c.text(x + c.text_width(label + " ", "4x6"), 0, self._pct(key), "4x6", level_color(self.value(key)[0], "load"))
-        mins = self._span() // 60
-        c.text_right(W - 1, H - 6, f"{mins}M" if mins < 60 else "1H", "4x6", (70, 70, 80))
+            c.rect(x - 1, y, x + w, y + 6, (0, 0, 0))
+            lw = c.text(x, y, label + " ", "4x6", col)
+            c.text(x + lw, y, val, "4x6", self._value_color(key, col))
+
+    def _render_lanes(self, c, lines, t):
+        W, H = c.width, c.height
+        n = len(lines)
+        lane = H // n
+        for i, (key, col) in enumerate(lines):
+            y0 = i * lane
+            y1 = y0 + lane - 2 if i < n - 1 else H - 1
+            box = (0, y0, 99, y1)
+            c.rect(*box, (10, 10, 14))
+            self._plot(c, box, key, col, fill=scale(col, 0.3))
+            if lane >= 14:                               # roomy lanes: label above the number
+                c.text(102, y0, STATS[key][0], "4x6", col)
+                c.text_right(W - 1, y0 + lane - 8, self._text(key), "5x7" if lane >= 16 else "4x6",
+                             self._value_color(key, col))
+            else:                                        # tight lanes: just the number, in the line's color
+                c.text_right(W - 1, y0 + (lane - 7) // 2, self._text(key), "5x7" if lane >= 9 else "4x6", col)
