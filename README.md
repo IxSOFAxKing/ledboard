@@ -515,6 +515,13 @@ With Home Assistant instead: Any Home Assistant sensors work; [HASS.Agent](https
 - **Spotlight**: one stat at a time in huge numbers (GPU, CPU, temperatures, memory, network), switching every 3 seconds.
 - **Thermometers**: CPU and GPU temperatures as thermometers that fill and change color.
 - **Details** (LibreHardwareMonitor): GPU and CPU power, GPU fan speed, GPU memory used / total, and GPU and CPU clocks, four to a page.
+- **Power** (LibreHardwareMonitor): total watts (GPU + CPU) in big numbers with a lightning bolt that pulses faster under load, and how it splits between GPU and CPU.
+- **GPU card** (LibreHardwareMonitor): your graphics card's name, with load, temperature, power, clock, fan and GPU memory.
+- **Cooling** (LibreHardwareMonitor): a fan picture that spins faster as the real GPU fan does and changes color with the temperature, plus the RPM and GPU / CPU temperatures.
+- **Memory** (LibreHardwareMonitor): system RAM and GPU memory as two big bars, with GB used / total.
+- **Clocks** (LibreHardwareMonitor): GPU and CPU clock speedometers.
+
+The LibreHardwareMonitor layouts fall back to Bars with the Home Assistant source.
 
 A temperature sensor that reads 0 (HASS.Agent reports that when it can't read the sensor, for example an unsupported GPU) shows as "--" instead of a fake 0°C / 32°F, and the Status tab points it out.
 
