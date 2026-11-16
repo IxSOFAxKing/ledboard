@@ -505,7 +505,7 @@ With Home Assistant instead: Any Home Assistant sensors work; [HASS.Agent](https
 1. In HASS.Agent, add sensors: **CpuLoad**, **GpuLoad**, **GpuTemperature**, **MemoryUsage**, plus a CPU temperature and network sensors if you have them. Set their update interval to 5–10 seconds for a lively board.
 2. On the **Gaming PC** board, click **Find my PC's sensors**, check what it filled in, and **Save**.
 
-**The graph.** Pick up to **4 lines** under **Screens → Graph**, and give each one a color. The stats you can graph:
+**The graph.** Pick up to **4 lines** under **Screens → Graph**, and give each one a color. Turn off a line's **Show on the graph** to list just its number with the others, without drawing a line. In Lanes, it shows the stat's name and number instead of a strip. The stats you can graph:
 - GPU load, CPU load, memory used
 - GPU and CPU temperature
 - network download and upload

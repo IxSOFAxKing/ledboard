@@ -115,7 +115,8 @@ class PCStatsBoard(Board):
                 "takeover": False, "temp_unit": "auto", "source": "homeassistant", "lhm_url": "", "lhm_refresh": 3, "graph_minutes": 10,
                 **{f"{k}_entity": "" for k in METRICS}, **{f"lhm_{k}": "" for k in LHM_KEYS},
                 **{f"line{n + 1}": st for n, (st, _c) in enumerate(LINE_DEFAULTS)},
-                **{f"line{n + 1}_color": col for n, (_s, col) in enumerate(LINE_DEFAULTS)}}
+                **{f"line{n + 1}_color": col for n, (_s, col) in enumerate(LINE_DEFAULTS)},
+                **{f"line{n + 1}_graph": True for n in range(LINES)}}
     FIELDS = [
         {"key": "source", "label": "Get the stats from", "type": "select", "options": ["homeassistant", "lhm"],
          "option_labels": {"homeassistant": "Home Assistant (e.g. HASS.Agent sensors)",
@@ -140,7 +141,9 @@ class PCStatsBoard(Board):
         *[f for n in range(1, LINES + 1) for f in (
             {"key": f"line{n}", "label": f"Line {n}", "type": "select", "options": ["none"] + list(STATS),
              "option_labels": {"none": "(not used)", **{k: v[1] for k, v in STATS.items()}}},
-            {"key": f"line{n}_color", "label": f"Line {n} color", "type": "color"})],
+            {"key": f"line{n}_color", "label": f"Line {n} color", "type": "color"},
+            {"key": f"line{n}_graph", "label": f"Show line {n} on the graph", "type": "bool",
+             "help": "Off: its number still shows with the others, but no line is drawn." if n == 1 else None})],
         {"key": "show", "label": "Show the board", "type": "select", "options": list(SHOW), "option_labels": SHOW,
          "help": "'While the PC is on' hides it when the sensors go unavailable (PC off or asleep). 'While gaming' "
                  "uses the Steam board (including games seen through Home Assistant)."},
@@ -157,7 +160,7 @@ class PCStatsBoard(Board):
         ("Basics", "Sensors", ["source", "lhm_url", "discover"] + [f"{k}_entity" for k in METRICS]
          + [f"lhm_{k}" for k in LHM_KEYS]),
         ("Screens", "Graph", ["layout", "graph_minutes"] + [k for n in range(1, LINES + 1)
-                                                           for k in (f"line{n}", f"line{n}_color")]),
+                                                           for k in (f"line{n}", f"line{n}_color", f"line{n}_graph")]),
         ("Screens", "When to show", ["show", "takeover"]),
         ("Look", "Units", ["temp_unit"]),
         ("Advanced", "Timing", ["duration", "refresh", "lhm_refresh"]),
@@ -457,12 +460,16 @@ class PCStatsBoard(Board):
 
     # -- drawing ---------------------------------------------------------------------
     def _lines(self):
-        """The graph's lines: [(stat, color)] from the Line 1-4 settings."""
-        out = []
+        """The lines: [(stat, color)] from the Line 1-4 settings. Which of them are drawn on the graph (rather
+        than only listed with the numbers) goes into self._graphed."""
+        out, graphed = [], set()
         for n in range(1, LINES + 1):
             key = self.cfg.get(f"line{n}", LINE_DEFAULTS[n - 1][0])
             if key in STATS and key not in [k for k, _c in out]:
                 out.append((key, hex_to_rgb(self.cfg.get(f"line{n}_color") or LINE_DEFAULTS[n - 1][1])))
+                if self.cfg.get(f"line{n}_graph", True) is not False:
+                    graphed.add(key)
+        self._graphed = graphed
         return out
 
     def _deg(self, key):
@@ -516,7 +523,7 @@ class PCStatsBoard(Board):
         floor = {"watts": 50, "rpm": 500, "ghz": 1, "rate": 1e5}.get(STATS[key][2], 1)
         return 0, max(floor, top * 1.1)
 
-    def _plot(self, c, box, key, color, fill=None):
+    def _plot(self, c, box, key, color, fill=None, line=True):
         """A step graph of a stat's history inside box=(x0, y0, x1, y1); fill = a color under the line."""
         x0, y0, x1, y1 = box
         now, span = time.time(), self._span()
@@ -535,9 +542,10 @@ class PCStatsBoard(Board):
             for (xa, ya), (xb, _yb) in zip(coords, coords[1:]):
                 for x in range(max(x0, xa), xb + 1):
                     c.line(x, ya, x, y1, fill)
-        for (xa, ya), (xb, yb) in zip(coords, coords[1:]):
-            c.line(xa, ya, xb, ya, color)
-            c.line(xb, ya, xb, yb, color)
+        if line:
+            for (xa, ya), (xb, yb) in zip(coords, coords[1:]):
+                c.line(xa, ya, xb, ya, color)
+                c.line(xb, ya, xb, yb, color)
 
     @staticmethod
     def _grid(c, box, fracs=(0.5,)):
@@ -571,8 +579,12 @@ class PCStatsBoard(Board):
         H = c.height
         box = (0, 1, 83, H - 2)
         self._grid(c, box)
-        for key, col in reversed(lines):                 # line 1 drawn last, on top
-            self._plot(c, box, key, col, fill=scale(col, 0.28) if fill else None)
+        drawn = [(k, col) for k, col in reversed(lines) if k in self._graphed]     # line 1 drawn last, on top
+        if fill:                                         # every filled area first, then every line over them
+            for key, col in drawn:
+                self._plot(c, box, key, col, fill=scale(col, 0.28), line=False)
+        for key, col in drawn:
+            self._plot(c, box, key, col)
         self._numbers(c, lines)
 
     def _render_area(self, c, lines, t):
@@ -583,7 +595,8 @@ class PCStatsBoard(Board):
         box = (0, 0, W - 1, H - 1)
         self._grid(c, box, (0.25, 0.5, 0.75))
         for key, col in reversed(lines):
-            self._plot(c, box, key, col)
+            if key in self._graphed:
+                self._plot(c, box, key, col)
         # the numbers in the corners (top-left, top-right, bottom-left, bottom-right), on a dark backing
         spots = [(False, 0), (True, 0), (False, H - 6), (True, H - 6)]
         for (key, col), (right, y) in zip(lines, spots):
@@ -602,8 +615,11 @@ class PCStatsBoard(Board):
             y0 = i * lane
             y1 = y0 + lane - 2 if i < n - 1 else H - 1
             box = (0, y0, 99, y1)
-            c.rect(*box, (10, 10, 14))
-            self._plot(c, box, key, col, fill=scale(col, 0.3))
+            if key not in self._graphed:                 # number only: the label in the strip's place
+                c.text(1, y0 + max(0, (y1 - y0 - 6) // 2), STATS[key][1].split(" (")[0].upper(), "4x6", col)
+            else:
+                c.rect(*box, (10, 10, 14))
+                self._plot(c, box, key, col, fill=scale(col, 0.3))
             if lane >= 14:                               # roomy lanes: label above the number
                 c.text(102, y0, STATS[key][0], "4x6", col)
                 c.text_right(W - 1, y0 + lane - 8, self._text(key), "5x7" if lane >= 16 else "4x6",
