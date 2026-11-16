@@ -48,7 +48,15 @@ LAYOUTS = {
     "cooling": "Cooling (an animated fan at the real fan speed, with temperatures; LibreHardwareMonitor)",
     "memory": "Memory (system RAM and GPU memory bars; LibreHardwareMonitor)",
     "clocks": "Clocks (GPU and CPU clock speedometers; LibreHardwareMonitor)",
+    "graph_temp": "Temperature graph (CPU and GPU temperatures over time)",
+    "graph_area": "Area graph (GPU load filled in, CPU load as a line on top)",
+    "graph_stack": "Stacked graphs (GPU above, CPU below, each with its own number)",
+    "graph_columns": "Columns (GPU load as green / yellow / red bars over time)",
+    "graph_power": "Power graph (total watts over time with the peak; LibreHardwareMonitor)",
+    "graph_net": "Network graph (download and upload over time)",
+    "graph_wide": "Wide graph (CPU and GPU load across the whole board)",
 }
+GRAPH_SPANS = {2: "2 minutes", 5: "5 minutes", 10: "10 minutes", 30: "30 minutes", 60: "1 hour"}
 LHM_LABELS = {
     "cpu_load": "CPU load", "cpu_temp": "CPU temperature", "gpu_load": "GPU load", "gpu_temp": "GPU temperature",
     "ram": "Memory used", "net_down": "Network download", "net_up": "Network upload",
@@ -67,6 +75,18 @@ def level_color(value, kind):
         return GRAY
     lo, hi = (65, 80) if kind == "temp" else (60, 85)
     return GREEN if value < lo else YELLOW if value < hi else RED
+
+
+RATE_FACTORS = {"b/s": 1, "B/s": 1, "kB/s": 1e3, "KB/s": 1e3, "KiB/s": 1024, "MB/s": 1e6, "MiB/s": 1024 ** 2,
+                "GB/s": 1e9, "bit/s": 0.125, "kbit/s": 125, "Kbps": 125, "Mbit/s": 125e3, "Mbps": 125e3,
+                "Gbit/s": 125e6}
+
+
+def to_bytes(value, unit):
+    """A network rate in bytes/s, or None."""
+    if value is None:
+        return None
+    return value * RATE_FACTORS.get((unit or "").strip(), 1)
 
 
 def fmt_rate(value, unit):
@@ -95,7 +115,7 @@ class PCStatsBoard(Board):
                    "(e.g. HASS.Agent sensors), updated live.")
     refresh = 30
     DEFAULTS = {"enabled": False, "duration": 10, "refresh": 30, "layout": "bars", "show": "online",
-                "takeover": False, "temp_unit": "auto", "source": "homeassistant", "lhm_url": "", "lhm_refresh": 3,
+                "takeover": False, "temp_unit": "auto", "source": "homeassistant", "lhm_url": "", "lhm_refresh": 3, "graph_minutes": 10,
                 **{f"{k}_entity": "" for k in METRICS}, **{f"lhm_{k}": "" for k in LHM_KEYS}}
     FIELDS = [
         {"key": "source", "label": "Get the stats from", "type": "select", "options": ["homeassistant", "lhm"],
@@ -122,6 +142,8 @@ class PCStatsBoard(Board):
          "help": "'While the PC is on' hides it when the sensors go unavailable (PC off or asleep). 'While gaming' "
                  "uses the Steam board (including games seen through Home Assistant)."},
         {"key": "takeover", "label": "Take over the display while gaming", "type": "bool"},
+        {"key": "graph_minutes", "label": "Graph time span", "type": "select", "options": list(GRAPH_SPANS),
+         "option_labels": GRAPH_SPANS, "help": "How far back the graph layouts look. History starts when LEDBoard starts."},
         {"key": "temp_unit", "label": "Temperatures in", "type": "select", "options": ["auto", "c", "f"],
          "option_labels": {"auto": "Whatever the sensor reports", "c": "°C", "f": "°F"}},
         {"key": "duration", "label": "Seconds on screen", "type": "number"},
@@ -131,7 +153,7 @@ class PCStatsBoard(Board):
     FIELDS = organize(FIELDS, [
         ("Basics", "Sensors", ["source", "lhm_url", "discover"] + [f"{k}_entity" for k in METRICS]
          + [f"lhm_{k}" for k in LHM_KEYS]),
-        ("Screens", "Display", ["layout", "show", "takeover"]),
+        ("Screens", "Display", ["layout", "graph_minutes", "show", "takeover"]),
         ("Look", "Units", ["temp_unit"]),
         ("Advanced", "Timing", ["duration", "refresh", "lhm_refresh"]),
     ])
@@ -139,7 +161,8 @@ class PCStatsBoard(Board):
     def __init__(self, cfg, app):
         super().__init__(cfg, app)
         self.states = {}                     # entity_id -> HA state dict
-        self.history = deque(maxlen=900)     # (time, cpu %, gpu %)
+        self.history = deque(maxlen=4000)    # (time, cpu %, gpu %): up to an hour at one sample a second
+        self.series = {}                     # metric -> deque of (time, value) for the graph layouts
         self._ws = None
 
     # -- data -------------------------------------------------------------------
@@ -295,7 +318,23 @@ class PCStatsBoard(Board):
             f = self._frac(key)                         # where the meter is (0..1), whatever the units
             if f is not None and (key not in peaks or f >= self._peak_frac(key)):
                 peaks[key] = (f, now)
-        cpu, gpu = self.value("cpu_load")[0], self.value("gpu_load")[0]
+        # every graphable metric, at most once a second (temperatures in °C, network in bytes/s)
+        point = {k: self.value(k)[0] for k in ("cpu_load", "gpu_load", "ram")}
+        point.update(cpu_temp=self._temp_c("cpu_temp"), gpu_temp=self._temp_c("gpu_temp"))
+        gw, cw = (self._x("gpu_power")[0], self._x("cpu_power")[0]) if self._lhm_on() else (None, None)
+        point["power"] = None if gw is None and cw is None else (gw or 0) + (cw or 0)
+        for k in ("net_down", "net_up"):
+            v, u = self.value(k)
+            point[k] = to_bytes(v, u)
+        for k, v in point.items():
+            if v is None:
+                continue
+            q = self.series.setdefault(k, deque(maxlen=4000))
+            if q and now - q[-1][0] < 1:
+                q[-1] = (now, v)
+            else:
+                q.append((now, v))
+        cpu, gpu = point["cpu_load"], point["gpu_load"]
         if cpu is None and gpu is None:
             return
         if self.history and now - self.history[-1][0] < 1:
@@ -407,7 +446,11 @@ class PCStatsBoard(Board):
         lay = self.cfg.get("layout", "bars")
         {"gauges": self._render_gauges, "graph": self._render_graph, "gaming": self._render_gaming,
          "meters": self._render_meters, "split": self._render_split, "spotlight": self._render_spotlight,
-         "thermo": self._render_thermo, "details": self._render_details, "power": self._render_power,
+         "thermo": self._render_thermo, "details": self._render_details,
+         "graph_temp": self._render_graph_temp, "graph_area": self._render_graph_area,
+         "graph_stack": self._render_graph_stack, "graph_columns": self._render_graph_columns,
+         "graph_power": self._render_graph_power, "graph_net": self._render_graph_net,
+         "graph_wide": self._render_graph_wide, "power": self._render_power,
          "gpucard": self._render_gpucard, "cooling": self._render_cooling, "memory": self._render_memory,
          "clocks": self._render_clocks}.get(lay, self._render_bars)(c, t)
 
@@ -488,7 +531,8 @@ class PCStatsBoard(Board):
             for x in range(gx0, gx1, 3):
                 c.pixel(x, y, (30, 30, 36))
         now = time.time()
-        pts = [p for p in self.history if now - p[0] <= HISTORY_SECONDS]
+        span = self._span()
+        pts = [p for p in self.history if now - p[0] <= span]
         for idx, col in ((1, CPU_COLOR), (2, GPU_COLOR)):
             prev = None
             for ts, *vals in pts:
@@ -496,7 +540,7 @@ class PCStatsBoard(Board):
                 if v is None:
                     prev = None
                     continue
-                x = gx1 - round((now - ts) / HISTORY_SECONDS * (gx1 - gx0))
+                x = gx1 - round((now - ts) / span * (gx1 - gx0))
                 y = gy1 - round((gy1 - gy0) * max(0, min(100, v)) / 100)
                 if prev:
                     c.line(prev[0], prev[1], x, prev[1], col)      # step lines: a value holds until the next one
@@ -899,3 +943,167 @@ class PCStatsBoard(Board):
                    "--" if g is None else f"{g:.2f}GHz")
         self._dial(c, half + half // 2, 22, 19, None if cpu is None else cpu / 6.0, CPU_COLOR, "CPU",
                    "--" if cpu is None else f"{cpu:.2f}GHz")
+
+    # -- graph layouts ---------------------------------------------------------------------
+    def _span(self):
+        try:
+            return max(60, int(float(self.cfg.get("graph_minutes") or 10)) * 60)
+        except (TypeError, ValueError):
+            return 600
+
+    def _pts(self, key):
+        now, span = time.time(), self._span()
+        return [(ts, v) for ts, v in self.series.get(key, ()) if now - ts <= span]
+
+    def _plot(self, c, box, key, lo, hi, color, fill=None, line=True):
+        """A step graph of a metric's history inside box=(x0, y0, x1, y1); fill = color under the line."""
+        x0, y0, x1, y1 = box
+        now, span = time.time(), self._span()
+        pts = self._pts(key)
+        if not pts:
+            return
+        rng = (hi - lo) or 1
+
+        def xy(ts, v):
+            return (x1 - round((now - ts) / span * (x1 - x0)),
+                    y1 - round((y1 - y0) * max(0.0, min(1.0, (v - lo) / rng))))
+        coords = [xy(ts, v) for ts, v in pts] + [(x1, xy(pts[-1][0], pts[-1][1])[1])]
+        if fill:
+            for (xa, ya), (xb, _yb) in zip(coords, coords[1:]):
+                for x in range(xa, xb + 1):
+                    c.line(x, ya, x, y1, fill)
+        if line:
+            for (xa, ya), (xb, yb) in zip(coords, coords[1:]):
+                c.line(xa, ya, xb, ya, color)
+                c.line(xb, ya, xb, yb, color)
+
+    @staticmethod
+    def _grid(c, box, fracs=(0.5,)):
+        x0, y0, x1, y1 = box
+        c.rect(x0, y0, x1, y1, (10, 10, 14))
+        for f in fracs:
+            y = y1 - round((y1 - y0) * f)
+            for x in range(x0, x1, 3):
+                c.pixel(x, y, (30, 30, 36))
+
+    def _side(self, c, rows, x0=87):
+        """The number panel on the right: [(label, text, label color, value color)], 8 px a row."""
+        W = c.width
+        for i, (label, text, lcol, vcol) in enumerate(rows[:4]):
+            y = 1 + i * 8
+            if label:
+                c.text(x0, y, label, "4x6", lcol)
+            c.text_right(W - 1, y, text, "4x6", vcol)
+
+    def _render_graph_temp(self, c, t):
+        H = c.height
+        box = (0, 1, 83, H - 2)
+        self._grid(c, box, (0.5,))
+        lo, hi = 30, 100                                   # °C
+        self._plot(c, box, "cpu_temp", lo, hi, CPU_COLOR)
+        self._plot(c, box, "gpu_temp", lo, hi, GPU_COLOR)
+        rows = []
+        for label, key, col in (("CPU", "cpu_temp", CPU_COLOR), ("GPU", "gpu_temp", GPU_COLOR)):
+            rows.append((label, self._deg(key) or "--", col, level_color(self._temp_c(key), "temp")))
+        hot = max((v for k in ("cpu_temp", "gpu_temp") for _ts, v in self._pts(k)), default=None)
+        if hot is not None:
+            disp = hot * 9 / 5 + 32 if self.cfg.get("temp_unit") == "f" or "F" in (self.value("gpu_temp")[1] or "") else hot
+            rows.append(("MAX", f"{disp:.0f}°", scale(WHITE, 0.6), level_color(hot, "temp")))
+        self._side(c, rows)
+
+    def _render_graph_area(self, c, t):
+        H = c.height
+        box = (0, 1, 83, H - 2)
+        self._grid(c, box, (0.5,))
+        self._plot(c, box, "gpu_load", 0, 100, GPU_COLOR, fill=scale(GPU_COLOR, 0.35))
+        self._plot(c, box, "cpu_load", 0, 100, CPU_COLOR)
+        rows = [("GPU", self._pct("gpu_load"), GPU_COLOR, level_color(self.value("gpu_load")[0], "load")),
+                ("CPU", self._pct("cpu_load"), CPU_COLOR, level_color(self.value("cpu_load")[0], "load"))]
+        avg = [v for _ts, v in self._pts("gpu_load")]
+        if avg:
+            rows.append(("AVG", f"{sum(avg) / len(avg):.0f}%", scale(WHITE, 0.6), scale(GPU_COLOR, 0.9)))
+        self._side(c, rows)
+
+    def _pct(self, key):
+        v = self.value(key)[0]
+        return "--" if v is None else f"{v:.0f}%"
+
+    def _render_graph_stack(self, c, t):
+        W = c.width
+        for i, (label, key, col) in enumerate((("GPU", "gpu_load", GPU_COLOR), ("CPU", "cpu_load", CPU_COLOR))):
+            y0, y1 = i * 16 + 1, i * 16 + 14
+            box = (0, y0, 99, y1)
+            c.rect(*box, (10, 10, 14))
+            self._plot(c, box, key, 0, 100, col, fill=scale(col, 0.3))
+            c.text(103, y0, label, "4x6", col)
+            v = self.value(key)[0]
+            c.text_right(W - 1, y0 + 6, self._pct(key), "5x7", level_color(v, "load"))
+
+    def _render_graph_columns(self, c, t):
+        W, H = c.width, c.height
+        x0, x1, y0, y1 = 0, 99, 1, H - 2
+        c.rect(x0, y0, x1, y1, (10, 10, 14))
+        n = 25                                             # columns (each a slice of the time span)
+        cw = (x1 - x0 + 1) // n
+        now, span = time.time(), self._span()
+        pts = self._pts("gpu_load")
+        for i in range(n):
+            t0 = now - span + i * span / n
+            vals = [v for ts, v in pts if t0 <= ts < t0 + span / n]
+            if not vals:
+                continue
+            v = max(vals)
+            h = round((y1 - y0) * v / 100)
+            x = x0 + i * cw
+            c.rect(x, y1 - h, x + cw - 2, y1, level_color(v, "load"))
+        c.text(103, 1, "GPU", "4x6", GPU_COLOR)
+        c.text_right(W - 1, 8, self._pct("gpu_load"), "5x7", level_color(self.value("gpu_load")[0], "load"))
+        c.text(103, 18, "CPU", "4x6", CPU_COLOR)
+        c.text_right(W - 1, 25, self._pct("cpu_load"), "4x6", level_color(self.value("cpu_load")[0], "load"))
+
+    def _render_graph_power(self, c, t):
+        H = c.height
+        pts = self._pts("power")
+        if not pts:
+            return self._render_graph(c, t)
+        box = (0, 1, 83, H - 2)
+        self._grid(c, box, (0.5,))
+        top = max(100.0, max(v for _ts, v in pts) * 1.1)
+        self._plot(c, box, "power", 0, top, YELLOW, fill=scale(YELLOW, 0.28))
+        now_w = pts[-1][1]
+        peak = max(v for _ts, v in pts)
+        avg = sum(v for _ts, v in pts) / len(pts)
+        self._side(c, [("NOW", f"{now_w:.0f}W", YELLOW, WHITE), ("PEAK", f"{peak:.0f}W", scale(WHITE, 0.6), RED),
+                       ("AVG", f"{avg:.0f}W", scale(WHITE, 0.6), scale(WHITE, 0.8))])
+
+    def _render_graph_net(self, c, t):
+        H = c.height
+        down, up = self._pts("net_down"), self._pts("net_up")
+        if not down and not up:
+            return self._render_graph(c, t)
+        box = (0, 1, 83, H - 2)
+        self._grid(c, box, (0.5,))
+        top = max([1e5] + [v * 1.1 for _ts, v in down + up])          # at least 100 KB/s tall
+        self._plot(c, box, "net_down", 0, top, CPU_COLOR, fill=scale(CPU_COLOR, 0.3))
+        self._plot(c, box, "net_up", 0, top, GPU_COLOR)
+        dv, du = self.value("net_down")
+        uv, uu = self.value("net_up")
+        self._side(c, [("DOWN", "", CPU_COLOR, WHITE), (None, fmt_rate(dv, du), None, CPU_COLOR),
+                       ("UP", "", GPU_COLOR, WHITE), (None, fmt_rate(uv, uu), None, GPU_COLOR)])
+
+    def _render_graph_wide(self, c, t):
+        W, H = c.width, c.height
+        box = (0, 0, W - 1, H - 1)
+        self._grid(c, box, (0.25, 0.5, 0.75))
+        self._plot(c, box, "gpu_load", 0, 100, GPU_COLOR, fill=scale(GPU_COLOR, 0.18))
+        self._plot(c, box, "cpu_load", 0, 100, CPU_COLOR)
+        # the numbers, small in the top corners, on a dark backing so the lines stay readable around them
+        for label, key, col, right in (("GPU", "gpu_load", GPU_COLOR, False), ("CPU", "cpu_load", CPU_COLOR, True)):
+            text = f"{label} {self._pct(key)}"
+            w = c.text_width(text, "4x6")
+            x = W - w - 1 if right else 1
+            c.rect(x - 1, 0, x + w, 6, (0, 0, 0))
+            c.text(x, 0, label, "4x6", col)
+            c.text(x + c.text_width(label + " ", "4x6"), 0, self._pct(key), "4x6", level_color(self.value(key)[0], "load"))
+        mins = self._span() // 60
+        c.text_right(W - 1, H - 6, f"{mins}M" if mins < 60 else "1H", "4x6", (70, 70, 80))

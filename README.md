@@ -523,6 +523,17 @@ With Home Assistant instead: Any Home Assistant sensors work; [HASS.Agent](https
 
 The LibreHardwareMonitor layouts fall back to Bars with the Home Assistant source.
 
+**Graphs** (more versions of Graph):
+- **Temperature graph**: CPU and GPU temperatures over time, with the current values and the highest in the window.
+- **Area graph**: GPU load filled in, with CPU load as a line on top, plus the average GPU load.
+- **Stacked graphs**: GPU above and CPU below, each filled in its own color with a big number beside it.
+- **Columns**: GPU load as bars, one per slice of time, colored green / yellow / red by the busiest moment in each.
+- **Power graph** (LibreHardwareMonitor): total watts over time, with now, peak and average.
+- **Network graph**: download (filled) and upload (line) over time, scaled to the busiest moment, with the current speeds.
+- **Wide graph**: CPU and GPU load across the whole board, with the numbers small in the corners.
+
+**Graph time span** sets how far back every graph looks: 2, 5, 10 or 30 minutes, or 1 hour. History starts when LEDBoard starts, so a graph fills in over its first few minutes.
+
 A temperature sensor that reads 0 (HASS.Agent reports that when it can't read the sensor, for example an unsupported GPU) shows as "--" instead of a fake 0°C / 32°F, and the Status tab points it out.
 
 Values turn yellow and then red as they climb: loads at 60% and 85%, temperatures at 65°C and 80°C. **Show the board**: while the PC is on (the default; it hides when the sensors go unavailable), only while gaming, or always. It can also take over the display while you game.
