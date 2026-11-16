@@ -24,6 +24,7 @@ from ..gfx import DIM, GRAY, WHITE, fetch_image, fill_height, fit_image, scale, 
 log = logging.getLogger(__name__)
 
 SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard"
+TSDB_URL = "https://www.thesportsdb.com/api/v1/json"
 HEADSHOT = "https://a.espncdn.com/i/headshots/mma/players/full/{id}.png"
 FLAG = "https://a.espncdn.com/i/teamlogos/countries/500/{code}.png"
 RED = (220, 30, 35)
@@ -46,6 +47,7 @@ LIVE_LAYOUTS = {
     "rounds": "Round tracker (a segment per round, the current one pulsing)",
 }
 COUNTDOWN_LAYOUTS = {
+    "banner": "Official banner (the event's official banner from TheSportsDB, countdown underneath)",
     "event": "Event (UFC logo and event number, date and start time, who's fighting)",
     "fightweek": "Fight week (DAYS / HRS / MIN / SEC tiles)",
     "versus": "Versus (big names on red and blue corners)",
@@ -441,7 +443,7 @@ class UFCBoard(Board):
     DEFAULTS = {"enabled": False, "duration": 8, "refresh": 900, "live_refresh": 30,
                 "favorites": [], "favorites_only": False, "bouts": "main_card",
                 "layout": "card", "live_layout": "same", "pictures": "headshots", "show_network": True,
-                "show_countdown": True, "countdown_days": 7, "countdown_layout": "poster", "event_logo_url": "", "countdown_to": "main",
+                "show_countdown": True, "countdown_days": 7, "countdown_layout": "poster", "event_logo_url": "", "tsdb_key": "", "countdown_to": "main",
                 "card_days": 2, "final_hours": 24,
                 "show_schedule": True, "schedule_count": 6, "schedule_when": "always",
                 "takeover": False, "celebrate": True, "single_screen": True, "result_minutes": 5}
@@ -478,6 +480,11 @@ class UFCBoard(Board):
          "show_if": {"show_countdown": True}},
         {"key": "countdown_layout", "label": "Countdown design", "type": "select", "options": list(COUNTDOWN_LAYOUTS),
          "option_labels": COUNTDOWN_LAYOUTS, "show_if": {"show_countdown": True}},
+        {"key": "tsdb_key", "label": "TheSportsDB API key (optional)", "type": "password",
+         "show_if": {"show_countdown": True},
+         "help": "The Official banner design gets each event's banner from TheSportsDB. It works with their free "
+                 "public key; paste your own (thesportsdb.com) if you have one. Events without a banner there use "
+                 "the Event design instead."},
         {"key": "event_logo_url", "label": "Event logo image (optional URL)", "type": "text",
          "placeholder": "UFC logo from ESPN",
          "help": "Leave blank for the UFC logo. Paste a link to an image (e.g. a PNG of the event's own logo) to use "
@@ -502,7 +509,7 @@ class UFCBoard(Board):
         ("Basics", "Fighters & bouts", ["favorites", "favorites_only", "bouts", "single_screen", "result_minutes"]),
         ("Basics", "Preview", ["preview"]),
         ("Screens", "Countdown", ["show_countdown", "countdown_layout", "countdown_to", "countdown_days",
-                                  "event_logo_url"]),
+                                  "event_logo_url", "tsdb_key"]),
         ("Screens", "Fight card", ["layout", "card_days"]),
         ("Screens", "Live fights", ["live_layout", "takeover", "celebrate"]),
         ("Screens", "Results", ["final_hours"]),
@@ -592,10 +599,87 @@ class UFCBoard(Board):
                 for fi in f["fighters"]:
                     self._load_pics(fi)
         self._load_logos(list(self.events.values()))
+        if self.cfg.get("show_countdown", True) and self.cfg.get("countdown_layout") == "banner":
+            for e in self._relevant_events():
+                if e["state"] == "pre":
+                    self._load_banner(e)
 
     def _logo_cands(self, e=None):
         custom = (self.cfg.get("event_logo_url") or "").strip()
         return [u for u in [custom, (e or {}).get("logo")] + self.logo_urls + LOGO_URLS if u]
+
+    # -- the event's official banner (TheSportsDB) ----------------------------------------
+    def _tsdb_event(self, e):
+        """TheSportsDB's record for an event (matched by name and date), or None. Cached for 6 hours."""
+        cache = self.__dict__.setdefault("_tsdb", {})
+        eid = str(e["id"]).replace("preview-", "", 1)      # a preview shares the real event's lookup
+        hit = cache.get(eid)
+        if hit and time.time() - hit[1] < 6 * 3600:
+            return hit[0]
+        short, head = split_label(e["name"])
+        terms = [t for t in dict.fromkeys([f"{short} {head}".strip(), short, head, e["name"]]) if t]
+        keys = [k for k in dict.fromkeys([(self.cfg.get("tsdb_key") or "").strip(), "123", "3"]) if k]
+        found = None
+        for key in keys:
+            for term in terms:
+                q = re.sub(r"[^\w\s]", "", term).strip().replace(" ", "_")
+                try:
+                    r = self.session.get(f"{TSDB_URL}/{key}/searchevents.php", params={"e": q}, timeout=10)
+                    if r.status_code in (401, 403, 404):
+                        break                           # this key doesn't work: try the next one
+                    r.raise_for_status()
+                    events = (r.json() or {}).get("event") or []
+                except Exception as ex:
+                    log.info("TheSportsDB lookup failed (%s): %s", term, ex)
+                    continue
+                for ev in events:
+                    if not isinstance(ev, dict) or "ufc" not in str(ev.get("strLeague") or "").lower():
+                        continue
+                    try:
+                        d = datetime.strptime(str(ev.get("dateEvent")), "%Y-%m-%d").date()
+                    except ValueError:
+                        continue
+                    if e["start"] and abs((d - e["start"].date()).days) <= 2:
+                        found = ev
+                        break
+                if found:
+                    break
+            if found:
+                break
+        cache[eid] = (found, time.time())
+        if found:
+            log.info("UFC: TheSportsDB has %r (banner: %s)", found.get("strEvent"), "yes" if found.get("strBanner") else "no")
+        return found
+
+    def _banner_url(self, e):
+        custom = (self.cfg.get("event_logo_url") or "").strip()
+        if custom:
+            return custom
+        ev = self._tsdb_event(e) if e and not str(e.get("id", "")).startswith("sample") else None
+        return (ev or {}).get("strBanner") or None
+
+    def _load_banner(self, e):
+        u = self._banner_url(e)
+        if not u or self.pics.get(u) is not None:
+            return
+        retry = self.__dict__.setdefault("_pic_retry", {})
+        if u in self.pics and time.time() < retry.get(u, 0):
+            return
+        img = fetch_image(u, 512, 512, trim=True)
+        self.pics[u] = trim_alpha(img) if img is not None else None
+        if img is None:
+            retry[u] = time.time() + 3600
+
+    def _banner(self, e, w, h):
+        """The event's banner fitted to w x h, or None."""
+        u = self._banner_url(e) if e else None
+        src = self.pics.get(u) if u else None
+        if src is None:
+            return None
+        key = (u, w, h, False, "banner")
+        if key not in self._cut:
+            self._cut[key] = fit_image(src, w, h)
+        return self._cut[key]
 
     def _load_logos(self, events):
         retry = self.__dict__.setdefault("_pic_retry", {})
@@ -944,6 +1028,8 @@ class UFCBoard(Board):
             for fi in f["fighters"]:
                 self._load_pics(fi)
         self._load_logos([ev])
+        if self.cfg.get("countdown_layout") == "banner":
+            self._load_banner(ev)
         if kind == "schedule" and not self._schedule():
             now = datetime.now(timezone.utc)
             self.calendar = [{"label": lbl, "start": now + timedelta(days=d), "end": None} for d, lbl in (
@@ -1023,7 +1109,8 @@ class UFCBoard(Board):
         if kind == "countdown":
             lay = self.cfg.get("countdown_layout", "poster")
             {"octagon": self._cd_octagon, "minimal": self._cd_minimal, "event": self._cd_event,
-             "fightweek": self._cd_fightweek, "versus": self._cd_versus}.get(lay, self._cd_poster)(c, e, t)
+             "fightweek": self._cd_fightweek, "versus": self._cd_versus,
+             "banner": self._cd_banner}.get(lay, self._cd_poster)(c, e, t)
             return
         if f is None:
             return
@@ -1495,6 +1582,26 @@ class UFCBoard(Board):
             for text, col in parts:
                 c.text(x, y, text, font, col, clip=(x0, x1))
                 x += c.text_width(text, font)
+
+    def _cd_banner(self, c, e, t):
+        """The event's official banner across the top, the countdown underneath."""
+        W, H = c.width, c.height
+        img = self._banner(e, W, H - 8)
+        if img is None:
+            return self._cd_event(c, e, t)              # no banner for this event: the Event design
+        bb = img.getbbox() or (0, 0, img.width, img.height)
+        band = bb[3] - bb[1]
+        y = max(0, (H - 8 - band) // 2) - bb[1]
+        c.paste(img, 0, y)
+        target, secs, short, head = self._cd_parts(e)
+        c.rect(0, H - 8, W - 1, H - 1, (0, 0, 0))
+        c.line(0, H - 8, W - 1, H - 8, scale(RED, 0.7))
+        when = when_text(target)
+        items = [(f"{countdown_text(secs)}  ·  {when}" if secs > 0 else when, WHITE)]
+        if self.cfg.get("show_network", True) and e["networks"]:
+            items.append((e["networks"][0].upper(), (150, 200, 255)))
+        text, col, tt = self._cycle(c, items, t, W - 4, "5x7")
+        c.scroll_text(2, W - 2, H - 7, text, "5x7", col, tt, align="center", pause=0.5)
 
     def _cd_event(self, c, e, t):
         W, H = c.width, c.height

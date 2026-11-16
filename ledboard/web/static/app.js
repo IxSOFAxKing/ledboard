@@ -383,7 +383,8 @@ function renderField(obj, f, onDepChange) {
     case "pc_discover": return pcDiscoverField(obj, f);
     default:
       return field(f.label, h("input", { type: "text", value: val ?? "", placeholder: f.placeholder || null, list: f.datalist || null,
-        onfocus: () => { if (f.datalist === "ha-entities" && !haEntitiesLoaded) loadHaEntities(); },
+        onfocus: () => { if (f.datalist === "ha-entities" && !haEntitiesLoaded) loadHaEntities();
+                         if (f.datalist === "lhm-sensors" && !lhmSensorsLoaded) loadLhmSensors(obj); },
         oninput: (e) => set(e.target.value) }), f.help);
   }
 }
@@ -569,9 +570,11 @@ function pcDiscoverField(obj, f) {
   const btn = h("button", { class: "small", onclick: async () => {
     btn.disabled = true; out.textContent = "Looking through Home Assistant…";
     try {
-      const found = (await api("/api/pcstats/discover")).found || {};
+      const qs = new URLSearchParams({ source: obj.source || "homeassistant", lhm_url: obj.lhm_url || "" });
+      const found = (await api(`/api/pcstats/discover?${qs}`)).found || {};
       const keys = Object.keys(found);
-      keys.forEach((k) => { obj[k + "_entity"] = found[k]; });
+      keys.forEach((k) => { obj[k] = found[k]; });
+      if (obj.source === "lhm") loadLhmSensors(obj);
       if (keys.length) { markDirty(); renderBoards(); toast(`Found ${keys.length} sensor${keys.length > 1 ? "s" : ""}. Check them, then Save.`); }
       else out.textContent = "No CPU / GPU / memory sensors found. Is HASS.Agent connected to Home Assistant?";
     } catch (e) { out.textContent = e.message; }
@@ -609,6 +612,16 @@ function geocodeField(obj, f) {
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); search(); } });
   input.addEventListener("input", (e) => { obj[f.key] = e.target.value; markDirty(); });
   return field(f.label, h("div", {}, h("div", { class: "row nowrap" }, input, h("button", { class: "small", onclick: search }, "Search")), results), f.help);
+}
+
+// LibreHardwareMonitor's sensors, for the Gaming PC board's boxes (the address typed in the form wins).
+let lhmSensorsLoaded = false;
+async function loadLhmSensors(obj) {
+  lhmSensorsLoaded = true;
+  try {
+    const j = await api(`/api/pcstats/lhm_sensors?lhm_url=${encodeURIComponent(obj.lhm_url || "")}`);
+    $("#lhm-sensors").replaceChildren(...j.sensors.map((x) => h("option", { value: x.id }, x.label)));
+  } catch (e) { lhmSensorsLoaded = false; toast("LibreHardwareMonitor: " + e.message, true); }
 }
 
 // Fills the entity autocomplete lists from Home Assistant (unsaved URL/token from the HA form win).

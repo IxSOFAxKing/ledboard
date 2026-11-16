@@ -339,6 +339,8 @@ The UFC board uses ESPN's free MMA data (no key needed), like the other sports b
   - **Octagon**: the days to go inside an eight-sided cage.
   - **Minimal**.
 
+  - **Official banner**: the event's official banner from [TheSportsDB](https://www.thesportsdb.com) across the board, with the countdown and date underneath. It works with TheSportsDB's free public key (paste your own if you have one). Events without a banner there use the Event design.
+
   The logo is ESPN's UFC logo. You can paste a link to any image (for example the event's own logo) under **Event logo image**. If no logo can be downloaded, a pixel "UFC" is drawn instead.
 - **The fight card**: the main event only, the main card (default) or the full card including prelims. Bouts start showing a set number of days before the event (2 by default). Each bout shows:
   - the fighters with their records and red / blue corner colors
@@ -489,9 +491,16 @@ Monitors that are down are always listed first; maintenance shows in blue and pe
 - **One at a time**: a big check / cross badge, the name, status and response time, 24-hour uptime, and a graph of recent response times (red lines where a check failed). With "only show when something is down", it cycles through just the broken ones and shows the error message.
 - **Summary**: a single screen: "ALL SYSTEMS OPERATIONAL" with a shield, or "OUTAGE" with what's down.
 
-### Gaming PC (HASS.Agent)
+### Gaming PC (HASS.Agent or LibreHardwareMonitor)
 
-Shows your PC's stats from Home Assistant: CPU and GPU load and temperatures, memory, and network. Any Home Assistant sensors work; [HASS.Agent](https://github.com/hass-agent/HASS.Agent) on the PC is the easy way to get them. It uses the Home Assistant board's URL and token, and follows the sensors live.
+Shows your PC's stats: CPU and GPU load and temperatures, memory, and network. **Get the stats from** either Home Assistant (below) or **LibreHardwareMonitor** directly:
+
+1. In LibreHardwareMonitor on the PC: **Options → Remote Web Server → Run** (port 8085). Allow it through the Windows firewall when asked. Run LibreHardwareMonitor as administrator so it can read CPU temperatures, and turn on **Options → Run On Windows Startup** (and **Start Minimized**) so it's always there.
+2. On the board, choose **LibreHardwareMonitor** and enter the PC's address, e.g. `http://192.168.1.50:8085`.
+
+It picks the right sensors automatically (CPU Total, CPU Package or Tctl/Tdie, GPU Core, memory load, the busiest network adapter). It also reads extras: GPU and CPU power, the GPU fan, GPU and CPU clocks, and GPU memory. Each box can be changed; click into one to see every sensor LibreHardwareMonitor has. The board reads it every 3 seconds, and hides itself 30 seconds after the PC stops answering.
+
+With Home Assistant instead: Any Home Assistant sensors work; [HASS.Agent](https://github.com/hass-agent/HASS.Agent) on the PC is the easy way to get them. It uses the Home Assistant board's URL and token, and follows the sensors live.
 
 1. In HASS.Agent, add sensors: **CpuLoad**, **GpuLoad**, **GpuTemperature**, **MemoryUsage**, plus a CPU temperature and network sensors if you have them. Set their update interval to 5–10 seconds for a lively board.
 2. On the **Gaming PC** board, click **Find my PC's sensors**, check what it filled in, and **Save**.
@@ -505,6 +514,7 @@ Shows your PC's stats from Home Assistant: CPU and GPU load and temperatures, me
 - **Split**: GPU and CPU panels side by side, each with big load and temperature numbers and a 5-minute mini graph.
 - **Spotlight**: one stat at a time in huge numbers (GPU, CPU, temperatures, memory, network), switching every 3 seconds.
 - **Thermometers**: CPU and GPU temperatures as thermometers that fill and change color.
+- **Details** (LibreHardwareMonitor): GPU and CPU power, GPU fan speed, GPU memory used / total, and GPU and CPU clocks, four to a page.
 
 A temperature sensor that reads 0 (HASS.Agent reports that when it can't read the sensor, for example an unsupported GPU) shows as "--" instead of a fake 0°C / 32°F, and the Status tab points it out.
 

@@ -300,9 +300,22 @@ def create_app(engine):
     def pcstats_discover():
         b = engine.boards.get("pcstats")
         try:
-            return jsonify({"found": b.discover() if b else {}})
+            return jsonify({"found": b.discover(request.args.get("source") or None,
+                                                request.args.get("lhm_url")) if b else {}})
         except Exception as e:
-            return jsonify({"error": str(e)}), 400
+            return jsonify({"error": _friendly_error(e)}), 400
+
+    @app.get("/api/pcstats/lhm_sensors")
+    def pcstats_lhm_sensors():
+        b = engine.boards.get("pcstats")
+        try:
+            return jsonify({"sensors": b.lhm_sensor_list(request.args.get("lhm_url")) if b else []})
+        except Exception as e:
+            return jsonify({"error": _friendly_error(e)}), 400
+
+    def _friendly_error(e):
+        from ..boards.base import short_error
+        return short_error(e) if not isinstance(e, RuntimeError) else str(e)
 
     @app.get("/api/steam/griddb/search")
     def steam_griddb_search():
