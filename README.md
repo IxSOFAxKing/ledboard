@@ -717,6 +717,9 @@ Open <http://localhost:8080> to see the live LED preview. If the `rgbmatrix` mod
 
 ## Troubleshooting
 
+**A board briefly shows an error, or the Status tab says "Drawing error at …"**: the board failed to draw a frame. A one-off failure is hidden: the panel keeps the last good frame. Only an error lasting more than 3 seconds shows on the panel. The Status tab lists the last drawing error for each board for an hour, and the full details are in `journalctl -u ledboard`. Send them along if one keeps happening.
+
+
 **"invalid literal for int() with base 16" on boards, or a "Fonts" line on the Status tab**: a font file on the Pi's SD card got damaged (usually a power cut or an aging card). LEDBoard restores a damaged font from its git copy automatically when it starts, and the Status tab notes the repair.
 
 If the Status tab still shows a red "Damaged font file" line, restore the fonts by hand. Delete them first: a single flipped bit changes neither a file's size nor its timestamp, so a plain `git checkout` thinks the file is fine and skips it.

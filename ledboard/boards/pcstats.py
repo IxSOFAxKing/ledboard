@@ -512,7 +512,9 @@ class PCStatsBoard(Board):
 
     def _pts(self, key):
         now, span = time.time(), self._span()
-        return [(ts, v) for ts, v in self.series.get(key, ()) if now - ts <= span]
+        # list() copies the history in one step: the reader thread may be adding a sample right now, and
+        # looping over the deque itself would then fail ("deque mutated during iteration")
+        return [(ts, v) for ts, v in list(self.series.get(key, ())) if now - ts <= span]
 
     def _range(self, key):
         """(low, high) for a stat's line: fixed for % and temperatures, otherwise scaled to the data shown."""

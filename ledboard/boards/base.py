@@ -176,4 +176,8 @@ class Board:
             "last_update": self.last_update,
             "last_error": self.last_error,
             "slides": len(self.slides()) if self.enabled else 0,
+            # the last time this board failed to draw a frame (within the last hour)
+            "render_error": (f"Drawing error at {time.strftime('%H:%M:%S', time.localtime(self.render_error[1]))}: "
+                             f"{self.render_error[0]}")
+            if getattr(self, "render_error", None) and time.time() - self.render_error[1] < 3600 else None,
         }

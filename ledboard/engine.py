@@ -544,13 +544,34 @@ class Engine:
                 self._render_chain(slides[idx], c, now - started)
             else:
                 board.render(c, slides[idx], now - started)
+            self._good = (name, now, c.image.copy())
         except Exception as e:
-            log.exception("render error in %s", name)
-            c.clear()
-            c.text(0, 0, name, "5x8", RED)
-            c.scroll_text(0, c.width, 12, f"{type(e).__name__}: {e}", "5x8", RED, now - started)
+            self._render_failed(c, board, name, e, now, started)
         self._apply_transition(c, (name, id(slides), idx), slides[idx], now)
         return c.image
+
+    def _render_failed(self, c, board, name, e, now, started):
+        """A board failed to draw a frame. A one-off (e.g. data changing mid-frame) keeps the last good frame
+        on screen instead of flashing an error; only an error that lasts 3+ seconds is shown on the panel.
+        Either way it's logged and listed on the Status tab."""
+        msg = f"{type(e).__name__}: {e}"
+        if board is not None:
+            board.render_error = (msg, time.time())
+        last = getattr(self, "_render_log", {}).get(name)
+        if not last or last[0] != msg or now - last[1] > 60:              # don't flood the log at 30 fps
+            log.exception("render error in %s", name)
+            self.__dict__.setdefault("_render_log", {})[name] = (msg, now)
+        good = getattr(self, "_good", None)
+        fails = self.__dict__.setdefault("_fail_since", {})
+        first = fails.get(name)
+        if first is None or (good and good[0] == name and good[1] > first):
+            fails[name] = first = now                   # a new run of failures starts now
+        if good and good[0] == name and now - first < 3:
+            c.image.paste(good[2])                      # hold the last good frame
+            return
+        c.clear()
+        c.text(0, 0, name, "5x8", RED)
+        c.scroll_text(0, c.width, 12, msg, "5x8", RED, now - first, speed=12, pause=2.5)
 
     def _apply_transition(self, c, key, slide, now):
         """Animate from the previous slide's last frame into the new one when the slide changes."""

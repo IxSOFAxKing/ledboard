@@ -161,7 +161,8 @@ function renderStatus() {
     return h("div", { class: "status-row" },
       h("span", { class: "dot " + (!b.enabled ? "idle" : b.last_error ? "err" : "ok") }),
       h("span", { class: "nm" }, SCHEMA?.[n]?.title || n),
-      h("span", { class: "info" }, info, b.last_error ? h("div", { class: "err-line" }, b.last_error) : null));
+      h("span", { class: "info" }, info, b.last_error ? h("div", { class: "err-line" }, b.last_error) : null,
+        b.render_error ? h("div", { class: "err-line" }, b.render_error) : null));
   });
   const bad = Object.keys(STATE.damaged_fonts || {});
   if (bad.length) rows.unshift(h("div", { class: "status-row" }, h("span", { class: "dot err" }), h("span", { class: "nm" }, "Fonts"),
