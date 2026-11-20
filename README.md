@@ -554,6 +554,8 @@ The session timer counts from when LEDBoard first sees you in a game.
 - `sensor.gaming_pc_arc_raiders=ARC Raiders`: a HASS.Agent **ProcessActive** sensor. The game counts as running while it's above 0, or on/true.
 - `sensor.gaming_pc_activewindow=Hades II|Balatro`: an **ActiveWindow** sensor. Whichever listed name appears in the window title counts as running.
 
+- `binary_sensor.gamertag_in_game=sensor.gamertag_status`: an on/off "in game" sensor, plus a second entity that holds the game's name. This fits Home Assistant's **Xbox** integration. The game counts as running while the first is on, and its name is the second one's text, with "Playing " removed. With no name available it shows "In game", with your avatar.
+
 The board shows the game for the first Steam ID, like a non-Steam game: session timer, SteamGridDB artwork, and every layout. It follows the entities live, using the Home Assistant board's URL and token. The Status tab shows what Home Assistant sees. If you leave out `=Game name`, the board uses the entity's name minus its device's name, so "GamingPC Arc Raiders" from a PC called GamingPC becomes "Arc Raiders".
 
 **Custom artwork (SteamGridDB):** pick community artwork for any game you've played.

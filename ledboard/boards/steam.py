@@ -84,8 +84,27 @@ def ha_game_name(st, names, device=""):
             return names[0]
         return None
     if lo in _ON or number is not None:
-        return _strip_device((st.get("attributes") or {}).get("friendly_name") or "", device) or None
-    return state
+        attrs = st.get("attributes") or {}
+        for k in ("game", "title", "now_playing", "media_title", "activity", "app_name", "app"):
+            name = clean_game_name(attrs.get(k))
+            if name:
+                return name
+        if str(st.get("entity_id", "")).startswith("binary_sensor."):
+            return "In game"                             # an on/off sensor (e.g. Xbox 'in game') has no game name
+        return _strip_device(attrs.get("friendly_name") or "", device) or None
+    return clean_game_name(state) or state
+
+
+_NOT_A_GAME = {"online", "offline", "away", "busy", "in game", "on", "off", "true", "false", "unknown", "unavailable",
+               "none", "home", "idle", "playing", "appear offline"}
+
+
+def clean_game_name(text):
+    """'ARC Raiders' from 'Playing ARC Raiders' / 'Now playing: ARC Raiders'; None for a plain status."""
+    t = re.sub(r"(?i)^\s*(now\s+)?playing\s*:?\s*", "", str(text or "")).strip()
+    if not t or t.lower() in _NOT_A_GAME or t.lower().startswith("last seen"):
+        return None
+    return t
 
 
 def _strip_device(friendly, device):
@@ -246,11 +265,16 @@ class SteamBoard(Board):
                 if not prev or prev[0] != appid:
                     self._sessions[sid] = (appid, now)
                 info["since"] = self._sessions[sid][1]
-                self._remember_game(appid, info["game"])
+                placeholder = appid == "ns:In game"     # playing, but the game's name isn't known
+                if not placeholder:
+                    self._remember_game(appid, info["game"])
                 if not nonsteam:                        # hours / icon only exist for Steam games
                     info.update(self._game_stats(sid, appid))
-                info["art"] = self._game_art(appid, info.get("icon_hash"))
-                want_hero = self.cfg.get("hero") or self._layout() in HERO_LAYOUTS
+                if placeholder:                         # no name to look artwork up by: their avatar instead
+                    info["art"] = fetch_image(info["avatar"], self.app.height, self.app.height) if info["avatar"] else None
+                else:
+                    info["art"] = self._game_art(appid, info.get("icon_hash"))
+                want_hero = (self.cfg.get("hero") or self._layout() in HERO_LAYOUTS) and not placeholder
                 hero = self._game_hero(appid) if want_hero else None
                 info["hero"] = hero["dim"] if hero and self.cfg.get("hero") else None
                 info["hero_full"] = hero["full"] if hero else None
@@ -356,13 +380,19 @@ class SteamBoard(Board):
 
     # -- games running outside Steam (seen by Home Assistant, e.g. via HASS.Agent) -------
     def _ha_entries(self):
-        """[(entity_id, [game names])] from 'entity=Name|Other name' entries."""
+        """[(entity_id, [game names], name entity or None)] from the 'Games outside Steam' entries:
+        'entity=Name|Other name', or 'entity=sensor.other' (playing while entity is on; the game's name is the
+        other entity's text, e.g. an Xbox 'in game' switch + its status sensor)."""
         out = []
         for line in self.cfg.get("ha_games") or []:
             if not isinstance(line, str) or "." not in line:
                 continue
             ent, _, names = line.partition("=")
-            out.append((ent.strip(), [n.strip() for n in names.split("|") if n.strip()]))
+            names = names.strip()
+            if re.fullmatch(r"[a-z_]+\.[a-z0-9_]+", names):
+                out.append((ent.strip(), [], names))
+            else:
+                out.append((ent.strip(), [n.strip() for n in names.split("|") if n.strip()], None))
         return out
 
     def _ha_game(self):
@@ -382,22 +412,36 @@ class SteamBoard(Board):
             self.ha_game_note = "set the Home Assistant URL and token on the Home Assistant board"
             return None
         verify = bool(hcfg.get("verify_ssl", True))
-        self._ensure_ha_live(base, token, verify, [e for e, _n in entries])
+        watch = [e for e, _n, _ne in entries] + [ne for _e, _n, ne in entries if ne]
+        self._ensure_ha_live(base, token, verify, list(dict.fromkeys(watch)))
         headers = {"Authorization": f"Bearer {token}"}
         found, notes = None, []
-        for ent, names in entries:
+
+        def state_of(ent):
             try:
                 r = requests.get(f"{base}/api/states/{ent}", headers=headers, timeout=10, verify=verify)
             except requests.RequestException as e:
                 notes.append(f"{ent}: {e.__class__.__name__}")
-                continue
+                return None
             if r.status_code == 404:
                 notes.append(f"{ent}: not found in Home Assistant")
-                continue
+                return None
             if not r.ok:
                 notes.append(f"{ent}: HTTP {r.status_code}")
+                return None
+            return r.json()
+        for ent, names, name_ent in entries:
+            st = state_of(ent)
+            if st is None:
                 continue
-            name = ha_game_name(r.json(), names, "" if names else self._ha_device_name(base, headers, verify, ent))
+            if name_ent:
+                # playing while this one is on; the game's name comes from the other entity
+                if not ha_game_name(st, ["x"]):
+                    continue
+                other = state_of(name_ent)
+                name = clean_game_name((other or {}).get("state")) or "In game"
+            else:
+                name = ha_game_name(st, names, "" if names else self._ha_device_name(base, headers, verify, ent))
             if name and not found:
                 found = name
         if found != getattr(self, "_ha_last", None):
