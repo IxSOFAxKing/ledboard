@@ -9,6 +9,7 @@ It's built for two chained 64×32 panels (128×32), and the layouts scale to oth
 | **Sports** | One board per league, using ESPN's free API (no key needed): NFL, NBA, MLB, NHL, college football and basketball, WNBA, MLS, EPL, La Liga, Bundesliga, Serie A, Ligue 1, Champions League. See [Sports](#sports) for the settings and the live-game details each sport shows. |
 | **UFC** | The next event's countdown, the fight card with fighter headshots (or flags) and records, live round and clock, results (KO/TKO, submission, decision with the round and time), a winner celebration for your favorite fighters, and the upcoming event schedule. See [UFC](#ufc). |
 | **Now Playing** | Album art, scrolling title and artist, and an animated wavy progress bar (Material 3 style; a straight bar is an option), from a **Home Assistant media player** (HA's Spotify integration, Sonos and so on) or directly from the Spotify API. It's skipped when nothing is playing and can take over the display while music plays. |
+| **Xbox** | What you're playing on Xbox or PC Game Pass, with game art and a session timer, plus your profile and stats (gamerscore and more), from Home Assistant's Xbox integration. Just enter your gamertag. |
 | **Steam** | What you're playing on Steam: the game icon, name, session time and total hours. It can take over the display while you play, and supports several players. Also "friend now playing" and "achievement unlocked" (with how rare it is) screens. |
 | **Plex** | Active streams (movies, TV, music) with the poster, title, S/E or artist, who's watching, and a wavy (or straight) progress bar. You can filter by user. Plus a carousel of recently added movies and episodes. |
 | **Gaming PC** | A live graph of your PC's stats (load, temperatures, memory, power, fans, clocks, network) from LibreHardwareMonitor or Home Assistant. You pick up to 4 lines and their colors. |
@@ -524,6 +525,20 @@ Loads and temperatures share a fixed scale (0–100%, 30–100°C). Everything e
 A temperature sensor that reads 0 (HASS.Agent reports that when it can't read the sensor, for example an unsupported GPU) shows as "--" instead of a fake 0°C / 32°F, and the Status tab points it out.
 
 **Show the board**: while the PC is on (the default; it hides when the sensors go unavailable), only while gaming, or always. It can also take over the display while you game.
+
+### Xbox
+
+Shows what you're playing on Xbox (a console, or Game Pass / the Xbox app on PC), your profile and your stats. Everything comes from Home Assistant's **Xbox** integration (**Settings → Devices & services → Add integration → Xbox**), using the Home Assistant board's URL and token.
+
+1. On the **Xbox** board, click **🔍 Find my gamertag** and tap yours, or type it in. Then **Save**.
+2. The board finds every entity the integration made for your gamertag and works out what each is: in game, online, party, multiplayer, status, gamerscore and gamerpic. Everything else becomes a stat. It follows them live. The Status tab shows what it recognized.
+
+**Screens:**
+- **Now playing**: the game's artwork, its name, a session timer (from when you started playing), MULTIPLAYER / PARTY when they apply, your gamertag and your gamerscore.
+- **Profile**, when you're online but not in a game: your gamerpic, gamertag, status and gamerscore.
+- **Stats**: every other stat Home Assistant has for you (gamerscore, account tier, followers, last online…), four to a page.
+
+The game's name comes from the integration's status ("Playing ARC Raiders" works too). Artwork comes from Home Assistant if it has a picture, otherwise from SteamGridDB using the Steam board's key. Xbox games join the Steam board's **Custom artwork** list, so you can rename them or pick their artwork there. **Show the board**: while online or playing (default), only while playing, or always. It can also take over the display while you play.
 
 ### Steam
 1. Get a free **Steam Web API key** at <https://steamcommunity.com/dev/apikey>. Any domain name works, for example `ledboard`.

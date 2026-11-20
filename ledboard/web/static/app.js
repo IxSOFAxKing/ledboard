@@ -148,6 +148,7 @@ function renderStatus() {
     if (n === "spotify" && b.enabled) info += b.now ? ` · ${b.now.playing ? "▶" : "⏸"} ${b.now.title} — ${b.now.artist}` : " · nothing playing";
     if (n === "spotify" && b.enabled && b.live) info += ` · live updates ${b.live}`;
     if (n === "plex" && b.enabled) info += ` · ${b.sessions.length} stream(s)`;
+    if (n === "xbox" && b.enabled && b.xbox) info += ` · ${b.xbox.game ? "playing " + b.xbox.game : b.xbox.online ? "online" : "offline"} · ${b.xbox.entities} entities (${Object.keys(b.xbox.found).join(", ") || "none recognised"})`;
     if (n === "pcstats" && b.enabled && b.pc_note) info += ` · ${b.pc_note}`;
     if (n === "steam" && b.enabled && b.ha_game) info += ` · game seen by Home Assistant: ${b.ha_game}` + (b.ha_game_note ? ` (${b.ha_game_note})` : "");
     if (n === "uptime" && b.enabled && (b.monitor_names || []).length) info += ` · monitors: ${b.monitor_names.join(", ")}`;
@@ -382,6 +383,7 @@ function renderField(obj, f, onDepChange) {
     case "actions": return actionsField(f, f, f.label, f.help);
     case "spotify_auth": return spotifyAuthField(obj);
     case "pc_discover": return pcDiscoverField(obj, f);
+    case "xbox_discover": return xboxDiscoverField(obj, f);
     default:
       return field(f.label, h("input", { type: "text", value: val ?? "", placeholder: f.placeholder || null, list: f.datalist || null,
         onfocus: () => { if (f.datalist === "ha-entities" && !haEntitiesLoaded) loadHaEntities();
@@ -563,6 +565,22 @@ function steamArtField(obj, f) {
   return h("div", {}, h("div", { class: "muted small", style: "margin-bottom:6px" }, f.label), wrap,
     h("div", { class: "help" }, "Type a name to rename a game on the board. Search picks which SteamGridDB game to take artwork from. " +
       "Icon / Cover / Hero pick the artwork. Then Save. ↺ undoes a choice."));
+}
+
+// Xbox: list the gamertags Home Assistant's Xbox integration knows; tap one to use it.
+function xboxDiscoverField(obj, f) {
+  const out = h("div", { class: "row" });
+  const btn = h("button", { class: "small", onclick: async () => {
+    btn.disabled = true; out.replaceChildren(h("span", { class: "muted small" }, "Looking through Home Assistant…"));
+    try {
+      const tags = (await api("/api/xbox/gamertags")).gamertags || [];
+      out.replaceChildren(...(tags.length ? tags.map((tag) => h("button", { class: "small" + (obj.gamertag === tag ? " primary" : ""),
+        onclick: () => { obj.gamertag = tag; markDirty(); renderBoards(); toast(`Gamertag set to ${tag}. Save to apply.`); } }, tag))
+        : [h("span", { class: "muted small" }, "No Xbox gamertags found. Is the Xbox integration set up in Home Assistant?")]));
+    } catch (e) { out.replaceChildren(h("span", { class: "err-line" }, e.message)); }
+    finally { btn.disabled = false; }
+  } }, "🔍 " + f.label);
+  return field("", h("div", {}, btn, out), f.help);
 }
 
 // Gaming PC: look through Home Assistant for CPU / GPU / memory / network sensors and fill in the boxes.

@@ -296,6 +296,14 @@ def create_app(engine):
         except Exception as e:
             return jsonify({"error": str(e)}), 400
 
+    @app.get("/api/xbox/gamertags")
+    def xbox_gamertags():
+        b = engine.boards.get("xbox")
+        try:
+            return jsonify({"gamertags": b.gamertags() if b else []})
+        except Exception as e:
+            return jsonify({"error": _friendly_error(e)}), 400
+
     @app.get("/api/pcstats/discover")
     def pcstats_discover():
         b = engine.boards.get("pcstats")
