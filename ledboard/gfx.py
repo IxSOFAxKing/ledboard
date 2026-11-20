@@ -242,6 +242,22 @@ def trim_alpha(img, threshold=24):
     return img.crop(bbox) if bbox else img
 
 
+def trim_dark(img, threshold=28, min_keep=0.5):
+    """Crop away a dark (or transparent) frame / padding baked into a picture. Leaves it alone if that would
+    cut away more than half of either side (a mostly dark picture, not a frame)."""
+    img = trim_alpha(img)
+    r, g, b, a = img.split()
+    from PIL import ImageChops
+    bright = ImageChops.lighter(ImageChops.lighter(r, g), b).point(lambda v: 255 if v > threshold else 0)
+    mask = ImageChops.multiply(bright, a.point(lambda v: 255 if v > 24 else 0))
+    bbox = mask.getbbox()
+    if not bbox:
+        return img
+    if (bbox[2] - bbox[0]) < img.width * min_keep or (bbox[3] - bbox[1]) < img.height * min_keep:
+        return img
+    return img.crop(bbox)
+
+
 def fit_image(img, w, h, bg=None):
     """Resize to fit inside w x h, keeping aspect ratio, centered on transparent canvas."""
     img = img.convert("RGBA")

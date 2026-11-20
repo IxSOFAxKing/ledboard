@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import requests
 
 from .base import Board, organize
-from ..gfx import GRAY, WHITE, fetch_image, scale
+from ..gfx import GRAY, WHITE, fetch_image, fill_height, fit_image, scale, trim_dark
 
 log = logging.getLogger(__name__)
 
@@ -260,7 +260,15 @@ class XboxBoard(Board):
         base, token, verify = self._ha()
         headers = {"Authorization": f"Bearer {token}"} if base and url.startswith(base) else None
         key = "xbox|" + url.split("token=")[0] + "|" + (url.split("cache=")[-1] if "cache=" in url else "")
-        img = fetch_image(url, size, size, headers=headers, verify=verify, cache_key=key, trim=True)
+        img = fetch_image(url, 256, 256, headers=headers, verify=verify, cache_key=key, trim=True)
+        if img is not None:
+            img = trim_dark(img)                         # no dark frame / padding around the picture
+            if img.width > img.height:                   # wide pictures fill the square (crop the sides)
+                img = fill_height(img, size, size)
+            if max(img.width, img.height) < size:     # small pictures grow to fill the square too
+                k = size / max(img.width, img.height)
+                img = img.resize((max(1, round(img.width * k)), max(1, round(img.height * k))))
+            img = fit_image(img, size, size)
         self._pics[slot] = img
         if img is None:
             self.__dict__.setdefault("_retry", {})[slot] = time.time() + 1800
@@ -510,8 +518,6 @@ class XboxBoard(Board):
     def _picture(self, c, prefer_game=True, hero=False):
         """The picture on the left (game art / gamerpic / an Xbox badge). Returns the text's left edge."""
         H = c.height
-        if hero:
-            c.rect(0, 0, H, H - 1, (0, 0, 0))
         img = None
         if prefer_game and self._art_style() != "gamerpic":
             img = getattr(self, "game_art", None)
