@@ -546,7 +546,7 @@ Shows what you're playing on Xbox (a console, or Game Pass / the Xbox app on PC)
 - **Stats card**: the game, your gamerscore in big numbers, the session time, and account tier / followers.
 - **Friends**: you and every Xbox friend Home Assistant tracks who is online, one per row, with the game they're in (or ONLINE). Your row is in gold. It switches to Classic when nobody else is on.
 
-Hero banners come from SteamGridDB (the Steam board's key, and your picks in its Custom artwork list); games without one use Classic. **Game hero banner as the background** puts the dimmed hero behind Classic, Session timer and Stats card. **Show gamerscore** turns the gamerscore off on the Now playing and Profile screens.
+Hero banners come from SteamGridDB (the Steam board's key, and your picks in its Custom artwork list); games without one use Classic. **Game hero banner as the background** puts the dimmed hero behind Classic, Session timer and Stats card, fading in from black on the left like the Steam board's Banner. **Show gamerscore** turns the gamerscore off on the Now playing and Profile screens.
 
 The game's name comes from the integration's status ("Playing ARC Raiders" works too). Artwork comes from Home Assistant if it has a picture, otherwise from SteamGridDB using the Steam board's key. Xbox games join the Steam board's **Custom artwork** list, so you can rename them or pick their artwork there. **Show the board**: while online or playing (default), only while playing, or always. It can also take over the display while you play.
 

@@ -416,7 +416,7 @@ class XboxBoard(Board):
         art = getattr(self, "game_art", None) if self.cfg.get("art", "game") == "game" else None
         return {"game": self.game() or "In game", "appid": "xbox", "since": getattr(self, "_since", time.time()),
                 "name": self.cfg.get("gamertag") or "", "art": art or getattr(self, "gamerpic", None),
-                "hero": hero.get("dim") if self.cfg.get("hero") else None, "hero_full": hero.get("full"),
+                "hero": self._hero_bg(), "hero_full": hero.get("full"),
                 "hero_banner": hero.get("banner"), "total_minutes": None}
 
     def _picture(self, c, prefer_game=True, hero=False):
@@ -442,6 +442,29 @@ class XboxBoard(Board):
         c.draw.line((x + m, y + m, x + s - 1 - m, y + s - 1 - m), fill=WHITE, width=2)
         c.draw.line((x + s - 1 - m, y + m, x + m, y + s - 1 - m), fill=WHITE, width=2)
 
+    def _hero_bg(self):
+        """The dimmed hero for the background, fading in from black on the left (behind the picture) like the
+        Steam board's Banner, or None when the switch is off or the game has no hero."""
+        dim = (getattr(self, "hero", None) or {}).get("dim") if self.cfg.get("hero") else None
+        if dim is None:
+            return None
+        hit = getattr(self, "_hero_faded", None)
+        if hit and hit[0] is dim:
+            return hit[1]
+        from PIL import Image
+        W, H = dim.size
+        start, fade = H - 4, max(1, W // 2)               # clear behind the picture, then a long fade in
+        mask = Image.new("L", (W, H), 255)
+        for x in range(min(W, start + fade)):
+            a = 0 if x < start else round(255 * ((x - start) / fade) ** 1.8)
+            mask.paste(a, (x, 0, x + 1, H))
+        alpha = dim.getchannel("A") if dim.mode == "RGBA" else Image.new("L", (W, H), 255)
+        from PIL import ImageChops
+        out = dim.convert("RGBA")
+        out.putalpha(ImageChops.multiply(alpha, mask))
+        self._hero_faded = (dim, out)
+        return out
+
     @staticmethod
     def _txt(hero):
         """Outlined text over the hero background, plain text otherwise: f(c, x0, x1, y, text, font, color, t)."""
@@ -466,7 +489,7 @@ class XboxBoard(Board):
 
     def _render_playing(self, c, t):
         W, H = c.width, c.height
-        hero = (getattr(self, "hero", None) or {}).get("dim") if self.cfg.get("hero") else None
+        hero = self._hero_bg()
         if hero is not None:
             c.paste(hero, 0, 0)
         x0 = self._picture(c, hero=hero is not None)
@@ -513,7 +536,7 @@ class XboxBoard(Board):
     def _render_stats_card(self, c, t):
         """Playing: the game and session time, your gamerscore big, and account tier / followers."""
         W, H = c.width, c.height
-        hero = (getattr(self, "hero", None) or {}).get("dim") if self.cfg.get("hero") else None
+        hero = self._hero_bg()
         if hero is not None:
             c.paste(hero, 0, 0)
         x0 = self._picture(c, hero=hero is not None)
