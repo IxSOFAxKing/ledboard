@@ -107,6 +107,11 @@ def migrate(data: dict) -> bool:
             for n in range(4):
                 pc[f"line{n + 1}"] = lines[n] if n < len(lines) else "none"
         changed = True
+    # Xbox: the "game" picture choice became "xbox" (Xbox's own picture) next to icon / cover
+    xb = boards.get("xbox")
+    if isinstance(xb, dict) and xb.get("art") == "game":
+        xb["art"] = "xbox"
+        changed = True
     # v6 -> v7: Server Status alerts got their own monitor list; keep alerting for the monitors that were shown
     up = boards.get("uptime")
     if isinstance(up, dict) and "alert_monitors" not in up:

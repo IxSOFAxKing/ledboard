@@ -548,6 +548,13 @@ Shows what you're playing on Xbox (a console, or Game Pass / the Xbox app on PC)
 
 Hero banners come from SteamGridDB (the Steam board's key, and your picks in its Custom artwork list); games without one use Classic. **Game hero banner as the background** puts the dimmed hero behind Classic, Session timer and Stats card, fading in from black on the left like the Steam board's Banner. **Show gamerscore** turns the gamerscore off on the Now playing and Profile screens.
 
+**Game art** (Look → Pictures): game icon or cover art (from SteamGridDB, or your pick in the Steam board's Your games list), Xbox's own game picture from Home Assistant, or your gamerpic.
+
+**Friends & achievements** (Screens), like the Steam board's:
+- **Friend now playing**: when a friend Home Assistant tracks starts a game (checked every refresh). **Only these friends** narrows it to the gamertags you list.
+- **Achievement unlocked**: Home Assistant's Xbox integration doesn't list achievements, so this appears when your gamerscore goes up, with the points you just earned and the game.
+- **Show these screens for**: how many minutes they stay in the rotation.
+
 The game's name comes from the integration's status ("Playing ARC Raiders" works too). Artwork comes from Home Assistant if it has a picture, otherwise from SteamGridDB using the Steam board's key. Xbox games join the Steam board's **Custom artwork** list, so you can rename them or pick their artwork there. **Show the board**: while online or playing (default), only while playing, or always. It can also take over the display while you play.
 
 ### Steam

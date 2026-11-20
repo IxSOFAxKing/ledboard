@@ -25,7 +25,9 @@ GOLD = (255, 190, 40)
 BLUE = (80, 160, 255)
 OFF = {"", "unknown", "unavailable", "none", "off", "false"}
 SHOW = {"online": "While you're online or playing", "playing": "Only while you're playing", "always": "Always"}
-ART = {"game": "Game artwork (gamerpic when there's none)", "gamerpic": "Your gamerpic"}
+ART = {"icon": "Game icon (made for small sizes)", "cover": "Cover art",
+       "xbox": "Xbox's own game picture (from Home Assistant; cover art when there's none)",
+       "gamerpic": "Your gamerpic"}
 LAYOUTS = {
     "classic": "Classic (game art, name, session time, gamertag and gamerscore)",
     "cinema": "Cinema (the game's hero banner, bright, with a slim bar for the name and time)",
@@ -65,8 +67,9 @@ class XboxBoard(Board):
                    "Assistant's Xbox integration. Just enter your gamertag.")
     refresh = 60
     DEFAULTS = {"enabled": False, "duration": 10, "refresh": 60, "gamertag": "", "show": "online",
-                "takeover": False, "art": "game", "show_profile": True, "show_stats": True,
-                "layout": "classic", "hero": False, "show_gamerscore": True}
+                "takeover": False, "art": "xbox", "show_profile": True, "show_stats": True,
+                "layout": "classic", "hero": False, "show_gamerscore": True,
+                "show_friends": True, "friend_filter": [], "show_achievements": True, "event_minutes": 10}
     FIELDS = [
         {"key": "gamertag", "label": "Your gamertag", "type": "text", "placeholder": "e.g. IxSOFAxKing"},
         {"key": "discover", "label": "Find my gamertag", "type": "xbox_discover",
@@ -82,10 +85,17 @@ class XboxBoard(Board):
         {"key": "takeover", "label": "Take over the display while playing", "type": "bool"},
         {"key": "show_profile", "label": "Profile screen when online but not playing", "type": "bool"},
         {"key": "show_stats", "label": "Stats screen (gamerscore, account tier, followers...)", "type": "bool"},
-        {"key": "art", "label": "Picture", "type": "select", "options": list(ART), "option_labels": ART,
-         "help": "Game artwork comes from Home Assistant when it has a picture, otherwise from SteamGridDB using the "
-                 "Steam board's key. Xbox games show up in the Steam board's Custom artwork list, so you can pick "
-                 "their artwork there."},
+        {"key": "art", "label": "Game art", "type": "select", "options": list(ART), "option_labels": ART,
+         "help": "Icon and cover art come from SteamGridDB using the Steam board's key. Xbox games show up in the "
+                 "Steam board's Your games list (Custom artwork), so you can rename them or pick their artwork there."},
+        {"key": "show_achievements", "label": "Achievement unlocked (when your gamerscore goes up)", "type": "bool",
+         "help": "Home Assistant's Xbox integration doesn't list achievements, so this shows the game and the "
+                 "gamerscore you just earned."},
+        {"key": "show_friends", "label": "Friend now playing (when a friend starts a game)", "type": "bool",
+         "help": "Friends that Home Assistant's Xbox integration tracks (checked every refresh)."},
+        {"key": "friend_filter", "label": "Only these friends (gamertags, comma-separated; blank = all)", "type": "list",
+         "show_if": {"show_friends": True}},
+        {"key": "event_minutes", "label": "Show these screens for (minutes)", "type": "number"},
         {"key": "duration", "label": "Seconds per screen", "type": "number"},
         {"key": "refresh", "label": "Check every (seconds)", "type": "number",
          "help": "Changes arrive live from Home Assistant; this is a backup."},
@@ -93,6 +103,7 @@ class XboxBoard(Board):
     FIELDS = organize(FIELDS, [
         ("Basics", "Account", ["gamertag", "discover"]),
         ("Screens", "Screens", ["layout", "show", "takeover", "show_profile", "show_stats"]),
+        ("Screens", "Friends & achievements", ["show_achievements", "show_friends", "friend_filter", "event_minutes"]),
         ("Look", "Pictures", ["art", "hero", "show_gamerscore"]),
         ("Advanced", "Timing", ["duration", "refresh"]),
     ])
@@ -102,7 +113,10 @@ class XboxBoard(Board):
         self.states = {}          # entity_id -> HA state (every entity for the gamertag)
         self.roles = {}           # role ('in_game', 'status', 'gamerscore'...) -> entity_id
         self._ws = None
-        self._pics = {}           # url -> image (or None)
+        self._pics = {}           # (url, size) -> image (or None)
+        self.events = []          # friend / achievement screens: dicts with key, kind, until
+        self._friend_games = None  # friend gamertag -> game (None until the first look)
+        self._last_score = None
 
     # -- Home Assistant -------------------------------------------------------------
     def _ha(self):
@@ -169,8 +183,10 @@ class XboxBoard(Board):
         base, token, verify = self._ha()
         self._ensure_live(base, token, verify, sorted(self.states))
         self._track_game()
+        self._check_gamerscore()
         self._load_pictures()
         self._load_friends(everything, tag)
+        self._expire_events()
 
     def _ensure_live(self, base, token, verify, ents):
         from ..ha_ws import HAStateStream
@@ -188,6 +204,7 @@ class XboxBoard(Board):
     def _on_live(self, ent, st):
         self.states[ent] = st
         self._track_game()
+        self._check_gamerscore()
         self.poke()                                       # pictures for a new game load in the update thread
 
     # -- what's going on --------------------------------------------------------------
@@ -270,26 +287,40 @@ class XboxBoard(Board):
                 self.hero = steam._game_hero("ns:" + g)   # {'dim', 'full', 'banner'} from SteamGridDB / your pick
             except Exception as e:
                 log.info("Xbox hero banner unavailable: %s", e)
-        url = self._picture_url(self._st("game_image")) or self._picture_url(self._st("now_playing"))
-        if url and url != gp:
-            self.game_art = self._fetch(url, H)
-        if self.game_art is None:
-            steam = self.app.boards.get("steam")
-            if steam and hasattr(steam, "_override"):
-                appid = "ns:" + g
-                kind = "cover"
-                pick = steam._override(appid, kind) or steam._override(appid, "icon")
-                try:
-                    pick = pick or steam._griddb_auto(appid, kind)
-                except Exception as e:
-                    log.info("Xbox artwork from SteamGridDB unavailable: %s", e)
+        style = self._art_style()
+        if style == "gamerpic":
+            return
+        ha_url = self._picture_url(self._st("game_image")) or self._picture_url(self._st("now_playing"))
+        ha_url = ha_url if ha_url and ha_url != gp else None
+        if style == "xbox" and ha_url:
+            self.game_art = self._fetch(ha_url, H)
+        if self.game_art is None and steam and hasattr(steam, "_override"):
+            appid = "ns:" + g
+            kind = "icon" if style == "icon" else "cover"
+            other = "cover" if kind == "icon" else "icon"
+            for pick_kind in (kind, other):              # your pick, else SteamGridDB's top match
+                pick = steam._override(appid, pick_kind)
+                if not pick:
+                    try:
+                        pick = steam._griddb_auto(appid, pick_kind)
+                    except Exception as e:
+                        log.info("Xbox artwork from SteamGridDB unavailable: %s", e)
                 if pick:
                     self.game_art = self._fetch(pick, H)
+                    if self.game_art is not None:
+                        break
+        if self.game_art is None and ha_url:
+            self.game_art = self._fetch(ha_url, H)
+
+    def _art_style(self):
+        style = self.cfg.get("art") or "xbox"
+        return "xbox" if style == "game" else style      # 'game' was the old name for Xbox's own picture
 
     def _load_friends(self, everything, me):
         """Every gamertag Home Assistant has (you and your friends): name, game / online, small gamerpic."""
-        if self.cfg.get("layout") != "friends":
-            self.friends = []
+        want_rows = self.cfg.get("layout") == "friends"
+        if not want_rows and not self.cfg.get("show_friends", True):
+            self.friends, self._friend_games = [], None
             return
         tags = {}
         for st in everything:
@@ -310,10 +341,59 @@ class XboxBoard(Board):
             online = g is not None or is_on(on)
             pic = next((self._picture_url(x) for x in states if self._picture_url(x)), None)
             friends.append({"tag": tag, "game": g, "online": online, "me": tag.lower() == me.lower(),
-                            "pic": self._fetch(pic, 9) if pic and online else None})
-        friends = [f for f in friends if f["online"]]
+                            "pic": self._fetch(pic, 9) if pic and online and want_rows else None, "pic_url": pic})
+        self._check_friends(friends)
+        friends = [f for f in friends if f["online"]] if want_rows else []
         friends.sort(key=lambda f: (not f["me"], f["game"] is None, f["tag"].lower()))
         self.friends = friends
+
+    # -- friends & achievements screens --------------------------------------------------
+    def _event_seconds(self):
+        try:
+            return max(1.0, float(self.cfg.get("event_minutes") or 10)) * 60
+        except (TypeError, ValueError):
+            return 600.0
+
+    def _expire_events(self):
+        now = time.time()
+        self.events = [e for e in self.events if e["until"] > now]
+
+    def _add_event(self, ev):
+        ev["until"] = time.time() + self._event_seconds()
+        self.events = [e for e in self.events if e["key"] != ev["key"]] + [ev]
+
+    def _check_friends(self, everyone):
+        """A 'friend now playing' screen when a friend starts (or switches) a game."""
+        if not self.cfg.get("show_friends", True):
+            self._friend_games = None
+            return
+        wanted = {n.strip().lower() for n in self.cfg.get("friend_filter") or [] if n.strip()}
+        now = {f["tag"]: f for f in everyone if not f["me"] and (not wanted or f["tag"].lower() in wanted)}
+        first, prev = self._friend_games is None, self._friend_games or {}
+        for tag, f in now.items():
+            g = f["game"]
+            if g and prev.get(tag) != g and not first:
+                self._add_event({"key": f"friend:{slugify(tag)}", "kind": "friend", "name": tag, "game": g,
+                                 "avatar": self._fetch(f["pic_url"], 24) if f["pic_url"] else None})
+            if not g:
+                self.events = [e for e in self.events if e["key"] != f"friend:{slugify(tag)}"]
+        self._friend_games = {tag: f["game"] for tag, f in now.items()}
+
+    def _check_gamerscore(self):
+        """An 'achievement unlocked' screen when your gamerscore goes up."""
+        st = self._st("gamerscore")
+        try:
+            score = float(st.get("state")) if st else None
+        except (TypeError, ValueError):
+            score = None
+        if score is None:
+            return
+        last, self._last_score = self._last_score, score
+        if last is None or score <= last or not self.cfg.get("show_achievements", True):
+            return
+        g = self.game()
+        self._add_event({"key": f"ach:{int(score)}", "kind": "ach", "gained": int(score - last), "score": int(score),
+                         "game": g if g and g != "In game" else ""})
 
     # -- stats ---------------------------------------------------------------------------
     def stats(self):
@@ -368,10 +448,13 @@ class XboxBoard(Board):
             return []
         show = self.cfg.get("show", "online")
         playing, online = self.game() is not None, self.online()
+        now = time.time()
+        ev = [e["key"] for e in self.events if e["until"] > now and
+              self.cfg.get("show_friends" if e["kind"] == "friend" else "show_achievements", True)]
         if show == "playing" and not playing:
-            return []
+            return ev
         if show == "online" and not (playing or online):
-            return []
+            return ev
         friends = getattr(self, "friends", []) if self.cfg.get("layout") == "friends" else []
         if len(friends) >= 2:
             out = [f"friends:{i}" for i in range(0, len(friends), 3)]
@@ -380,7 +463,7 @@ class XboxBoard(Board):
         if self.cfg.get("show_stats", True):
             n = len(self.stats())
             out += [f"stats:{i}" for i in range((n + 3) // 4)]
-        return out
+        return ev + out
 
     def takeover_slides(self):
         return ["playing"] if self.cfg.get("takeover") and self.game() is not None else []
@@ -395,6 +478,11 @@ class XboxBoard(Board):
     # -- drawing ------------------------------------------------------------------------------
     def render(self, c, slide, t):
         s = str(slide or "")
+        if s.startswith(("friend:", "ach:")):
+            e = next((x for x in self.events if x["key"] == s), None)
+            if e:
+                (self._render_friend_event if e["kind"] == "friend" else self._render_achievement)(c, e, t)
+            return
         if s.startswith("stats:"):
             return self._render_stats(c, int(s.split(":")[1]), t)
         if s.startswith("friends:"):
@@ -413,7 +501,7 @@ class XboxBoard(Board):
     def _player(self):
         """This board's game in the shape the Steam board's layouts draw."""
         hero = getattr(self, "hero", None) or {}
-        art = getattr(self, "game_art", None) if self.cfg.get("art", "game") == "game" else None
+        art = getattr(self, "game_art", None) if self._art_style() != "gamerpic" else None
         return {"game": self.game() or "In game", "appid": "xbox", "since": getattr(self, "_since", time.time()),
                 "name": self.cfg.get("gamertag") or "", "art": art or getattr(self, "gamerpic", None),
                 "hero": self._hero_bg(), "hero_full": hero.get("full"),
@@ -425,7 +513,7 @@ class XboxBoard(Board):
         if hero:
             c.rect(0, 0, H, H - 1, (0, 0, 0))
         img = None
-        if prefer_game and self.cfg.get("art", "game") == "game":
+        if prefer_game and self._art_style() != "gamerpic":
             img = getattr(self, "game_art", None)
         img = img or getattr(self, "gamerpic", None)
         if img is not None:
@@ -532,6 +620,34 @@ class XboxBoard(Board):
         if gs:
             self._g_icon(c, x0, H - 7)
             c.text(x0 + 9, H - 7, gs, "4x6", GOLD)
+
+    def _render_friend_event(self, c, e, t):
+        W, H = c.width, c.height
+        c.rect(0, 0, 1, H - 1, XBOX_GREEN)
+        if e.get("avatar") is not None:
+            c.paste(e["avatar"], 4, 4)
+        else:
+            self._badge(c, 4, 4, 24)
+        x0 = 33
+        c.text(x0, 0, "FRIEND NOW PLAYING", "4x6", XBOX_GREEN)
+        c.scroll_text(x0, W, 8, e["name"], "6x10", WHITE, t)
+        c.scroll_text(x0, W, 20, e["game"], "5x7", BLUE, t)
+
+    def _render_achievement(self, c, e, t):
+        W, H = c.width, c.height
+        glow = 0.6 + 0.4 * math.sin(t * 4)
+        d = c.draw
+        d.ellipse((4, 4, 27, 27), outline=GOLD)                      # a gold medal with a G
+        d.ellipse((7, 7, 24, 24), fill=scale(GOLD, 0.35 + 0.25 * glow), outline=GOLD)
+        c.text_centered(9, "G", "7x13B", WHITE, x0=4, x1=28)
+        for a in range(0, 360, 45):                                # sparkles circling it
+            ang = math.radians(a + t * 60)
+            c.pixel(round(15.5 + 14 * math.cos(ang)), round(15.5 + 14 * math.sin(ang)), scale(GOLD, glow))
+        x0 = 33
+        c.text(x0, 0, "ACHIEVEMENT UNLOCKED", "4x6", GOLD)
+        c.text(x0, 8, f"+{e['gained']:,} G", "6x10", WHITE)
+        c.scroll_text(x0, W, 19, e["game"] or "Xbox", "4x6", XBOX_GREEN, t)
+        c.text(x0, H - 6, f"GAMERSCORE {e['score']:,}", "4x6", GRAY)
 
     def _render_stats_card(self, c, t):
         """Playing: the game and session time, your gamerscore big, and account tier / followers."""
