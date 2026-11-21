@@ -621,6 +621,18 @@ Each game also has **Icon**, **Cover** and **Hero** buttons. Tap one to see Stea
 
 **Recently added** (on by default): new movies, episodes, seasons (and optionally music albums) from the last 24 hours, with the poster, title, season/episode or year/runtime/rating, and how long ago they were added. Set how far back and how many to show.
 
+**Now playing layouts** (Screens → Now playing → Now playing layout):
+- **Classic**: poster, title, episode or year, who's watching and the progress bar.
+- **Cinema**: the movie or show's background art from Plex, bright, with a slim bar along the bottom for the title and time left (the bar's top edge is the progress).
+- **Backdrop**: the background art, dimmed, behind the poster and the Classic text.
+- **Ends at**: what time it'll finish, in big numbers (12 or 24-hour, following the Clock board), with the time left and a progress line.
+- **Stream details**: the quality (4K, 1080P, or the audio format for music), DIRECT PLAY / DIRECT STREAM / TRANSCODE, REMOTE for streams from outside your network, and who's watching on what device.
+- **All streams**: when two or more streams are going, one row per stream (who, what, and a progress line), three to a screen. With one stream it uses Classic.
+
+Cinema and Backdrop use Classic for anything without background art.
+
+**Recently added layouts** (Screens → Recently added): **Classic**; **Backdrop**, the background art behind the poster and text; or **Poster wall**, every new poster side by side on one screen with their titles scrolling along the bottom.
+
 ### Home Assistant
 1. Enter your HA URL, for example `http://homeassistant.local:8123`.
 2. Create a **long-lived access token** in HA under Profile → Security, and paste it in.

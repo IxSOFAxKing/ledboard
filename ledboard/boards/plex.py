@@ -12,6 +12,8 @@ import urllib3
 
 from .base import Board, organize
 from ..gfx import DIM, GRAY, WHITE, Ease, fetch_image, fill_height, fmt_ms
+from .plex_layouts import (FANART_LAYOUTS, LAYOUTS, RECENT_LAYOUTS, RENDERERS, prepare_fanart,
+                           render_recent_backdrop, render_streams, render_wall)
 
 log = logging.getLogger(__name__)
 PLEX_ORANGE = (229, 160, 13)
@@ -28,6 +30,7 @@ class PlexBoard(Board):
         "url": "http://192.168.1.10:32400", "token": "", "verify_ssl": False,
         "users": [], "show_user": True, "progress_style": "wavy",
         "show_recent": True, "recent_hours": 24, "recent_max": 6, "recent_music": False,
+        "layout": "classic", "recent_layout": "classic",
     }
     FIELDS = [
         {"key": "url", "label": "Server URL", "type": "text", "help": "e.g. http://192.168.1.10:32400"},
@@ -37,6 +40,12 @@ class PlexBoard(Board):
         {"key": "show_user", "label": "Show who is watching", "type": "bool"},
         {"key": "show_paused", "label": "Show paused streams", "type": "bool"},
         {"key": "takeover", "label": "Take over the display while something is playing", "type": "bool"},
+        {"key": "layout", "label": "Now playing layout", "type": "select", "options": list(LAYOUTS),
+         "option_labels": LAYOUTS,
+         "help": "Cinema and Backdrop use the movie or show's background art from Plex (Classic when there's none). "
+                 "All streams shows one row per stream when two or more are playing, otherwise Classic."},
+        {"key": "recent_layout", "label": "Recently added layout", "type": "select", "options": list(RECENT_LAYOUTS),
+         "option_labels": RECENT_LAYOUTS, "section": "Recently added", "show_if": {"show_recent": True}},
         {"key": "progress_style", "label": "Progress bar style", "type": "select",
          "options": ["wavy", "straight"],
          "option_labels": {"wavy": "Wavy (animated, Material 3 style)", "straight": "Straight"}},
@@ -54,8 +63,8 @@ class PlexBoard(Board):
     ]
     FIELDS = organize(FIELDS, [
         ("Basics", "Connection", ["url", "token", "verify_ssl"]),
-        ("Screens", "Now playing", ["takeover", "users", "show_user", "show_paused", "progress_style"]),
-        ("Screens", "Recently added", ["show_recent", "recent_hours", "recent_max", "recent_music"]),
+        ("Screens", "Now playing", ["layout", "takeover", "users", "show_user", "show_paused", "progress_style"]),
+        ("Screens", "Recently added", ["show_recent", "recent_layout", "recent_hours", "recent_max", "recent_music"]),
         ("Advanced", "Timing", ["duration", "refresh"])], {"duration": "Seconds per screen"})
 
     def __init__(self, cfg, app):
@@ -83,12 +92,16 @@ class PlexBoard(Board):
         users = {u.strip().lower() for u in self.cfg.get("users", []) if u.strip()}
         if users:
             sessions = [s for s in sessions if s["user"].lower() in users]
+        lay = self.cfg.get("layout", "classic")
         for s in sessions:
             s["art"] = self._art(s["thumb"]) if s["thumb"] else None
+            s["fanart"] = self._fanart(s.get("art_path")) if lay in FANART_LAYOUTS and s.get("art_path") else None
+            s["art_small"] = self._small(s["thumb"]) if lay == "streams" and s["thumb"] else None
         self.sessions = sessions
         self.fetched_at = time.time()
         if self.cfg.get("show_recent", True):
-            sig = (self.cfg.get("recent_hours"), self.cfg.get("recent_max"), self.cfg.get("recent_music"))
+            sig = (self.cfg.get("recent_hours"), self.cfg.get("recent_max"), self.cfg.get("recent_music"),
+                   self.cfg.get("recent_layout"))
             if time.time() - self._recent_at > 600 or sig != getattr(self, "_recent_sig", None):   # every 10 min
                 self._recent_sig = sig
                 try:
@@ -116,6 +129,8 @@ class PlexBoard(Board):
         H = self.app.height
         for it in items:
             it["art"] = self._poster(it["thumb"], H) if it["thumb"] else None
+            it["fanart"] = (self._fanart(it.get("art_path")) if self.cfg.get("recent_layout") == "backdrop"
+                            and it.get("art_path") else None)
         self.recent = items
 
     def _poster(self, thumb, h):
@@ -125,6 +140,30 @@ class PlexBoard(Board):
         img = fetch_image(f"{self._base()}/photo/:/transcode?{q}", h * 4, h * 4,
                           verify=bool(self.cfg.get("verify_ssl")), cache_key="plex4" + thumb)
         return fill_height(img, h, h) if img is not None else None
+
+    def _transcode(self, path, w, h):
+        q = urllib.parse.urlencode({"width": w, "height": h, "minSize": 1, "upscale": 1,
+                                    "url": path, "X-Plex-Token": self.cfg["token"]})
+        return f"{self._base()}/photo/:/transcode?{q}"
+
+    def _fanart(self, path):
+        """The wide background art, prepared for the board (cached per item)."""
+        cache = self.__dict__.setdefault("_fan", {})
+        if path in cache:
+            return cache[path]
+        W, H = self.app.width, self.app.height
+        src = fetch_image(self._transcode(path, W * 2, W * 2), W * 2, W * 2, verify=bool(self.cfg.get("verify_ssl")),
+                          cache_key="plexfan" + path)
+        out = prepare_fanart(src, W, H)
+        if len(cache) > 30:
+            cache.clear()
+        cache[path] = out
+        return out
+
+    def _small(self, thumb):
+        img = fetch_image(self._transcode(thumb, 64, 64), 64, 64, verify=bool(self.cfg.get("verify_ssl")),
+                          cache_key="plex4" + thumb)
+        return fill_height(img, 9, 9) if img is not None else None
 
     @staticmethod
     def parse_recent(j, since, music=False):
@@ -163,7 +202,8 @@ class PlexBoard(Board):
                         "thumb": m.get("thumb")}
             else:
                 continue
-            item.update(key="new:" + str(m.get("ratingKey") or len(out)), added=added)
+            item.update(key="new:" + str(m.get("ratingKey") or len(out)), added=added,
+                        art_path=m.get("art") or m.get("grandparentArt") or m.get("parentArt"))
             out.append(item)
         out.sort(key=lambda i: -i["added"])
         return out
@@ -199,7 +239,23 @@ class PlexBoard(Board):
                 sub = m.get("grandparentTitle", "")
                 thumb = m.get("thumb")
             player = m.get("Player") or {}
+            media = (m.get("Media") or [{}])[0] if isinstance(m.get("Media"), list) else {}
+            res = str(media.get("videoResolution") or "").lower()
+            quality = {"4k": "4K", "1080": "1080P", "720": "720P", "480": "480P", "576": "576P", "sd": "SD"}.get(res, res.upper())
+            if kind == "track" and media.get("audioCodec"):
+                quality = str(media["audioCodec"]).upper()
+            tc = m.get("TranscodeSession") or {}
+            if not tc:
+                decision = "DIRECT PLAY"
+            elif "transcode" in (tc.get("videoDecision"), tc.get("audioDecision")):
+                decision = "TRANSCODE"
+            else:
+                decision = "DIRECT STREAM"
+            sess = m.get("Session") or {}
+            remote = "REMOTE" if sess.get("location") == "wan" or player.get("local") is False else ""
             out.append({
+                "art_path": (m.get("grandparentArt") or m.get("art")) if kind == "episode" else (m.get("art") or m.get("grandparentArt")),
+                "quality": quality, "decision": decision, "remote": remote,
                 "key": str(m.get("sessionKey") or (m.get("Session") or {}).get("id") or m.get("ratingKey")),
                 "type": kind, "title": title, "subtitle": sub, "thumb": thumb,
                 "user": (m.get("User") or {}).get("title", ""),
@@ -212,16 +268,23 @@ class PlexBoard(Board):
     def _visible(self):
         return [s for s in self.sessions if s["state"] == "playing" or self.cfg.get("show_paused")]
 
+    def _stream_pages(self):
+        vis = self._visible()
+        if self.cfg.get("layout") != "streams" or len(vis) < 2:
+            return None
+        return [f"streams:{i}" for i in range((len(vis) + 2) // 3)]
+
     def slides(self):
-        out = [s["key"] for s in self._visible()]
-        if self.cfg.get("show_recent", True):
-            out += [r["key"] for r in self.recent]
+        out = self._stream_pages() or [s["key"] for s in self._visible()]
+        if self.cfg.get("show_recent", True) and self.recent:
+            out += ["new:wall"] if self.cfg.get("recent_layout") == "wall" else [r["key"] for r in self.recent]
         return out
 
     def takeover_slides(self):
         if not self.cfg.get("takeover"):
             return []
-        return [s["key"] for s in self._visible() if s["state"] == "playing"]
+        playing = [s["key"] for s in self._visible() if s["state"] == "playing"]
+        return (self._stream_pages() or playing) if playing else []
 
     def _render_recent(self, c, item, t):
         H, W = c.height, c.width
@@ -243,14 +306,36 @@ class PlexBoard(Board):
                 c.pixel(W - 1 - (n - 1 - k) * 2, H - 1, WHITE if k == i else DIM)
 
     def render(self, c, slide, t):
+        if slide == "new:wall":
+            return render_wall(self, c, self.recent, t)
         if isinstance(slide, str) and slide.startswith("new:"):
             item = next((r for r in self.recent if r["key"] == slide), None)
             if item:
-                self._render_recent(c, item, t)
+                if self.cfg.get("recent_layout") == "backdrop":
+                    render_recent_backdrop(self, c, item, t)
+                else:
+                    self._render_recent(c, item, t)
             return
+        if isinstance(slide, str) and slide.startswith("streams:"):
+            vis = sorted(self._visible(), key=lambda x: x["state"] != "playing")
+            return render_streams(self, c, vis, int(slide.split(":")[1]), t)
         s = next((x for x in self.sessions if x["key"] == slide), None)
         if not s:
             return
+        offset = self._offset(s)
+        fn = RENDERERS.get(self.cfg.get("layout", "classic"))
+        if fn:
+            return fn(self, c, s, offset, slide, t)
+        return self._render_classic(c, s, offset, slide, t)
+
+    def _offset(self, s):
+        """Where the stream is now (ms), moving on smoothly between checks."""
+        offset = s["offset"]
+        if s["state"] == "playing":
+            offset += (time.time() - self.fetched_at) * 1000
+        return min(offset, s["duration"] or offset)
+
+    def _render_classic(self, c, s, offset, slide, t):
         H, W = c.height, c.width
         if s["art"] is not None:
             c.paste(s["art"], 0, 0)
@@ -260,10 +345,6 @@ class PlexBoard(Board):
             x0 = 26
         c.scroll_text(x0, W, 1, s["title"], "6x10", WHITE, t)
         c.scroll_text(x0, W, 11, s["subtitle"], "5x8", PLEX_ORANGE, t)
-        offset = s["offset"]
-        if s["state"] == "playing":
-            offset += (time.time() - self.fetched_at) * 1000
-        offset = min(offset, s["duration"] or offset)
         if s["state"] != "playing":
             label = "PAUSED"
         elif self.cfg.get("show_user", True) and s["user"]:
@@ -286,6 +367,7 @@ class PlexBoard(Board):
 
     def status(self):
         s = super().status()
-        s["sessions"] = [{k: v for k, v in x.items() if k not in ("art", "thumb")} for x in self.sessions]
-        s["recent"] = [{k: v for k, v in x.items() if k not in ("art", "thumb")} for x in self.recent]
+        skip = ("art", "thumb", "fanart", "art_small")
+        s["sessions"] = [{k: v for k, v in x.items() if k not in skip} for x in self.sessions]
+        s["recent"] = [{k: v for k, v in x.items() if k not in skip} for x in self.recent]
         return s
