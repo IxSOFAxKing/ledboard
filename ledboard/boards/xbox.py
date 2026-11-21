@@ -47,10 +47,26 @@ def slugify(text):
     return s
 
 
-def clean_game(text):
-    """'ARC Raiders' from 'Playing ARC Raiders'; None for a plain status like 'Online'."""
+# Xbox screens and apps that aren't games (the dashboard shows up as 'Home')
+NOT_GAMES = {"home", "xbox", "xbox app", "xbox dashboard", "dashboard", "microsoft store", "store", "settings",
+             "guide", "xbox guide", "game pass", "xbox game pass", "my games & apps", "my games and apps"}
+_PRESENCE = re.compile(r"\s+[-–—|]\s+")
+
+
+def split_presence(text):
+    """'Grand Theft Auto VI - Exploring Port Gellhorn' -> ('Grand Theft Auto VI', 'Exploring Port Gellhorn').
+    Xbox adds Rich Presence (what you're doing in the game) after the game's name."""
     t = re.sub(r"(?i)^\s*(now\s+)?playing\s*:?\s*", "", str(text or "")).strip()
-    if not t or t.lower() in STATUS_WORDS or t.lower() in OFF or t.lower().startswith("last seen"):
+    parts = _PRESENCE.split(t, maxsplit=1)
+    return parts[0].strip(), (parts[1].strip() if len(parts) > 1 else "")
+
+
+def clean_game(text):
+    """'ARC Raiders' from 'Playing ARC Raiders' or 'ARC Raiders - In a match'; None for a plain status like
+    'Online' or the Xbox Home screen."""
+    t, _activity = split_presence(text)
+    low = t.lower()
+    if not t or low in STATUS_WORDS or low in OFF or low in NOT_GAMES or low.startswith("last seen"):
         return None
     return t
 
@@ -182,6 +198,11 @@ class XboxBoard(Board):
         self.roles = self._classify(mine)
         base, token, verify = self._ha()
         self._ensure_live(base, token, verify, sorted(self.states))
+        if not getattr(self, "_tidied", False):
+            steam = self.app.boards.get("steam")
+            if steam and hasattr(steam, "known_games"):
+                self._tidy_games(steam)
+            self._tidied = True
         self._track_game()
         self._check_gamerscore()
         self._load_pictures()
@@ -242,6 +263,25 @@ class XboxBoard(Board):
                 steam = self.app.boards.get("steam")
                 if g != "In game" and steam and hasattr(steam, "_remember_game"):
                     steam._remember_game("ns:" + g, g)    # listed with the Steam board's games for artwork picks
+                    self._tidy_games(steam)
+
+    @staticmethod
+    def _tidy_games(steam):
+        """Forget entries older versions saved for the Xbox Home screen or 'Game - what you're doing' (Rich
+        Presence), unless you picked artwork or a name for them."""
+        try:
+            games = steam.known_games()
+        except Exception:
+            return
+        picked = steam.cfg.get("art_overrides") or {}
+        for key in list(games):
+            if not key.startswith("ns:") or picked.get(key):
+                continue
+            name = key[3:]
+            base, act = split_presence(name)
+            if name.lower() in NOT_GAMES or (act and ("ns:" + base) in games):
+                steam.forget_game(key)
+                log.info("Xbox: removed %r from the games list (not a separate game)", name)
 
     # -- pictures ------------------------------------------------------------------------
     def _picture_url(self, st):
@@ -598,6 +638,9 @@ class XboxBoard(Board):
             badges.append("MULTIPLAYER")
         if is_on(self._st("in_party")):
             badges.append("PARTY")
+        act = activity_of(self._st)
+        if act:
+            badges.append(act.upper())
         txt(c, x0, W, 12, "  ·  ".join([f"PLAYING · {clock}"] + badges), "5x8", XBOX_GREEN, t)
         tag = (self.cfg.get("gamertag") or "").upper()
         gs = self._gamerscore_text() if self.cfg.get("show_gamerscore", True) else None
@@ -706,6 +749,20 @@ class XboxBoard(Board):
             vw = c.text_width(val, "5x7")
             c.scroll_text(1, max(20, W - vw - 4), y + 1, label, "4x6", XBOX_GREEN, t)
             c.text_right(W - 1, y, val, "5x7", GOLD if "GAMERSCORE" in label else WHITE)
+
+
+def activity_of(st):
+    """The Rich Presence text after the game's name ('Exploring Port Gellhorn'), or ''."""
+    for ent in (st("now_playing"), st("status")):
+        if not ent:
+            continue
+        attrs = ent.get("attributes") or {}
+        for text in (ent.get("state"), attrs.get("title"), attrs.get("rich_presence"), attrs.get("activity")):
+            if clean_game(text):
+                act = split_presence(text)[1]
+                if act:
+                    return act
+    return ""
 
 
 def game_of(st):

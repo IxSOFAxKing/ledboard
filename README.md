@@ -555,7 +555,7 @@ Hero banners come from SteamGridDB (the Steam board's key, and your picks in its
 - **Achievement unlocked**: Home Assistant's Xbox integration doesn't list achievements, so this appears when your gamerscore goes up, with the points you just earned and the game.
 - **Show these screens for**: how many minutes they stay in the rotation.
 
-The game's name comes from the integration's status ("Playing ARC Raiders" works too). Artwork comes from Home Assistant if it has a picture, otherwise from SteamGridDB using the Steam board's key. Xbox games join the Steam board's **Custom artwork** list, so you can rename them or pick their artwork there. **Show the board**: while online or playing (default), only while playing, or always. It can also take over the display while you play.
+The game's name comes from the integration's status ("Playing ARC Raiders" works too). What you're doing in the game (Xbox Rich Presence, e.g. "Grand Theft Auto VI - Exploring Port Gellhorn") is split off the name and shown on the PLAYING line, so it doesn't count as a new game. The Xbox Home screen isn't counted as a game. Artwork comes from Home Assistant if it has a picture, otherwise from SteamGridDB using the Steam board's key. Xbox games join the Steam board's **Custom artwork** list, so you can rename them or pick their artwork there. **Show the board**: while online or playing (default), only while playing, or always. It can also take over the display while you play.
 
 ### Steam
 1. Get a free **Steam Web API key** at <https://steamcommunity.com/dev/apikey>. Any domain name works, for example `ledboard`.
