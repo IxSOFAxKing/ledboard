@@ -408,6 +408,14 @@ With live updates off, Home Assistant's Spotify integration only asks Spotify ab
 
 Right at a song change, Spotify and Home Assistant sometimes briefly report an older song. The board only switches once it sees the same new song twice in a row (it re-checks a second later), so that brief wrong song never shows.
 
+**Layouts** (Screens → Layout), all made from the album art the board already downloads:
+- **Classic**: album art, title, artist and the progress bar.
+- **Backdrop**: the album art, blurred and dimmed, fills the board behind outlined text.
+- **Album colors**: the title, artist and progress bar take the album's own colors, over a faint wash of its main color.
+- **Vinyl**: the album art is the label of a record that spins with the song (it stops when paused).
+- **Visualizer**: animated equalizer bars in the album's colors instead of the progress bar (a thin progress line runs along the bottom). They're for show: they don't follow the actual audio.
+- **Big title**: the song title in large letters across the whole board, the artist below, and the time and progress along the bottom.
+
 ### Weather
 1. Turn on **Weather**.
 2. Choose a source:

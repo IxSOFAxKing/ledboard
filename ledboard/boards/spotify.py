@@ -21,6 +21,7 @@ import requests
 
 from .base import Board, organize
 from ..gfx import GRAY, WHITE, Ease, fetch_image, fmt_ms, hex_to_rgb
+from .spotify_layouts import LAYOUTS, RENDERERS
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class SpotifyBoard(Board):
         "client_id": "", "client_secret": "", "refresh_token": "",
         "redirect_uri": "http://127.0.0.1:8080/spotify/callback",
         "title_color": "#ffffff", "artist_color": "#1ed760", "progress_style": "wavy",
+        "layout": "classic",
     }
     FIELDS = [
         {"key": "source", "label": "Get now-playing info from", "type": "select",
@@ -79,6 +81,9 @@ class SpotifyBoard(Board):
         {"key": "takeover", "label": "Take over the display while music is playing", "type": "bool"},
         {"key": "show_paused", "label": "Keep showing when paused", "type": "bool"},
         {"key": "duration", "label": "Seconds on screen (in rotation)", "type": "number"},
+        {"key": "layout", "label": "Layout", "type": "select", "options": list(LAYOUTS), "option_labels": LAYOUTS,
+         "help": "All made from the album art: Backdrop blurs it behind the text, Album colors and Visualizer "
+                 "take their colors from it, Vinyl spins it as a record."},
         {"key": "progress_style", "label": "Progress bar style", "type": "select",
          "options": ["wavy", "straight"],
          "option_labels": {"wavy": "Wavy (animated, Material 3 style)", "straight": "Straight"}},
@@ -91,6 +96,7 @@ class SpotifyBoard(Board):
     FIELDS = organize(FIELDS, [
         ("Basics", "Source", ["source", "ha_entities", "ha_live", "ha_force_refresh", "spotify_auth", "client_id", "client_secret", "redirect_uri"]),
         ("Screens", "Now playing", ["takeover", "show_paused"]),
+        ("Screens", "Layout", ["layout"]),
         ("Look", "Style", ["progress_style", "title_color", "artist_color"]),
         ("Advanced", "Timing", ["duration", "refresh"])], {})
 
@@ -448,12 +454,16 @@ class SpotifyBoard(Board):
         if not n:
             return
         H, W = c.height, c.width
-        c.paste(n["art"], 0, 0)
-        x0 = H + 2
         progress = n["progress"]
         if n["playing"]:
             progress += (time.time() - fetched_at) * 1000
         progress = min(progress, n["duration"] or progress)
+        fn = RENDERERS.get(self.cfg.get("layout", "classic"))
+        if fn:
+            frac = progress / n["duration"] if n["duration"] else 0
+            return fn(self, c, n, progress, frac, slide, t)
+        c.paste(n["art"], 0, 0)
+        x0 = H + 2
         c.scroll_text(x0, W, 1, n["title"], "6x10", hex_to_rgb(self.cfg.get("title_color"), WHITE), t)
         c.scroll_text(x0, W, 11, n["artist"], "5x8", hex_to_rgb(self.cfg.get("artist_color"), GREEN), t)
         frac = progress / n["duration"] if n["duration"] else 0
@@ -468,6 +478,10 @@ class SpotifyBoard(Board):
             c.wavy_progress(x0, W - 1, H - 4, frac, GREEN, amp=self._wave.value(slide, n["playing"]))
         else:
             c.progress(x0, H - 3, W - 1, frac, GREEN)
+
+    def _colors(self):
+        """(title color, artist color) from the settings."""
+        return (hex_to_rgb(self.cfg.get("title_color"), WHITE), hex_to_rgb(self.cfg.get("artist_color"), GREEN))
 
     def status(self):
         s = super().status()
