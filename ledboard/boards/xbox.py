@@ -248,16 +248,33 @@ class XboxBoard(Board):
     def _track_game(self):
         """When the current game started (for the session timer), and remember the game for artwork picks."""
         g = self.game()
+        now = time.time()
+        sess = getattr(self, "_session", None)
+        if g:
+            # the session only restarts for a different game, or after 10 minutes away; Rich Presence changes,
+            # a moment of 'In game' or a blip in the status keep the timer going
+            same = sess and now - sess["seen"] < 600 and (sess["game"] == g or "In game" in (g, sess["game"]))
+            if same:
+                if sess["game"] == "In game" and g != "In game":
+                    sess["game"] = g                     # the name arrived: same session
+            else:
+                started = now
+                in_game = self._st("in_game")
+                if in_game and is_on(in_game) and in_game.get("last_changed"):
+                    try:
+                        t0 = datetime.fromisoformat(in_game["last_changed"].replace("Z", "+00:00")).timestamp()
+                        if now - 12 * 3600 < t0 <= now and not (sess and t0 < sess["seen"]):
+                            started = t0                 # when the console says the game started
+                    except ValueError:
+                        pass
+                sess = self._session = {"game": g, "since": started, "seen": now}
+                log.info("Xbox: new session for %r (started %d min ago)", g, (now - started) // 60)
+            sess["seen"] = now
+            self._since = sess["since"]
+        elif sess is None:
+            self._since = now
         if g != getattr(self, "_game", None):
             self._game = g
-            started = time.time()
-            in_game = self._st("in_game")
-            if g and in_game and in_game.get("last_changed"):
-                try:
-                    started = datetime.fromisoformat(in_game["last_changed"].replace("Z", "+00:00")).timestamp()
-                except ValueError:
-                    pass
-            self._since = started
             if g:
                 log.info("Xbox: playing %r", g)
                 steam = self.app.boards.get("steam")
@@ -622,38 +639,13 @@ class XboxBoard(Board):
         c.text(x + 2, y, "G", "4x6", GOLD)
 
     def _render_playing(self, c, t):
-        W, H = c.width, c.height
-        hero = self._hero_bg()
-        if hero is not None:
-            c.paste(hero, 0, 0)
-        x0 = self._picture(c, hero=hero is not None)
-        txt = self._txt(hero)
-        g = self.game() or "In game"
-        txt(c, x0, W, 1, g, "6x10", WHITE, t)
-        mins = int((time.time() - getattr(self, "_since", time.time())) // 60)
-        h, m = divmod(mins, 60)
-        clock = f"{h}h {m:02d}m" if h else f"{m}m"
-        badges = []
-        if is_on(self._st("in_multiplayer")):
-            badges.append("MULTIPLAYER")
-        if is_on(self._st("in_party")):
-            badges.append("PARTY")
-        act = activity_of(self._st)
-        if act:
-            badges.append(act.upper())
-        txt(c, x0, W, 12, "  ·  ".join([f"PLAYING · {clock}"] + badges), "5x8", XBOX_GREEN, t)
-        tag = (self.cfg.get("gamertag") or "").upper()
+        """Classic: drawn by the Steam board's own Classic code, so the two look the same."""
+        from .steam import SteamBoard
+        p = self._player()
         gs = self._gamerscore_text() if self.cfg.get("show_gamerscore", True) else None
-        tw = c.text_width(tag, "4x6") if tag else 0
-        if tag:
-            txt(c, x0, W, H - 7, tag, "4x6", GRAY if hero is None else (215, 215, 215), 0)
         if gs:
-            gx = max(x0 + tw + 4, W - c.text_width(gs, "4x6") - 10)
-            if gx + 8 + c.text_width(gs, "4x6") <= W:
-                if hero is not None:
-                    c.rect(gx - 1, H - 8, W - 1, H - 1, (0, 0, 0))
-                self._g_icon(c, gx, H - 7)
-                c.text(gx + 9, H - 7, gs, "4x6", GOLD)
+            p["name"] = f"{p['name']}  ·  {gs} G" if p["name"] else f"{gs} G"
+        SteamBoard._render_classic(_SteamLook(self), c, p, t)
 
     def _render_profile(self, c, t):
         W, H = c.width, c.height

@@ -542,12 +542,12 @@ Shows what you're playing on Xbox (a console, or Game Pass / the Xbox app on PC)
 2. The board finds every entity the integration made for your gamertag and works out what each is: in game, online, party, multiplayer, status, gamerscore and gamerpic. Everything else becomes a stat. It follows them live. The Status tab shows what it recognized.
 
 **Screens:**
-- **Now playing**: the game's artwork, its name, a session timer (from when you started playing), MULTIPLAYER / PARTY when they apply, your gamertag and your gamerscore.
+- **Now playing**: the game's artwork, its name, a session timer, your gamertag and your gamerscore. The timer keeps running through Rich Presence changes and short blips in the status; it only restarts when you start a different game or come back after 10+ minutes away.
 - **Profile**, when you're online but not in a game: your gamerpic, gamertag, status and gamerscore.
 - **Stats**: every other stat Home Assistant has for you (gamerscore, account tier, followers, last online…), four to a page.
 
 **Now playing layouts** (Look → Layout), like the Steam board's:
-- **Classic**: the screen above.
+- **Classic**: the screen above, drawn exactly like the Steam board's Classic.
 - **Cinema**: the game's hero banner, bright, with a slim bar for the name and session time.
 - **Banner**: the hero on the right fading into black, the text on the left.
 - **Session timer**: a big play-time clock next to the game art.
