@@ -434,8 +434,11 @@ Right at a song change, Spotify and Home Assistant sometimes briefly report an o
    - **Moon phase**: the moon drawn in its real phase, % lit, and the next full/new moon.
    - **Today in 4 parts**: morning / afternoon / evening / night, starting from now.
    - **Compared to yesterday**: shows only when today's high differs from yesterday's by at least the set number of degrees.
+   - **Live radar**: the last hour of weather radar around you, animated over a dark map, holding on the newest frame. A blinking dot marks your location; the top-left corner shows how old each frame is ("-40M" … "NOW") and the dots in the bottom-right corner show where the loop is. When nothing is falling in view it says NO RAIN NEARBY.
 
    **24-hour graph rain bars** (under Screens): the blue bars along the bottom show each hour's chance of rain (taller = more likely). Settings: turn them off, show only hours with at least a set chance (20% by default, which hides the faint 1-pixel line small chances made), and a legend in the top-right corner with a raindrop and the day's highest chance (that hour's bar is drawn lighter).
+
+   **Radar settings** (under Screens → Radar): the **area shown** (about 40, 100, 250, 500 or 1,000 miles across), the **source**, and **only show when there's rain or snow in view**. Sources: **NEXRAD** for the US (the National Weather Service radars as combined by Iowa State University's Iowa Environmental Mesonet; a frame every 5 minutes in the classic green / yellow / red colors) and **RainViewer** for everywhere else (every 10 minutes). **Automatic** picks NEXRAD for locations in the mainland US. The map is CARTO's dark map, without labels. Both are free and need no key. With the radar on, the board checks every 5 minutes. The Status tab shows the radar source, frame count and any error.
 
    With the Home Assistant source, Rain soon and Compared to yesterday aren't available, and air quality isn't either; UV shows if your weather entity reports it.
 

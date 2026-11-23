@@ -161,6 +161,11 @@ def parse_ha(state, daily, hourly, sun_up=True):
     return out
 
 
+from .weather_radar import AREAS as RADAR_AREAS, SOURCES as RADAR_SOURCES, Radar, has_radar, render_radar  # noqa: E402
+
+SCREENS = dict(SCREENS, radar=("show_radar", "Live radar (animated, the last hour around you)", has_radar,
+                                render_radar))
+
 ALL_SCREENS = [("current", "show_current", "Current conditions"),
                ("daily", "show_daily", "4-day forecast"),
                ("hourly", "show_hourly", "Next 24 hours graph")] + \
@@ -192,6 +197,7 @@ class WeatherBoard(Board):
         "aqi_scale": "us", "yesterday_threshold": 8,
         "hourly_rain": True, "hourly_rain_min": 20, "hourly_rain_legend": True,
         "screen_order": [],          # slide ids in the order to show them ([] = default order)
+        "show_radar": False, "radar_source": "auto", "radar_area": "250", "radar_only_rain": False,
     }
     FIELDS = [
         {"key": "source", "label": "Weather data from", "type": "select", "section": "Source",
@@ -223,6 +229,12 @@ class WeatherBoard(Board):
          "help": "Hides the faint 1-pixel bars small chances make (0 = show every hour)."},
         {"key": "hourly_rain_legend", "label": "...and a rain legend (drop + the highest chance, top right)",
          "type": "bool", "section": "Screens", "show_if": {"show_hourly": True, "hourly_rain": True}},
+        {"key": "radar_area", "label": "Radar: area shown", "type": "select", "section": "Screens",
+         "options": list(RADAR_AREAS), "option_labels": RADAR_AREAS, "show_if": {"show_radar": True}},
+        {"key": "radar_source", "label": "Radar: source", "type": "select", "section": "Screens",
+         "options": list(RADAR_SOURCES), "option_labels": RADAR_SOURCES, "show_if": {"show_radar": True}},
+        {"key": "radar_only_rain", "label": "Radar: only show when there's rain or snow in view", "type": "bool",
+         "section": "Screens", "show_if": {"show_radar": True}},
         {"key": "duration", "label": "Seconds per screen", "type": "number", "section": "Display"},
         {"key": "refresh", "label": "Refresh interval (s)", "type": "number", "section": "Display"},
     ]
@@ -231,18 +243,58 @@ class WeatherBoard(Board):
         ("Screens", "Screens", ["screen_order"]),
         ("Screens", "Screen options", ["aqi_scale", "yesterday_threshold", "hourly_rain", "hourly_rain_min",
                                        "hourly_rain_legend"]),
+        ("Screens", "Radar", ["radar_area", "radar_source", "radar_only_rain"]),
         ("Advanced", "Timing", ["duration", "refresh"])], {})
 
     def __init__(self, cfg, app):
         super().__init__(cfg, app)
         self.weather = None
+        self.radar = Radar()
 
     # -- data -----------------------------------------------------------------
     def update(self):
         if self.cfg.get("source") == "homeassistant":
-            self.weather = self._update_ha()
+            w = self._update_ha()
         else:
-            self.weather = self._update_open_meteo()
+            w = self._update_open_meteo()
+        if w is not None and self.cfg.get("show_radar"):
+            self._update_radar()
+            w["radar"] = self.radar
+        self.weather = w
+
+    def interval(self):
+        base = super().interval()
+        return min(base, 300) if self.cfg.get("show_radar") else base   # radar: new frames every 5-10 minutes
+
+    def _location(self):
+        """(lat, lon): the board's location, or Home Assistant's home location."""
+        lat, lon = self.cfg.get("latitude"), self.cfg.get("longitude")
+        if lat not in ("", None) and lon not in ("", None):
+            return float(lat), float(lon)
+        ha = self.app.boards.get("homeassistant")
+        hcfg = ha.cfg if ha else {}
+        base = (hcfg.get("url") or "").rstrip("/")
+        if base and hcfg.get("token"):
+            r = requests.get(f"{base}/api/config", headers={"Authorization": f"Bearer {hcfg['token']}"}, timeout=10,
+                             verify=bool(hcfg.get("verify_ssl", True)))
+            if r.ok and r.json().get("latitude") is not None:
+                return float(r.json()["latitude"]), float(r.json()["longitude"])
+        return None
+
+    def _update_radar(self):
+        try:
+            loc = self._location()
+            if not loc:
+                raise RuntimeError("the radar needs a location: search one on the Weather board")
+            try:
+                miles = float(self.cfg.get("radar_area") or 250)
+            except (TypeError, ValueError):
+                miles = 250.0
+            self.radar.refresh(loc[0], loc[1], miles * 1.609, self.cfg.get("radar_source") or "auto",
+                               self.app.width, self.app.height)
+        except Exception as e:                   # the rest of the weather keeps working
+            self.radar.error = str(e)
+            log.warning("weather radar unavailable: %s", e)
 
     def _update_open_meteo(self):
         lat, lon = self.cfg.get("latitude"), self.cfg.get("longitude")
@@ -477,6 +529,10 @@ class WeatherBoard(Board):
         s = super().status()
         w = self.weather or {}
         s["weather"] = {k: w.get(k) for k in ("condition", "temp", "humidity")} if w else None
+        if self.cfg.get("show_radar"):
+            r = self.radar
+            s["radar"] = {"source": r.source, "frames": len(r.frames), "rain_in_view": r.rain, "error": r.error,
+                          "updated": r.updated}
         return s
 
 
