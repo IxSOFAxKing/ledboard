@@ -4,7 +4,8 @@ Radar:
   * NEXRAD (US): Iowa State University's Iowa Environmental Mesonet composite of the National Weather
     Service radars, a new frame every 5 minutes, in the classic radar colors. Free, no key.
   * RainViewer (worldwide): free radar mosaic API (a frame every 10 minutes).
-Map: CARTO's dark map tiles (no labels), made a little brighter so coasts and roads show on LEDs.
+Map: Esri's map tiles (satellite, street map turned into a night map, or dark gray canvas), prepared so the
+radar stands out on LEDs.
 
 Everything is downloaded in the board's update thread and turned into ready-made frames (map + radar), so
 drawing a frame is just a paste.
@@ -23,11 +24,11 @@ log = logging.getLogger(__name__)
 
 IEM_TILE = "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/{layer}/{z}/{x}/{y}.png"
 RAINVIEWER_MAPS = "https://api.rainviewer.com/public/weather-maps.json"
-CARTO_TILE = "https://a.basemaps.cartocdn.com/{style}/{z}/{x}/{y}.png"
-ESRI_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/{service}/MapServer/tile/{z}/{y}/{x}"
+ESRI_SERVICES = {"satellite": "World_Imagery", "streets": "World_Street_Map", "dark": "Canvas/World_Dark_Gray_Base"}
 MAPS = {"satellite": "Satellite (real colors: land, forests, lakes; Esri World Imagery)",
-        "streets": "Streets in color (roads, parks, water; CARTO Voyager, no labels)",
-        "dark": "Dark (faint coasts and roads only; CARTO Dark Matter)",
+        "streets": "Streets in color (highways, parks, water as a night map; Esri World Street Map)",
+        "dark": "Dark (faint borders, coasts and roads only; Esri Dark Gray Canvas)",
         "none": "No map (radar on black)"}
 UA = {"User-Agent": "LEDBoard weather radar (Raspberry Pi LED matrix)"}
 
@@ -125,11 +126,8 @@ class Radar:
         if style == "none":
             self._base = (key, Image.new("RGB", (W, H), (0, 0, 0)))
             return self._base[1]
-        if style == "satellite":
-            url_for = lambda z, x, y: ESRI_TILE.format(z=z, x=x, y=y)          # noqa: E731
-        else:
-            name = "rastertiles/voyager_nolabels" if style == "streets" else "dark_nolabels"
-            url_for = lambda z, x, y: CARTO_TILE.format(style=name, z=z, x=x, y=y)   # noqa: E731
+        service = ESRI_SERVICES.get(style, "World_Imagery")
+        url_for = lambda z, x, y: ESRI.format(service=service, z=z, x=x, y=y)      # noqa: E731
         img = self._stitch(url_for, v, W, H, empty_ok=False)
         if img is None:
             base = Image.new("RGB", (W, H), (0, 0, 0))
@@ -138,18 +136,16 @@ class Radar:
             base = ImageEnhance.Color(img.convert("RGB")).enhance(1.35)
             base = ImageEnhance.Brightness(base).enhance(0.5)
         elif style == "streets":
-            # a light map turned into a night map: plain land goes black, water and parks keep their colors
-            # (richer), and roads (lighter than the land) become a soft gray
-            from PIL import ImageChops
+            # a light street map turned into a night map: only colored things are kept (highways in orange /
+            # yellow, water, parks), richer; plain land, white side streets and the labels (dark text with
+            # white outlines) all go black, so no text shows
             h, sat, val = img.convert("RGB").convert("HSV").split()
-            ground = sorted(val.getdata())[len(val.getdata()) // 2]
-            sat = sat.point(lambda x: min(255, x * 4))
-            colored = sat.point(lambda x: 0 if x < 30 else int(20 + x * 0.42))
-            roads = val.point(lambda x: 70 if x > ground + 4 else 0)
-            base = Image.merge("HSV", (h, sat, ImageChops.lighter(colored, roads))).convert("RGB")
+            sat = sat.point(lambda x: min(255, x * 3))
+            bright = sat.point(lambda x: 0 if x < 45 else int(25 + x * 0.45))
+            base = Image.merge("HSV", (h, sat, bright)).convert("RGB")
         else:
             base = img.convert("RGB")
-            # CARTO's dark map is nearly black: make the land black and stretch what stands out from it
+            # the dark map is nearly black: make the land black and stretch what stands out from it
             # (coasts, rivers, roads) up to about 70, so it shows faintly on LEDs under the radar
             vals = sorted(base.convert("L").getdata())
             ground, hi = vals[len(vals) // 2], vals[int(len(vals) * 0.985)]
