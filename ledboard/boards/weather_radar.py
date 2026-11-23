@@ -17,13 +17,18 @@ import math
 import time
 
 import requests
-from PIL import Image
+from PIL import Image, ImageEnhance
 
 log = logging.getLogger(__name__)
 
 IEM_TILE = "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/{layer}/{z}/{x}/{y}.png"
 RAINVIEWER_MAPS = "https://api.rainviewer.com/public/weather-maps.json"
-CARTO_TILE = "https://basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png"
+CARTO_TILE = "https://a.basemaps.cartocdn.com/{style}/{z}/{x}/{y}.png"
+ESRI_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+MAPS = {"satellite": "Satellite (real colors: land, forests, lakes; Esri World Imagery)",
+        "streets": "Streets in color (roads, parks, water; CARTO Voyager, no labels)",
+        "dark": "Dark (faint coasts and roads only; CARTO Dark Matter)",
+        "none": "No map (radar on black)"}
 UA = {"User-Agent": "LEDBoard weather radar (Raspberry Pi LED matrix)"}
 
 SOURCES = {"auto": "Automatic (NEXRAD in the US, RainViewer elsewhere)",
@@ -79,6 +84,8 @@ class Radar:
                 img = None
             else:
                 r.raise_for_status()
+                if not r.headers.get("Content-Type", "image").startswith("image"):
+                    raise OSError(f"not a picture ({r.headers.get('Content-Type')})")
                 img = Image.open(io.BytesIO(r.content)).convert("RGBA")
         except (requests.RequestException, OSError) as e:
             log.debug("radar tile %s: %s", url, e)
@@ -111,13 +118,35 @@ class Radar:
         crop = big.crop((round(ox), round(oy), round(ox + sw), round(oy + sh)))
         return crop.resize((W, H), Image.LANCZOS if sw >= W else Image.BILINEAR)
 
-    def _basemap(self, v, W, H, lat, lon):
-        key = (round(lat, 3), round(lon, 3), v[0], round(v[3]), W, H)
+    def _basemap(self, v, W, H, lat, lon, style="satellite"):
+        key = (round(lat, 3), round(lon, 3), v[0], round(v[3]), W, H, style)
         if self._base[0] == key:
             return self._base[1]
-        img = self._stitch(lambda z, x, y: CARTO_TILE.format(z=z, x=x, y=y), v, W, H, empty_ok=False)
+        if style == "none":
+            self._base = (key, Image.new("RGB", (W, H), (0, 0, 0)))
+            return self._base[1]
+        if style == "satellite":
+            url_for = lambda z, x, y: ESRI_TILE.format(z=z, x=x, y=y)          # noqa: E731
+        else:
+            name = "rastertiles/voyager_nolabels" if style == "streets" else "dark_nolabels"
+            url_for = lambda z, x, y: CARTO_TILE.format(style=name, z=z, x=x, y=y)   # noqa: E731
+        img = self._stitch(url_for, v, W, H, empty_ok=False)
         if img is None:
             base = Image.new("RGB", (W, H), (0, 0, 0))
+        elif style == "satellite":
+            # real colors, darker and a little richer, so the radar's colors stand out on top
+            base = ImageEnhance.Color(img.convert("RGB")).enhance(1.35)
+            base = ImageEnhance.Brightness(base).enhance(0.5)
+        elif style == "streets":
+            # a light map turned into a night map: plain land goes black, water and parks keep their colors
+            # (richer), and roads (lighter than the land) become a soft gray
+            from PIL import ImageChops
+            h, sat, val = img.convert("RGB").convert("HSV").split()
+            ground = sorted(val.getdata())[len(val.getdata()) // 2]
+            sat = sat.point(lambda x: min(255, x * 4))
+            colored = sat.point(lambda x: 0 if x < 30 else int(20 + x * 0.42))
+            roads = val.point(lambda x: 70 if x > ground + 4 else 0)
+            base = Image.merge("HSV", (h, sat, ImageChops.lighter(colored, roads))).convert("RGB")
         else:
             base = img.convert("RGB")
             # CARTO's dark map is nearly black: make the land black and stretch what stands out from it
@@ -147,12 +176,12 @@ class Radar:
             return False
         return sum(1 for p in radar.getchannel("A").getdata() if p > 60) >= 3
 
-    def refresh(self, lat, lon, width_km, source, W, H):
+    def refresh(self, lat, lon, width_km, source, W, H, map_style="satellite"):
         lat, lon = float(lat), float(lon)
         if source == "auto":
             source = "nexrad" if in_conus(lat, lon) else "rainviewer"
         v = view(lat, lon, width_km, W, H, MAX_ZOOM[source])
-        base = self._basemap(v, W, H, lat, lon)
+        base = self._basemap(v, W, H, lat, lon, map_style)
         layers = []          # (label, url_for, keep)
         if source == "nexrad":
             # 'nexrad-n0q-900913' is the newest composite; '-m10m' etc. are 10, 20... minutes before it
@@ -185,7 +214,7 @@ class Radar:
         if not got_any:
             if source == "rainviewer" and self.rv_color != 2:
                 self.rv_color = 2              # that color scheme isn't offered (any more): RainViewer's default
-                return self.refresh(lat, lon, width_km, "rainviewer", W, H)
+                return self.refresh(lat, lon, width_km, "rainviewer", W, H, map_style)
             raise RuntimeError(f"couldn't download the {'NEXRAD' if source == 'nexrad' else 'RainViewer'} radar")
         self.frames, self.rain, self.source = frames, self._has_rain(last), source
         self.updated, self.error = time.time(), None

@@ -161,7 +161,8 @@ def parse_ha(state, daily, hourly, sun_up=True):
     return out
 
 
-from .weather_radar import AREAS as RADAR_AREAS, SOURCES as RADAR_SOURCES, Radar, has_radar, render_radar  # noqa: E402
+from .weather_radar import (AREAS as RADAR_AREAS, MAPS as RADAR_MAPS, SOURCES as RADAR_SOURCES,  # noqa: E402
+                            Radar, has_radar, render_radar)
 
 SCREENS = dict(SCREENS, radar=("show_radar", "Live radar (animated, the last hour around you)", has_radar,
                                 render_radar))
@@ -198,6 +199,7 @@ class WeatherBoard(Board):
         "hourly_rain": True, "hourly_rain_min": 20, "hourly_rain_legend": True,
         "screen_order": [],          # slide ids in the order to show them ([] = default order)
         "show_radar": False, "radar_source": "auto", "radar_area": "250", "radar_only_rain": False,
+        "radar_map": "satellite",
     }
     FIELDS = [
         {"key": "source", "label": "Weather data from", "type": "select", "section": "Source",
@@ -231,6 +233,8 @@ class WeatherBoard(Board):
          "type": "bool", "section": "Screens", "show_if": {"show_hourly": True, "hourly_rain": True}},
         {"key": "radar_area", "label": "Radar: area shown", "type": "select", "section": "Screens",
          "options": list(RADAR_AREAS), "option_labels": RADAR_AREAS, "show_if": {"show_radar": True}},
+        {"key": "radar_map", "label": "Radar: map", "type": "select", "section": "Screens",
+         "options": list(RADAR_MAPS), "option_labels": RADAR_MAPS, "show_if": {"show_radar": True}},
         {"key": "radar_source", "label": "Radar: source", "type": "select", "section": "Screens",
          "options": list(RADAR_SOURCES), "option_labels": RADAR_SOURCES, "show_if": {"show_radar": True}},
         {"key": "radar_only_rain", "label": "Radar: only show when there's rain or snow in view", "type": "bool",
@@ -243,7 +247,7 @@ class WeatherBoard(Board):
         ("Screens", "Screens", ["screen_order"]),
         ("Screens", "Screen options", ["aqi_scale", "yesterday_threshold", "hourly_rain", "hourly_rain_min",
                                        "hourly_rain_legend"]),
-        ("Screens", "Radar", ["radar_area", "radar_source", "radar_only_rain"]),
+        ("Screens", "Radar", ["radar_area", "radar_map", "radar_source", "radar_only_rain"]),
         ("Advanced", "Timing", ["duration", "refresh"])], {})
 
     def __init__(self, cfg, app):
@@ -291,7 +295,7 @@ class WeatherBoard(Board):
             except (TypeError, ValueError):
                 miles = 250.0
             self.radar.refresh(loc[0], loc[1], miles * 1.609, self.cfg.get("radar_source") or "auto",
-                               self.app.width, self.app.height)
+                               self.app.width, self.app.height, self.cfg.get("radar_map") or "satellite")
         except Exception as e:                   # the rest of the weather keeps working
             self.radar.error = str(e)
             log.warning("weather radar unavailable: %s", e)
