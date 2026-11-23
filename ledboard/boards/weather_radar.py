@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 IEM_TILE = "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/{layer}/{z}/{x}/{y}.png"
 RAINVIEWER_MAPS = "https://api.rainviewer.com/public/weather-maps.json"
 ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/{service}/MapServer/tile/{z}/{y}/{x}"
-ESRI_SERVICES = {"satellite": "World_Imagery", "streets": "World_Street_Map", "dark": "World_Street_Map"}
+ESRI_SERVICES = {"satellite": "World_Imagery", "streets": "World_Street_Map", "dark": "Canvas/World_Dark_Gray_Base"}
 MAPS = {"satellite": "Satellite (real colors: land, forests, lakes; Esri World Imagery)",
         "streets": "Streets in color (highways, parks, water as a night map; Esri World Street Map)",
         "dark": "Dark (faint borders, coasts and roads only; Esri Dark Gray Canvas)",
@@ -97,7 +97,7 @@ class Radar:
             self._tiles[url] = img
         return img
 
-    def _stitch(self, url_for, v, W, H, keep=True, empty_ok=True, full=False):
+    def _stitch(self, url_for, v, W, H, keep=True, empty_ok=True):
         """Download the tiles covering the view and turn them into one W x H picture (RGBA)."""
         z, left, top, sw, sh = v
         n = 2 ** z
@@ -117,8 +117,6 @@ class Radar:
             return None
         ox, oy = left - tx0 * 256, top - ty0 * 256
         crop = big.crop((round(ox), round(oy), round(ox + sw), round(oy + sh)))
-        if full:
-            return crop                                  # at the map's own resolution
         return crop.resize((W, H), Image.LANCZOS if sw >= W else Image.BILINEAR)
 
     def _basemap(self, v, W, H, lat, lon, style="satellite"):
@@ -130,7 +128,7 @@ class Radar:
             return self._base[1]
         service = ESRI_SERVICES.get(style, "World_Imagery")
         url_for = lambda z, x, y: ESRI.format(service=service, z=z, x=x, y=y)      # noqa: E731
-        img = self._stitch(url_for, v, W, H, empty_ok=False, full=style in ("dark", "streets"))
+        img = self._stitch(url_for, v, W, H, empty_ok=False)
         if img is None:
             base = Image.new("RGB", (W, H), (0, 0, 0))
         elif style == "satellite":
@@ -138,11 +136,29 @@ class Radar:
             base = ImageEnhance.Color(img.convert("RGB")).enhance(1.35)
             base = ImageEnhance.Brightness(base).enhance(0.5)
         elif style == "streets":
-            # the street map as a night map: land black, parks green, water blue, highways orange; labels,
-            # side streets and the light land drop out (so no text shows)
-            base = dark_map(img, W, H, colors=True)
+            # a light street map turned into a night map: only colored things are kept (highways in orange /
+            # yellow, water, parks), richer; plain land, white side streets and the labels (dark text with
+            # white outlines) all go black, so no text shows
+            h, sat, val = img.convert("RGB").convert("HSV").split()
+            sat = sat.point(lambda x: min(255, x * 3))
+            bright = sat.point(lambda x: 0 if x < 45 else int(25 + x * 0.45))
+            base = Image.merge("HSV", (h, sat, bright)).convert("RGB")
         else:
-            base = dark_map(img, W, H)
+            base = img.convert("RGB")
+            # Esri's dark gray map: water darkest, land a bit lighter, borders / coasts / roads lighter still.
+            # Water -> black, land -> a dim gray (about 40), lines -> up to about 100, so the shape of the land
+            # shows faintly under the radar
+            vals = sorted(base.convert("L").getdata())
+            n = len(vals)
+            ground, hi = vals[n // 2], vals[int(n * 0.995)]
+            lo = min(vals[int(n * 0.01)], int(ground * 0.55))
+            span_lo, span_hi = max(1, ground - lo), max(6, hi - ground)
+
+            def level(p):
+                if p <= ground:
+                    return max(0, int(40 * (p - lo) / span_lo))
+                return min(255, int(40 + 60 * min(1.0, (p - ground) / span_hi)))
+            base = Image.eval(base.convert("L"), level).convert("RGB")
         self._base = (key, base)
         return base
 
@@ -205,38 +221,6 @@ class Radar:
         self.updated, self.error = time.time(), None
 
     rv_color = 4          # RainViewer's 'The Weather Channel' colors (green / yellow / red); 2 if not offered
-
-
-def dark_map(street, W, H, colors=False):
-    """A dark map drawn from Esri's street map at its full resolution: dim gray land, blue rivers and lakes, light
-    gray highways. The features are found at full size and thickened before shrinking to the board, so thin
-    rivers and roads survive (shrinking a map normally averages them away). Labels, side streets, parks and
-    the light land all drop out."""
-    from PIL import ImageChops, ImageFilter
-    h, sat, _val = street.convert("RGB").convert("HSV").split()
-    in_range = lambda band, lo, hi: band.point(lambda x: 255 if lo <= x <= hi else 0)   # noqa: E731
-    # thresholds are low on purpose: JPEG map tiles smear the color of 1-pixel rivers and roads
-    water = ImageChops.multiply(in_range(h, 115, 180), in_range(sat, 28, 255))        # blues
-    roads = ImageChops.multiply(in_range(h, 4, 52), in_range(sat, 40, 255))           # orange / yellow highways
-    ratio = street.width / W
-    if ratio >= 1.6:                                 # thicken lines so they're still there after shrinking
-        k = 3 if ratio < 4 else 5
-        roads = roads.filter(ImageFilter.MaxFilter(k))
-        rivers = water.filter(ImageFilter.MaxFilter(k))
-        water = ImageChops.lighter(water, rivers)
-    water = water.resize((W, H), Image.BOX).point(lambda x: min(255, int(x * 1.8)))
-    roads = roads.resize((W, H), Image.BOX).point(lambda x: min(255, int(x * 1.8)))
-    if colors:                                       # 'Streets in color': black land, green parks, orange highways
-        parks = ImageChops.multiply(in_range(h, 45, 110), in_range(sat, 25, 255)).resize((W, H), Image.BOX)
-        out = Image.new("RGB", (W, H), (0, 0, 0))
-        out.paste(Image.new("RGB", (W, H), (25, 75, 25)), (0, 0), parks)
-        out.paste(Image.new("RGB", (W, H), (25, 80, 190)), (0, 0), water)
-        out.paste(Image.new("RGB", (W, H), (210, 120, 30)), (0, 0), roads)
-        return out
-    out = Image.new("RGB", (W, H), (30, 30, 32))                                     # land
-    out.paste(Image.new("RGB", (W, H), (20, 60, 150)), (0, 0), water)                 # rivers and lakes
-    out.paste(Image.new("RGB", (W, H), (150, 150, 140)), (0, 0), roads)               # highways
-    return out
 
 
 # -- the screen --------------------------------------------------------------------------------
