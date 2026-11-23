@@ -145,15 +145,20 @@ class Radar:
             base = Image.merge("HSV", (h, sat, bright)).convert("RGB")
         else:
             base = img.convert("RGB")
-            # the dark map is nearly black: make the land black and stretch what stands out from it
-            # (coasts, rivers, roads) up to about 70, so it shows faintly on LEDs under the radar
+            # Esri's dark gray map: water darkest, land a bit lighter, borders / coasts / roads lighter still.
+            # Water -> black, land -> a dim gray (about 40), lines -> up to about 100, so the shape of the land
+            # shows faintly under the radar
             vals = sorted(base.convert("L").getdata())
-            ground, hi = vals[len(vals) // 2], vals[int(len(vals) * 0.985)]
-            if hi - ground < 4:
-                base = Image.new("RGB", (W, H), (0, 0, 0))
-            else:
-                k = min(8.0, 70.0 / (hi - ground))
-                base = Image.eval(base, lambda p: max(0, min(255, int((p - ground) * k))))
+            n = len(vals)
+            ground, hi = vals[n // 2], vals[int(n * 0.995)]
+            lo = min(vals[int(n * 0.01)], int(ground * 0.55))
+            span_lo, span_hi = max(1, ground - lo), max(6, hi - ground)
+
+            def level(p):
+                if p <= ground:
+                    return max(0, int(40 * (p - lo) / span_lo))
+                return min(255, int(40 + 60 * min(1.0, (p - ground) / span_hi)))
+            base = Image.eval(base.convert("L"), level).convert("RGB")
         self._base = (key, base)
         return base
 
