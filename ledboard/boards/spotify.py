@@ -55,7 +55,7 @@ class SpotifyBoard(Board):
         "client_id": "", "client_secret": "", "refresh_token": "",
         "redirect_uri": "http://127.0.0.1:8080/spotify/callback",
         "title_color": "#ffffff", "artist_color": "#1ed760", "progress_style": "wavy",
-        "layout": "classic",
+        "layout": "classic", "bar_color_mode": "layout", "bar_color": "#1ed760",
     }
     FIELDS = [
         {"key": "source", "label": "Get now-playing info from", "type": "select",
@@ -87,6 +87,13 @@ class SpotifyBoard(Board):
         {"key": "progress_style", "label": "Progress bar style", "type": "select",
          "options": ["wavy", "straight"],
          "option_labels": {"wavy": "Wavy (animated, Material 3 style)", "straight": "Straight"}},
+        {"key": "bar_color_mode", "label": "Progress bar color", "type": "select",
+         "options": ["layout", "custom", "album"],
+         "option_labels": {"layout": "The layout's usual color (Spotify green on Classic)",
+                           "custom": "A color I pick", "album": "Dynamic: a color from the album cover"},
+         "help": "Dynamic picks the most colorful bright color in each song's album art, so the bar changes with "
+                 "every album (the layout's usual color when the cover is black and white)."},
+        {"key": "bar_color", "label": "Progress bar color", "type": "color", "show_if": {"bar_color_mode": "custom"}},
         {"key": "title_color", "label": "Title color", "type": "color"},
         {"key": "artist_color", "label": "Artist color", "type": "color"},
         {"key": "refresh", "label": "Check every (seconds)", "type": "number",
@@ -97,7 +104,7 @@ class SpotifyBoard(Board):
         ("Basics", "Source", ["source", "ha_entities", "ha_live", "ha_force_refresh", "spotify_auth", "client_id", "client_secret", "redirect_uri"]),
         ("Screens", "Now playing", ["takeover", "show_paused"]),
         ("Screens", "Layout", ["layout"]),
-        ("Look", "Style", ["progress_style", "title_color", "artist_color"]),
+        ("Look", "Style", ["progress_style", "bar_color_mode", "bar_color", "title_color", "artist_color"]),
         ("Advanced", "Timing", ["duration", "refresh"])], {})
 
     def __init__(self, cfg, app):
@@ -475,9 +482,23 @@ class SpotifyBoard(Board):
         if not n["playing"]:
             c.text_centered(ty, "PAUSED", "4x6", (200, 120, 0), x0, W)
         if wavy:
-            c.wavy_progress(x0, W - 1, H - 4, frac, GREEN, amp=self._wave.value(slide, n["playing"]))
+            c.wavy_progress(x0, W - 1, H - 4, frac, self.bar_color(n, GREEN), amp=self._wave.value(slide, n["playing"]))
         else:
-            c.progress(x0, H - 3, W - 1, frac, GREEN)
+            c.progress(x0, H - 3, W - 1, frac, self.bar_color(n, GREEN))
+
+    def bar_color(self, n, usual):
+        """The progress bar's color: the layout's usual one, the picked one, or one from the album cover."""
+        mode = self.cfg.get("bar_color_mode", "layout")
+        if mode == "custom":
+            return hex_to_rgb(self.cfg.get("bar_color"), usual)
+        if mode == "album":
+            import colorsys
+            from .spotify_layouts import palette
+            col = palette(self, n.get("art"))[0]
+            if colorsys.rgb_to_hsv(*(v / 255 for v in col))[1] < 0.25:
+                return usual                            # a black and white cover: the layout's usual color
+            return col
+        return usual
 
     def _colors(self):
         """(title color, artist color) from the settings."""

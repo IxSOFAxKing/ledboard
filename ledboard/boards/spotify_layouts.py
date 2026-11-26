@@ -135,7 +135,7 @@ def render_backdrop(board, c, n, progress, frac, slide, t):
     title, artist = board._colors()
     _shadow(c, x0, W, 1, n["title"], "6x10", title, t)
     _shadow(c, x0, W, 11, n["artist"], "5x8", artist, t)
-    ty = _bar(board, c, x0, W - 1, H, n, slide, frac, WHITE, track=(70, 70, 70))
+    ty = _bar(board, c, x0, W - 1, H, n, slide, frac, board.bar_color(n, WHITE), track=(70, 70, 70))
     _times(c, x0, W - 1, ty, n, progress, (220, 220, 220), shadow=True)
 
 
@@ -150,7 +150,8 @@ def render_colors(board, c, n, progress, frac, slide, t):
     x0 = H + 3
     c.scroll_text(x0, W, 1, n["title"], "6x10", main, t)
     c.scroll_text(x0, W, 11, n["artist"], "5x8", accent, t)
-    ty = _bar(board, c, x0, W - 1, H, n, slide, frac, main, track=scale(main, 0.18))
+    bar = board.bar_color(n, main)
+    ty = _bar(board, c, x0, W - 1, H, n, slide, frac, bar, track=scale(bar, 0.18))
     _times(c, x0, W - 1, ty, n, progress)
 
 
@@ -195,7 +196,7 @@ def render_vinyl(board, c, n, progress, frac, slide, t):
     title, artist = board._colors()
     c.scroll_text(x0, W, 1, n["title"], "6x10", title, t)
     c.scroll_text(x0, W, 11, n["artist"], "5x8", artist, t)
-    ty = _bar(board, c, x0, W - 1, H, n, slide, frac, GREEN)
+    ty = _bar(board, c, x0, W - 1, H, n, slide, frac, board.bar_color(n, GREEN))
     _times(c, x0, W - 1, ty, n, progress)
 
 
@@ -226,7 +227,7 @@ def render_visualizer(board, c, n, progress, frac, slide, t):
     c.line(x0, H - 1, W - 1, H - 1, (35, 35, 35))
     end = x0 + int((W - 1 - x0) * frac)
     if end > x0:
-        c.line(x0, H - 1, end, H - 1, main)
+        c.line(x0, H - 1, end, H - 1, board.bar_color(n, main))
     if not n["playing"]:
         c.text_right(W - 1, y_top, "PAUSED", "4x6", (220, 140, 0))
 
@@ -241,7 +242,7 @@ def render_bigtitle(board, c, n, progress, frac, slide, t):
         label = "PAUSED  " + label
     c.text_right(W - 1, H - 7, label, "4x6", GRAY if n["playing"] else (220, 140, 0))
     lw = c.text_width(label, "4x6")
-    c.progress(0, H - 4, W - lw - 5, frac, GREEN, height=2)
+    c.progress(0, H - 4, W - lw - 5, frac, board.bar_color(n, GREEN), height=2)
 
 
 RENDERERS = {"backdrop": render_backdrop, "colors": render_colors, "vinyl": render_vinyl,

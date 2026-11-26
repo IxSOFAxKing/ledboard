@@ -416,6 +416,8 @@ Right at a song change, Spotify and Home Assistant sometimes briefly report an o
 - **Visualizer**: animated equalizer bars in the album's colors instead of the progress bar (a thin progress line runs along the bottom). They're for show: they don't follow the actual audio.
 - **Big title**: the song title in large letters across the whole board, the artist below, and the time and progress along the bottom.
 
+**Progress bar color** (Look → Style): the layout's usual color (Spotify green on Classic), **a color you pick**, or **Dynamic**, which takes a color from each song's album cover (its most prominent bright, colorful color) so the bar changes with every album. A black-and-white cover keeps the layout's usual color. It applies to every layout.
+
 ### Weather
 1. Turn on **Weather**.
 2. Choose a source:
