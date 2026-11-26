@@ -26,7 +26,9 @@ def board_defaults():
 
 
 def board_fields(cls):
-    return list(cls.FIELDS) + COMMON_FIELDS
+    """The board's settings for the web UI, in the standard sections (see settings_layout.py)."""
+    from .settings_layout import arrange
+    return arrange(cls.name, list(cls.FIELDS) + COMMON_FIELDS, league=issubclass(cls, LeagueBoard))
 
 
 # settings that moved from the old single "sports" board onto each league board
